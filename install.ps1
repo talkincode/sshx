@@ -167,9 +167,6 @@ function Show-QuickStart {
     Write-Host "  # Save password (optional)"
     Write-Host "  sshx --set-password host=192.168.1.100 user=Administrator"
     Write-Host ""
-    Write-Host "  # Start MCP server"
-    Write-Host "  sshx mcp-stdio"
-    Write-Host ""
     Write-ColorOutput "Documentation: https://github.com/$Repo" "Info"
 }
 
@@ -178,7 +175,7 @@ function Main {
     Write-Host ""
     Write-Host "╔════════════════════════════════════════╗"
     Write-Host "║   sshx Automatic Installer            ║"
-    Write-Host "║   SSH & SFTP Tool with MCP Support     ║"
+    Write-Host "║   SSH & SFTP Tool with Password Mgr    ║"
     Write-Host "╚════════════════════════════════════════╝"
     Write-Host ""
 

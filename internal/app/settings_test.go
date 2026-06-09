@@ -400,3 +400,57 @@ func TestSettingsPath(t *testing.T) {
 		t.Errorf("GetSettingsDir() = %s, want %s", settingsDir, expectedDir)
 	}
 }
+
+func TestSaveSettings_AtomicOverwrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	t.Cleanup(func() {
+		if err := os.Setenv("HOME", oldHome); err != nil {
+			t.Logf("Warning: failed to restore HOME: %v", err)
+		}
+	})
+	if err := os.Setenv("HOME", tmpDir); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+
+	first := &Settings{Hosts: []HostConfig{{Name: "a", Host: "10.0.0.1"}}}
+	if err := SaveSettings(first); err != nil {
+		t.Fatalf("first SaveSettings() error = %v", err)
+	}
+
+	second := &Settings{Hosts: []HostConfig{{Name: "b", Host: "10.0.0.2"}}}
+	if err := SaveSettings(second); err != nil {
+		t.Fatalf("second SaveSettings() error = %v", err)
+	}
+
+	loaded, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings() error = %v", err)
+	}
+	if len(loaded.Hosts) != 1 || loaded.Hosts[0].Name != "b" {
+		t.Fatalf("overwrite failed, got %+v", loaded.Hosts)
+	}
+
+	settingsDir, err := GetSettingsDir()
+	if err != nil {
+		t.Fatalf("GetSettingsDir() error = %v", err)
+	}
+
+	// No leftover temp files from the atomic write.
+	leftovers, err := filepath.Glob(filepath.Join(settingsDir, "settings-*.tmp"))
+	if err != nil {
+		t.Fatalf("Glob error = %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("found leftover temp files: %v", leftovers)
+	}
+
+	// Settings file must be created with 0600 permissions.
+	info, err := os.Stat(filepath.Join(settingsDir, SettingsFile))
+	if err != nil {
+		t.Fatalf("Stat settings file error = %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("settings file perm = %o, want 600", perm)
+	}
+}

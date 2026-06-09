@@ -51,6 +51,7 @@ func handleHostAdd(config *sshclient.Config) error {
 			Host:        config.Host,
 			Port:        config.Port,
 			User:        config.User,
+			Key:         config.KeyPath,
 			PasswordKey: config.SudoKey,
 			Type:        config.HostType,
 		}
@@ -94,6 +95,12 @@ func handleHostAdd(config *sshclient.Config) error {
 			host.User = strings.TrimSpace(user)
 		}
 
+		// SSH private key (optional, overrides global key)
+		fmt.Print("SSH private key path (optional, overrides global key): ")
+		if keyPath, err := reader.ReadString('\n'); err == nil {
+			host.Key = strings.TrimSpace(keyPath)
+		}
+
 		// Password key (optional)
 		fmt.Print("Password key (optional): ")
 		if pwdKey, err := reader.ReadString('\n'); err == nil {
@@ -106,7 +113,7 @@ func handleHostAdd(config *sshclient.Config) error {
 			host.Type = strings.TrimSpace(sysType)
 		}
 		if host.Type == "" {
-			host.Type = "linux"
+			host.Type = DefaultHostType
 		}
 	}
 
@@ -137,22 +144,15 @@ func handleHostUpdate(config *sshclient.Config) error {
 		return fmt.Errorf("host name is required for update (use --host-name=<name>)")
 	}
 
-	// Check if host exists
-	_, err = GetHost(settings, config.HostName)
+	// Check that the host exists and capture its current values
+	existingHost, err := GetHost(settings, config.HostName)
 	if err != nil {
 		return fmt.Errorf("host '%s' not found, use --host-add to create it", config.HostName)
 	}
 
-	// Build updated host config
+	// Build updated host config, keeping existing values unless overridden
 	host := HostConfig{
 		Name: config.HostName,
-	}
-
-	// Update fields if provided, otherwise keep existing values
-	existingHost, err := GetHost(settings, config.HostName)
-	if err != nil {
-		// If host doesn't exist, we'll create it with only the provided fields
-		existingHost = &HostConfig{}
 	}
 
 	if config.Host != "" {
@@ -167,20 +167,20 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.Description = existingHost.Description
 	}
 
-	if config.Port != "" && config.Port != "22" {
+	if config.Port != "" && config.Port != sshclient.DefaultSSHPort {
 		host.Port = config.Port
 	} else if existingHost.Port != "" {
 		host.Port = existingHost.Port
 	} else {
-		host.Port = "22"
+		host.Port = sshclient.DefaultSSHPort
 	}
 
-	if config.User != "" && config.User != "master" {
+	if config.User != "" && config.User != sshclient.DefaultSSHUser {
 		host.User = config.User
 	} else if existingHost.User != "" {
 		host.User = existingHost.User
 	} else {
-		host.User = "master"
+		host.User = sshclient.DefaultSSHUser
 	}
 
 	if config.SudoKey != "" && config.SudoKey != sshclient.DefaultSudoKey {
@@ -189,12 +189,18 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.PasswordKey = existingHost.PasswordKey
 	}
 
+	if config.KeyPath != "" {
+		host.Key = config.KeyPath
+	} else {
+		host.Key = existingHost.Key
+	}
+
 	if config.HostType != "" {
 		host.Type = config.HostType
 	} else if existingHost.Type != "" {
 		host.Type = existingHost.Type
 	} else {
-		host.Type = "linux"
+		host.Type = DefaultHostType
 	}
 
 	// Update host
@@ -242,6 +248,9 @@ func handleHostList(config *sshclient.Config) error {
 		}
 		if host.User != "" {
 			fmt.Printf("    User:        %s\n", host.User)
+		}
+		if host.Key != "" {
+			fmt.Printf("    Key:         %s\n", host.Key)
 		}
 		if host.PasswordKey != "" {
 			fmt.Printf("    Password Key: %s\n", host.PasswordKey)
@@ -457,8 +466,13 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 
 	if !testConfig.UseKeyAuth {
 		testConfig.KeyPath = ""
-	} else if testConfig.KeyPath == "" && settings != nil && settings.Key != "" {
-		testConfig.KeyPath = settings.Key
+	} else if testConfig.KeyPath == "" {
+		switch {
+		case hostConfig.Key != "":
+			testConfig.KeyPath = hostConfig.Key
+		case settings != nil && settings.Key != "":
+			testConfig.KeyPath = settings.Key
+		}
 	}
 
 	if hostConfig.PasswordKey != "" {

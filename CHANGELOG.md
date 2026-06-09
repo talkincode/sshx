@@ -19,34 +19,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Auto-resolve host details when using `-h=<hostname>`
   - Support for default SSH key path in settings
   - Per-host password key configuration
-- **MCP Host Management Tools** - Full support for host management in AI assistant integration
-  - `host_add` - Add new host configurations
-  - `host_list` - List all configured hosts
-  - `host_test` - Test host connections
-  - `host_remove` - Remove host configurations
+  - **Per-host SSH key configuration** - each host can use its own SSH private key via `-i=`/`--key=` (with `--host-add`/`--host-update`) or the `key` field in `settings.json`; falls back to the global key when unset
 - **Flexible authentication controls**
   - `--no-key`/`--password-only` flag and `SSH_DISABLE_KEY` environment variable to force password-only sessions
   - Automatic password fallback when public key authentication fails on hosts that reject keys
 
+### Removed
+
+- **MCP (Model Context Protocol) server** - `sshx` is now a focused CLI-only tool. The `mcp-stdio` / `--mcp-stdio` mode and all MCP tools have been removed.
+- **SSH connection pool** - removed the connection pool that only served the MCP server; CLI commands use direct connections.
+
 ### Changed
 
-- Enhanced error reporting in MCP mode with detailed diagnostic information
 - Improved `ExecuteCommandWithOutput()` to capture and report comprehensive error details
   - Now includes full stderr output in error messages
   - Now includes stdout output when command fails
   - Now displays process exit codes for better debugging
   - Provides command and host context in error messages
 - Updated usage documentation with host management commands
-- **Refactored MCP implementation** - Moved MCP server to app package to resolve circular dependency
-  - Moved `internal/mcp/mcp.go` to `internal/app/mcp.go`
-  - Removed separate `mcp` package
-  - Enabled full host management functionality in MCP mode
 
 ### Fixed
 
-- Fixed issue where MCP error messages lacked specific error details (only showed "Process exited with status X")
 - Improved error message formatting to include all available diagnostic information
-- **Fixed circular dependency issue** preventing host management tools from working in MCP mode
 - Fixed EOF error handling in PTY execution mode
 
 ## [0.0.7] - 2025-11-13

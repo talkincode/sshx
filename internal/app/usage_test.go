@@ -37,7 +37,6 @@ func TestPrintUsage(t *testing.T) {
 	expectedSections := []string{
 		"SSH & SFTP Remote Tool",
 		"Usage:",
-		"MCP Mode:",
 		"SSH Options:",
 		"Safety Options:",
 		"SFTP Options:",
@@ -56,7 +55,6 @@ func TestPrintUsage(t *testing.T) {
 
 	// Verify important commands are documented
 	importantCommands := []string{
-		"sshx mcp-stdio",
 		"sshx -h=",
 		"--upload=",
 		"--download=",
@@ -90,20 +88,6 @@ func TestPrintUsage(t *testing.T) {
 	for _, keyword := range safetyKeywords {
 		if !strings.Contains(output, keyword) {
 			t.Errorf("Expected output to contain safety keyword: %s", keyword)
-		}
-	}
-
-	// Verify MCP tools are listed
-	mcpTools := []string{
-		"ssh_execute",
-		"sftp_upload",
-		"sftp_download",
-		"password_set",
-	}
-
-	for _, tool := range mcpTools {
-		if !strings.Contains(output, tool) {
-			t.Errorf("Expected output to contain MCP tool: %s", tool)
 		}
 	}
 

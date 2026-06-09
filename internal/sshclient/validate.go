@@ -10,7 +10,13 @@ import (
 
 const KeyringServiceName = "sshx"
 
-// ValidateCommand validates command safety
+// ValidateCommand performs a best-effort safety check against a small set of
+// well-known destructive commands (for example "rm -rf /" or a fork bomb).
+//
+// It is a guardrail to catch accidental mistakes, NOT a security boundary: the
+// substring/keyword matching is trivially bypassed (casing, quoting, shell
+// variables, alternate paths), so it must never be relied upon to sandbox
+// untrusted input.
 func ValidateCommand(command string) error {
 	cmd := strings.TrimSpace(command)
 	cmdLower := strings.ToLower(cmd)
@@ -109,6 +115,18 @@ func ValidateCommand(command string) error {
 	}
 
 	return nil
+}
+
+// CommandUsesSudo reports whether the command invokes sudo as a distinct
+// command token. This avoids false positives from substrings such as "pseudo"
+// that merely contain the letters "sudo".
+func CommandUsesSudo(command string) bool {
+	for _, field := range strings.Fields(command) {
+		if field == "sudo" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSudoPassword reads sudo password from system keyring (cross-platform support)

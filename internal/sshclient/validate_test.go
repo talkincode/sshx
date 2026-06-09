@@ -462,3 +462,28 @@ func BenchmarkValidateCommand_Dangerous(b *testing.B) {
 		}
 	}
 }
+
+func TestCommandUsesSudo(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{"plain sudo", "sudo apt update", true},
+		{"sudo only", "sudo", true},
+		{"leading spaces", "   sudo ls", true},
+		{"sudo later in pipeline", "ls && sudo reboot", true},
+		{"no sudo", "ls -la", false},
+		{"pseudo substring", "pseudo-terminal --help", false},
+		{"sudoers substring", "cat /etc/sudoers", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CommandUsesSudo(tt.command); got != tt.want {
+				t.Errorf("CommandUsesSudo(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}

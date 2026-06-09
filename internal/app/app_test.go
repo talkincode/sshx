@@ -50,24 +50,6 @@ func TestRun_HelpFlag(t *testing.T) {
 	t.Skip("--help flag calls os.Exit, requires integration test")
 }
 
-func TestRun_MCPStdioMode(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{"mcp-stdio", []string{"sshx", "mcp-stdio"}},
-		{"--mcp-stdio", []string{"sshx", "--mcp-stdio"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// MCP mode starts a server which we can't easily test in unit tests
-			// This is better as an integration test
-			t.Skip("MCP mode requires integration testing")
-		})
-	}
-}
-
 func TestRun_PasswordMode(t *testing.T) {
 	// These tests would require actual keyring access
 	// Better tested as integration tests
@@ -105,7 +87,7 @@ func TestErrUsage(t *testing.T) {
 
 // Mock tests for demonstrating the testing approach
 // In a real scenario, you'd want to refactor Run() to accept dependencies
-// that can be mocked (like SSH client factory, MCP server factory, etc.)
+// that can be mocked (like SSH client factory, etc.)
 
 func TestRun_ArgumentParsing(t *testing.T) {
 	// This test verifies that Run() calls ParseArgs correctly
@@ -198,7 +180,6 @@ func TestRun_ArgumentParsing(t *testing.T) {
 //
 // type AppDependencies struct {
 //     SSHClientFactory func(*sshclient.Config) (*sshclient.SSHClient, error)
-//     MCPServerFactory func() *mcp.MCPServer
 //     PasswordManager  PasswordManager
 //     UsagePrinter     func()
 // }

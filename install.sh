@@ -210,7 +210,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════╗"
     echo "║   sshx Automatic Installer            ║"
-    echo "║   SSH & SFTP Tool with MCP Support     ║"
+    echo "║   SSH & SFTP Tool with Password Mgr    ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
     
@@ -231,9 +231,6 @@ main() {
     echo ""
     echo "  # Save password (optional)"
     echo "  sshx --set-password host=192.168.1.100 user=root"
-    echo ""
-    echo "  # Start MCP server"
-    echo "  sshx mcp-stdio"
     echo ""
     print_info "Documentation: https://github.com/${REPO}"
 }

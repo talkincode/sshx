@@ -3,11 +3,8 @@ package app
 import (
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 
@@ -21,54 +18,6 @@ var ErrUsage = errors.New("usage displayed")
 
 // Run executes the CLI using the provided arguments (typically os.Args).
 func Run(args []string) (err error) {
-	// Handle MCP stdio mode
-	if len(args) >= 2 && (args[1] == "mcp-stdio" || args[1] == "--mcp-stdio") {
-		// Standard log output should be disabled to avoid interfering with JSON-RPC
-		log.SetOutput(io.Discard)
-
-		// Check for --debug flag in MCP mode
-		debugMode := false
-		// #nosec G602 - slice bounds are properly checked before access
-		for i := 2; i < len(args); i++ {
-			if args[i] == "--debug" {
-				debugMode = true
-				break
-			}
-		}
-
-		// But we can use file logging for debug purposes
-		// Check --debug flag first, then environment variable
-		if debugMode {
-			logger.GetLogger().SetLevel(logger.LogLevelDebug)
-			if fileErr := logger.GetLogger().EnableFileLogging(""); fileErr != nil {
-				// Silently ignore file logging errors in MCP mode
-				_ = fileErr
-			} else {
-				logger.GetLogger().Debug("MCP server starting in debug mode (--debug flag), logs will be written to file")
-			}
-		} else if logLevelStr := os.Getenv("SSHX_LOG_LEVEL"); logLevelStr != "" {
-			// Fallback to environment variable for MCP mode
-			logLevel := logger.LogLevelFromString(logLevelStr)
-			logger.GetLogger().SetLevel(logLevel)
-
-			// Enable file logging in debug mode
-			if logLevel == logger.LogLevelDebug {
-				if fileErr := logger.GetLogger().EnableFileLogging(""); fileErr != nil {
-					// Silently ignore file logging errors in MCP mode
-					_ = fileErr
-				} else {
-					logger.GetLogger().Debug("MCP server starting in debug mode (SSHX_LOG_LEVEL), logs will be written to file")
-				}
-			}
-		}
-
-		server := NewMCPServer()
-		if startErr := server.Start(); startErr != nil {
-			return startErr
-		}
-		return nil
-	}
-
 	// Handle usage
 	if len(args) < 2 {
 		PrintUsage()
@@ -112,7 +61,7 @@ func Run(args []string) (err error) {
 	}
 
 	// Auto-fill sudo password if needed
-	if strings.Contains(config.Command, "sudo") && config.SudoKey != "" {
+	if sshclient.CommandUsesSudo(config.Command) && config.SudoKey != "" {
 		password, pwdErr := sshclient.GetSudoPassword(config.SudoKey)
 		if pwdErr != nil {
 			logger.GetLogger().Warning("failed to get sudo password from keyring: %v", pwdErr)
@@ -177,12 +126,12 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 
 	// Update config with host settings
 	config.Host = hostConfig.Host
-	if config.Port == "" || config.Port == "22" {
+	if config.Port == "" || config.Port == sshclient.DefaultSSHPort {
 		if hostConfig.Port != "" {
 			config.Port = hostConfig.Port
 		}
 	}
-	if config.User == "" || config.User == "master" {
+	if config.User == "" || config.User == sshclient.DefaultSSHUser {
 		if hostConfig.User != "" {
 			config.User = hostConfig.User
 		}
@@ -194,10 +143,16 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 		logger.GetLogger().Success("Using password key: %s", hostConfig.PasswordKey)
 	}
 
-	// Use default SSH key from settings if available
-	if config.UseKeyAuth && config.KeyPath == "" && settings.Key != "" {
-		config.KeyPath = settings.Key
-		logger.GetLogger().Success("Using SSH key: %s", settings.Key)
+	// Use per-host SSH key if available, otherwise fall back to the default key
+	if config.UseKeyAuth && config.KeyPath == "" {
+		switch {
+		case hostConfig.Key != "":
+			config.KeyPath = hostConfig.Key
+			logger.GetLogger().Success("Using host SSH key: %s", hostConfig.Key)
+		case settings.Key != "":
+			config.KeyPath = settings.Key
+			logger.GetLogger().Success("Using SSH key: %s", settings.Key)
+		}
 	}
 
 	return nil

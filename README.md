@@ -1,17 +1,17 @@
 <!-- markdownlint-disable MD033 MD036 MD040 MD041 -->
 
 ```
- $$$$$$\   $$$$$$\  $$\   $$\ $$\      $$\  $$$$$$\  $$$$$$$\
-$$  __$$\ $$  __$$\ $$ |  $$ |$$$\    $$$ |$$  __$$\ $$  __$$\
-$$ /  \__|$$ /  \__|$$ |  $$ |$$$$\  $$$$ |$$ /  \__|$$ |  $$ |
-\$$$$$$\  \$$$$$$\  $$$$$$$$ |$$\$$\$$ $$ |$$ |      $$$$$$$  |
- \____$$\  \____$$\ $$  __$$ |$$ \$$$  $$ |$$ |      $$  ____/
-$$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
-\$$$$$$  |\$$$$$$  |$$ |  $$ |$$ | \_/ $$ |\$$$$$$  |$$ |
- \______/  \______/ \__|  \__|\__|     \__| \______/ \__|
+ $$$$$$\   $$$$$$\  $$\   $$\ $$\   $$\
+$$  __$$\ $$  __$$\ $$ |  $$ |$$ |  $$ |
+$$ /  \__|$$ /  \__|$$ |  $$ |\$$\ $$  |
+\$$$$$$\  \$$$$$$\  $$$$$$$$ | \$$$$  /
+ \____$$\  \____$$\ $$  __$$ | $$  $$<
+$$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
+\$$$$$$  |\$$$$$$  |$$ |  $$ |$$ /  $$ |
+ \______/  \______/ \__|  \__|\__|  \__|
 
 
-Secure SSH & SFTP Client with MCP Protocol Support
+Secure SSH & SFTP Client with Built-in Password Manager
 ```
 
 <div align="center">
@@ -33,7 +33,6 @@ Secure SSH & SFTP Client with MCP Protocol Support
 [![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx)
 
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshx/releases)
-[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-orange?style=flat-square)](https://modelcontextprotocol.io)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshx/pulls)
 
@@ -45,26 +44,26 @@ English | [简体中文](./README_CN.md)
 
 # SSHX
 
-`sshx` provides a barrier-free SSH command-line client while implementing the MCP (Model Context Protocol) interface, enabling AI assistants to easily invoke remote SSH/SFTP functionality.
+`sshx` is a barrier-free, cross-platform SSH/SFTP command-line client with a built-in system keyring password manager, making it easy to manage and operate multiple remote servers.
 
 ## Why You Need It?
 
-Managing multiple servers means juggling different passwords, repeatedly entering sudo passwords, and manually executing SSH commands in AI assistants. `sshx` securely stores passwords in your system keyring, auto-fills sudo passwords, and enables AI assistants to directly operate remote servers through MCP protocol. One command, multiple servers, zero password hassle.
+Managing multiple servers means juggling different passwords and repeatedly entering sudo passwords. `sshx` securely stores passwords in your system keyring and auto-fills sudo passwords, so you can run commands across many servers without the password hassle. One command, multiple servers, zero password hassle.
 
-**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Import from your existing `~/.ssh/config` or add hosts interactively!
+**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Each host can have its own SSH private key. Add hosts interactively!
 
 ## Project Structure
 
-- `cmd/sshx`: Main binary entry point, responsible for command-line argument parsing, MCP mode startup, and password management features.
-- `internal/sshclient`: Core SSH/SFTP/script execution logic, command security validation, and connection pool wrapper.
-- `internal/mcp`: MCP stdio server implementation, exposing SSH/SFTP/script tools to external tools (e.g., AI assistants).
+- `cmd/sshx`: Main binary entry point, responsible for command-line argument parsing and password management features.
+- `internal/sshclient`: Core SSH/SFTP/script execution logic and command security validation.
+- `internal/app`: CLI command routing, host configuration management, and password management.
 
 ## Key Features
 
 1. Cross-platform SSH/SFTP operations (supports sudo auto-fill).
 2. Password management (Keychain / Secret Service / Credential Manager).
-3. MCP stdio mode for AI assistant integration.
-4. Connection pooling, script execution, and command security validation.
+3. Host configuration management with per-host SSH keys.
+4. Script execution and command security validation.
 
 ## Installation
 
@@ -193,9 +192,6 @@ sshx --password-set=192.168.1.100-root
 
 # Execute command without password flag (uses saved password)
 sshx -h=192.168.1.100 -u=root "df -h"
-
-# Start MCP stdio mode
-sshx mcp-stdio
 ```
 
 ## Host Configuration Management
@@ -205,14 +201,14 @@ sshx mcp-stdio
 ### Quick Setup
 
 ```bash
-# Import hosts from your existing ~/.ssh/config
-sshx --host-import
-
-# Or add hosts interactively
+# Add hosts interactively
 sshx --host-add
 
 # Add host with command line options
 sshx --host-add --host-name=prod-web -h=192.168.1.100 -u=root --host-desc="Production Web Server"
+
+# Add a host that uses its own SSH private key
+sshx --host-add --host-name=prod-db -h=192.168.1.200 -u=admin -i=~/.ssh/prod-db.pem
 
 # List all configured hosts
 sshx --host-list
@@ -243,15 +239,25 @@ Location: `~/.sshx/settings.json`
       "user": "root",
       "password_key": "prod-web-password",
       "type": "linux"
+    },
+    {
+      "name": "prod-db",
+      "description": "Production Database",
+      "host": "192.168.1.200",
+      "port": "22",
+      "user": "admin",
+      "key": "/Users/username/.ssh/prod-db.pem",
+      "type": "linux"
     }
   ]
 }
 ```
 
+> The top-level `key` is the default SSH private key for all hosts. A per-host `key` overrides the default for that host only.
+
 ### Host Management Commands
 
 - `--host-add` - Add new host (interactive or with options)
-- `--host-import` - Import hosts from `~/.ssh/config`
 - `--host-list` - List all configured hosts
 - `--host-test=<name>` - Test connection to a host
 - `--host-test-all` - Test connections to all hosts (per-host 10s dial timeout) and show auth method used
@@ -261,7 +267,6 @@ Location: `~/.sshx/settings.json`
 
 - 📝 Store connection details once, use everywhere
 - 🚀 Connect with just a name: `sshx -h=prod-web "command"`
-- 🔄 Import from existing `~/.ssh/config`
 - 🔐 Integrate with password manager for each host
 - ✅ Test connections before use
 
@@ -470,7 +475,7 @@ export SUDO_PASSWORD=your_sudo_password
 You can control the logging verbosity using the `SSHX_LOG_LEVEL` environment variable:
 
 ```bash
-# Set log level to DEBUG (shows detailed debugging information, including MCP requests/responses)
+# Set log level to DEBUG (shows detailed debugging information)
 export SSHX_LOG_LEVEL=debug
 
 # Set log level to INFO (default)
@@ -483,41 +488,10 @@ export SSHX_LOG_LEVEL=warning
 export SSHX_LOG_LEVEL=error
 ```
 
-**Debug Logging in MCP Mode:**
-
-In MCP stdio mode, to avoid interfering with JSON-RPC communication, logs are written to a file instead of stdout. There are two ways to enable DEBUG level:
-
-**Method 1: Using --debug flag (Recommended)**
-
-```bash
-# Start MCP server with --debug flag
-sshx mcp-stdio --debug
-
-# Log file location: ~/.sshx/sshx.log
-# You can monitor logs in real-time
-tail -f ~/.sshx/sshx.log
-```
-
-**Method 2: Using environment variable**
-
-```bash
-# Set environment variable to enable debug logging
-export SSHX_LOG_LEVEL=debug
-sshx mcp-stdio
-
-# Log file location: ~/.sshx/sshx.log
-# You can monitor logs in real-time
-tail -f ~/.sshx/sshx.log
-```
-
-**Note:** The `--debug` flag takes precedence over the environment variable.
-
 Debug level logs include:
 
-- All MCP requests received (JSON format)
-- All MCP responses sent (JSON format)
-- Detailed parameters and results of tool calls
 - Detailed SSH/SFTP operation processes
+- Authentication method selection and fallback details
 
 ### Example Workflow
 

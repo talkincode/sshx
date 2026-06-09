@@ -7,53 +7,14 @@ import (
 )
 
 func TestIsWindows(t *testing.T) {
-	// Save original env
-	origOS := os.Getenv("OS")
-	defer func() {
-		if err := os.Setenv("OS", origOS); err != nil {
-			t.Logf("Failed to restore OS env: %v", err)
-		}
-	}()
-
-	tests := []struct {
-		name     string
-		osEnv    string
-		expected bool
-	}{
-		{"Windows OS", "Windows_NT", true},
-		{"windows lowercase", "windows", true},
-		{"Linux OS", "Linux", false},
-		{"macOS", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := os.Setenv("OS", tt.osEnv); err != nil {
-				t.Fatalf("Failed to set OS env: %v", err)
-			}
-			result := isWindows()
-			if result != tt.expected {
-				t.Errorf("isWindows() = %v, expected %v", result, tt.expected)
-			}
-		})
+	if got, want := isWindows(), runtime.GOOS == "windows"; got != want {
+		t.Errorf("isWindows() = %v, want %v", got, want)
 	}
 }
 
 func TestIsMacOS(t *testing.T) {
-	result := isMacOS()
-
-	// This test checks the actual detection logic
-	// On macOS, /Applications should exist
-	_, err := os.Stat("/Applications")
-	expected := err == nil
-
-	if result != expected {
-		t.Errorf("isMacOS() = %v, expected %v (based on /Applications existence)", result, expected)
-	}
-
-	// Also verify it matches runtime.GOOS on actual macOS
-	if runtime.GOOS == "darwin" && !result {
-		t.Error("On darwin OS, isMacOS() should return true")
+	if got, want := isMacOS(), runtime.GOOS == "darwin"; got != want {
+		t.Errorf("isMacOS() = %v, want %v", got, want)
 	}
 }
 

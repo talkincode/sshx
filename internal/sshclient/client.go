@@ -296,22 +296,7 @@ func NewSSHClient(config *Config) (*SSHClient, error) {
 	return &SSHClient{config: config, authMethodUsed: AuthMethodUnknown}, nil
 }
 
-// Connect establishes an SSH connection (prefers using connection pool)
-func (c *SSHClient) Connect() error {
-	lg := logger.GetLogger()
-	pool := GetConnectionPool()
-	c.authMethodUsed = AuthMethodUnknown
-	client, err := pool.GetConnection(c.config)
-	if err == nil {
-		c.client = client
-		return nil
-	}
-
-	lg.Debug("Connection pool failed, falling back to direct connection: %v", err)
-	return c.ConnectDirect()
-}
-
-// ConnectDirect establishes a direct SSH connection (without using connection pool)
+// ConnectDirect establishes a direct SSH connection.
 func (c *SSHClient) ConnectDirect() error {
 	lg := logger.GetLogger()
 	timeout := c.config.DialTimeout
@@ -444,7 +429,7 @@ func (c *SSHClient) ExecuteCommand() (err error) {
 	// Use new error handling mechanism that automatically ignores common errors like EOF
 	defer errutil.HandleCloseError(&err, session)
 
-	if c.config.Password != "" && strings.Contains(c.config.Command, "sudo") {
+	if c.config.Password != "" && CommandUsesSudo(c.config.Command) {
 		return c.executeInteractive(session)
 	}
 
@@ -466,32 +451,30 @@ func (c *SSHClient) ExecuteCommandWithOutput() (output string, err error) {
 	// Use new error handling mechanism
 	defer errutil.HandleCloseError(&err, session)
 
-	// Request PTY for better compatibility (like ExecuteCommand does)
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-
-	if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
-		// PTY request failed, try without it
-		lg.Warning("failed to request PTY: %v", ptyErr)
+	useSudo := c.config.Password != "" && CommandUsesSudo(c.config.Command)
+	command := c.config.Command
+	if useSudo {
+		// Feed the sudo password via stdin instead of embedding it in the
+		// command string (avoids quote breakage and shell injection).
+		command = sudoStdinCommand(command)
+		session.Stdin = strings.NewReader(c.config.Password + "\n")
+	} else {
+		// Request PTY for better compatibility on the non-sudo path.
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.TTY_OP_ISPEED: 14400,
+			ssh.TTY_OP_OSPEED: 14400,
+		}
+		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
+			lg.Warning("failed to request PTY: %v", ptyErr)
+		}
 	}
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	var execErr error
-	if c.config.Password != "" && strings.Contains(c.config.Command, "sudo") {
-		actualCmd := strings.TrimPrefix(c.config.Command, "sudo ")
-		actualCmd = strings.TrimSpace(actualCmd)
-		finalCmd := fmt.Sprintf(`printf '%%s\n' '%s' | sudo -S %s`, c.config.Password, actualCmd)
-
-		execErr = session.Run(finalCmd)
-	} else {
-		execErr = session.Run(c.config.Command)
-	}
+	execErr := session.Run(command)
 
 	// Build output
 	output = stdout.String()
@@ -578,17 +561,31 @@ func (c *SSHClient) executeNormal(session *ssh.Session) error {
 	return nil
 }
 
+// sudoStdinCommand rewrites a command that begins with "sudo" so that sudo
+// reads the password from standard input (-S) using an empty prompt. The
+// password itself is supplied through the SSH session's stdin and is never
+// interpolated into the command string, which previously broke on quotes and
+// allowed shell injection.
+func sudoStdinCommand(command string) string {
+	trimmed := strings.TrimLeft(command, " \t")
+	switch {
+	case trimmed == "sudo":
+		return "sudo -S -p ''"
+	case strings.HasPrefix(trimmed, "sudo "):
+		return "sudo -S -p '' " + strings.TrimSpace(trimmed[len("sudo "):])
+	default:
+		return command
+	}
+}
+
 // executeInteractive executes an interactive command (supports auto sudo password input)
 func (c *SSHClient) executeInteractive(session *ssh.Session) error {
 	lg := logger.GetLogger()
-	var finalCmd string
+	command := c.config.Command
 	if c.config.Password != "" {
 		lg.Info("Auto-filling sudo password...")
-		actualCmd := strings.TrimPrefix(c.config.Command, "sudo ")
-		actualCmd = strings.TrimSpace(actualCmd)
-		finalCmd = fmt.Sprintf(`printf '%%s\n' '%s' | sudo -S %s`, c.config.Password, actualCmd)
-	} else {
-		finalCmd = c.config.Command
+		command = sudoStdinCommand(command)
+		session.Stdin = strings.NewReader(c.config.Password + "\n")
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -597,7 +594,7 @@ func (c *SSHClient) executeInteractive(session *ssh.Session) error {
 
 	lg.Debug("Executing (no PTY): %s", "sudo command")
 
-	if err := session.Run(finalCmd); err != nil {
+	if err := session.Run(command); err != nil {
 		if stderr.Len() > 0 {
 			fmt.Fprintf(os.Stderr, "STDERR:\n%s", stderr.String())
 		}
@@ -771,26 +768,25 @@ func (c *SSHClient) removeDirectory(path string) error {
 	return c.sftpClient.RemoveDirectory(path)
 }
 
-// Close closes the connection (releases back to connection pool)
+// Close closes the SFTP and SSH connections.
 func (c *SSHClient) Close() error {
-	if c.config != nil {
-		pool := GetConnectionPool()
-		pool.ReleaseConnection(c.config)
+	var firstErr error
+	if c.sftpClient != nil {
+		if err := c.sftpClient.Close(); err != nil {
+			firstErr = err
+		}
+		c.sftpClient = nil
 	}
-	return nil
+	if c.client != nil {
+		if err := c.client.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		c.client = nil
+	}
+	return firstErr
 }
 
-// CloseWithError closes the connection and removes it from pool if there's an error
-func (c *SSHClient) CloseWithError(err error) error {
-	if err != nil && c.config != nil {
-		pool := GetConnectionPool()
-		pool.RemoveConnection(c.config)
-		return err
-	}
-	return c.Close()
-}
-
-// ForceClose forcefully closes the connection (does not release back to pool)
+// ForceClose forcefully closes the underlying SSH connection.
 func (c *SSHClient) ForceClose() error {
 	if c.client != nil {
 		return c.client.Close()

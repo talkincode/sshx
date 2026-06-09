@@ -1,9 +1,14 @@
 package app
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"runtime"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/zalando/go-keyring"
 
@@ -79,6 +84,7 @@ func getPassword(serviceName, key string) error {
 	logger.GetLogger().Info("  Service: %s", serviceName)
 	logger.GetLogger().Info("  Key: %s", key)
 	fmt.Printf("\nPassword: %s\n", password)
+	logger.GetLogger().Warning("Password printed in plaintext; clear your terminal scrollback if it is sensitive.")
 
 	return nil
 }
@@ -181,22 +187,30 @@ func listPasswords() error {
 }
 
 func readPassword() (string, error) {
-	var password string
-	fmt.Print("\n")
-	_, err := fmt.Scanln(&password)
-	if err != nil {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		pw, err := term.ReadPassword(fd)
+		fmt.Println()
+		if err != nil {
+			return "", err
+		}
+		return string(pw), nil
+	}
+
+	// Non-interactive input (e.g. piped): read a full line so passwords that
+	// contain spaces are preserved.
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return strings.TrimSpace(password), nil
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func isWindows() bool {
-	return strings.Contains(strings.ToLower(os.Getenv("OS")), "windows")
+	return runtime.GOOS == "windows"
 }
 
 func isMacOS() bool {
-	if _, err := os.Stat("/Applications"); err == nil {
-		return true
-	}
-	return false
+	return runtime.GOOS == "darwin"
 }
