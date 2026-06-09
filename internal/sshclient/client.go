@@ -296,22 +296,7 @@ func NewSSHClient(config *Config) (*SSHClient, error) {
 	return &SSHClient{config: config, authMethodUsed: AuthMethodUnknown}, nil
 }
 
-// Connect establishes an SSH connection (prefers using connection pool)
-func (c *SSHClient) Connect() error {
-	lg := logger.GetLogger()
-	pool := GetConnectionPool()
-	c.authMethodUsed = AuthMethodUnknown
-	client, err := pool.GetConnection(c.config)
-	if err == nil {
-		c.client = client
-		return nil
-	}
-
-	lg.Debug("Connection pool failed, falling back to direct connection: %v", err)
-	return c.ConnectDirect()
-}
-
-// ConnectDirect establishes a direct SSH connection (without using connection pool)
+// ConnectDirect establishes a direct SSH connection.
 func (c *SSHClient) ConnectDirect() error {
 	lg := logger.GetLogger()
 	timeout := c.config.DialTimeout
@@ -771,26 +756,25 @@ func (c *SSHClient) removeDirectory(path string) error {
 	return c.sftpClient.RemoveDirectory(path)
 }
 
-// Close closes the connection (releases back to connection pool)
+// Close closes the SFTP and SSH connections.
 func (c *SSHClient) Close() error {
-	if c.config != nil {
-		pool := GetConnectionPool()
-		pool.ReleaseConnection(c.config)
+	var firstErr error
+	if c.sftpClient != nil {
+		if err := c.sftpClient.Close(); err != nil {
+			firstErr = err
+		}
+		c.sftpClient = nil
 	}
-	return nil
+	if c.client != nil {
+		if err := c.client.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		c.client = nil
+	}
+	return firstErr
 }
 
-// CloseWithError closes the connection and removes it from pool if there's an error
-func (c *SSHClient) CloseWithError(err error) error {
-	if err != nil && c.config != nil {
-		pool := GetConnectionPool()
-		pool.RemoveConnection(c.config)
-		return err
-	}
-	return c.Close()
-}
-
-// ForceClose forcefully closes the connection (does not release back to pool)
+// ForceClose forcefully closes the underlying SSH connection.
 func (c *SSHClient) ForceClose() error {
 	if c.client != nil {
 		return c.client.Close()

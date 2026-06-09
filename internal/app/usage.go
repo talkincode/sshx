@@ -8,7 +8,6 @@ func PrintUsage() {
 SSH & SFTP Remote Tool with Password Manager (Cross-Platform)
 
 Usage:
-  sshx mcp-stdio                                  # MCP stdio mode (for AI assistants)
   sshx -h=<host> [options] <command>              # SSH mode
   sshx -h=<host> [options] --upload=<file>        # SFTP upload
   sshx -h=<host> [options] --download=<file>      # SFTP download
@@ -22,22 +21,6 @@ Usage:
   sshx --host-test=<name>                         # Test host connection
   sshx --host-test-all                            # Test all host connections
   sshx --host-remove=<name>                       # Remove host configuration
-
-MCP Mode:
-  sshx mcp-stdio            Start MCP server in stdio mode
-  sshx --mcp-stdio          Alternative MCP mode flag
-
-  MCP Tools Available:
-    - ssh_execute           Execute SSH commands with sudo support
-    - sftp_upload           Upload files via SFTP
-    - sftp_download         Download files via SFTP
-    - sftp_list             List directory contents
-    - sftp_mkdir            Create remote directory
-    - sftp_remove           Remove files/directories
-    - password_set          Store password in system keyring
-    - password_get          Retrieve password from keyring
-    - password_delete       Delete password from keyring
-    - password_list         List common password keys
 
 SSH Options:
   -h, --host=HOST          Remote host address (required)
@@ -93,6 +76,7 @@ Host Management:
     -h=<address>                      Host address (IP or hostname)
     -p=<port>                         SSH port
     -u=<user>                         SSH username
+    -i=<key>, --key=<key>            SSH private key path for this host (optional)
     -pk=<key>                         Password key name
     --host-type=<type>                System type (linux/windows/macos)
 
@@ -188,8 +172,14 @@ Host Management Examples:
   # Add host with command line options
   sshx --host-add --host-name=prod-web -h=192.168.1.100 -u=root -pk=prod-web --host-desc="Production Web Server"
 
+  # Add host with its own SSH private key
+  sshx --host-add --host-name=prod-db -h=192.168.1.200 -u=admin -i=~/.ssh/prod-db.pem
+
   # Update host IP address
   sshx --host-update --host-name=prod-web -h=192.168.1.101
+
+  # Update host SSH key
+  sshx --host-update --host-name=prod-web -i=~/.ssh/new-key.pem
 
   # Update host password key
   sshx --host-update --host-name=prod-web -pk=new-password-key

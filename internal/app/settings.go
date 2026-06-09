@@ -21,6 +21,7 @@ type HostConfig struct {
 	Host        string `json:"host"`                   // IP or hostname
 	Port        string `json:"port,omitempty"`         // Port (default: 22)
 	User        string `json:"user,omitempty"`         // Username (default: master)
+	Key         string `json:"key,omitempty"`          // SSH private key path (optional, overrides global key)
 	PasswordKey string `json:"password_key,omitempty"` // Password key name (optional)
 	Type        string `json:"type,omitempty"`         // System type (linux/windows/macos)
 }

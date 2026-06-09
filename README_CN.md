@@ -11,7 +11,7 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
  \______/  \______/ \__|  \__|\__|     \__| \______/ \__|
 
 
-支持 MCP 协议的安全 SSH 和 SFTP 客户端
+内置密码管理器的安全 SSH 和 SFTP 客户端
 ```
 
 <div align="center">
@@ -33,7 +33,6 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
 [![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx)
 
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshx/releases)
-[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-orange?style=flat-square)](https://modelcontextprotocol.io)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshx/pulls)
 
@@ -45,24 +44,24 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
 
 # SSHX
 
-`sshx` 提供了一个无障碍的 SSH 命令行客户端，同时实现了 MCP（Model Context Protocol，模型上下文协议）接口，使 AI 助手能够轻松调用远程 SSH/SFTP 功能。
+`sshx` 是一个无障碍、跨平台的 SSH/SFTP 命令行客户端，内置基于系统密钥链的密码管理器，让你轻松管理和操作多台远程服务器。
 
 ## 为什么你需要它？
 
-管理多台服务器时，记住不同的密码、反复输入 sudo 密码、在 AI 助手中手动执行 SSH 命令都很繁琐。`sshx` 将密码安全存储在系统密钥链中，自动填充 sudo 密码，并通过 MCP 协议让 AI 助手直接操作远程服务器，让服务器管理变得简单高效。一个命令，多台服务器，零密码困扰。
+管理多台服务器时，记住不同的密码、反复输入 sudo 密码都很繁琐。`sshx` 将密码安全存储在系统密钥链中，自动填充 sudo 密码，让你在多台服务器上执行命令时不再为密码烦恼。一个命令，多台服务器，零密码困扰。
 
 ## 项目结构
 
-- `cmd/sshx`: 主二进制入口点，负责命令行参数解析、MCP 模式启动和密码管理功能。
-- `internal/sshclient`: 核心 SSH/SFTP/脚本执行逻辑、命令安全验证和连接池封装。
-- `internal/mcp`: MCP stdio 服务器实现，向外部工具（如 AI 助手）暴露 SSH/SFTP/脚本工具。
+- `cmd/sshx`: 主二进制入口点，负责命令行参数解析和密码管理功能。
+- `internal/sshclient`: 核心 SSH/SFTP/脚本执行逻辑和命令安全验证。
+- `internal/app`: CLI 命令路由、主机配置管理和密码管理。
 
 ## 核心特性
 
 1. 跨平台 SSH/SFTP 操作（支持 sudo 自动填充）。
 2. 密码管理（Keychain / Secret Service / Credential Manager）。
-3. MCP stdio 模式用于 AI 助手集成。
-4. 连接池、脚本执行和命令安全验证。
+3. 主机配置管理，支持为每台主机配置独立的 SSH 密钥。
+4. 脚本执行和命令安全验证。
 
 ## 安装
 
@@ -191,9 +190,6 @@ sshx --password-set=192.168.1.100-root
 
 # 执行命令时无需密码标志（使用已保存的密码）
 sshx -h=192.168.1.100 -u=root "df -h"
-
-# 启动 MCP stdio 模式
-sshx mcp-stdio
 
 # 一次性测试所有已配置的主机（每台主机 10 秒拨号超时），并在报告中标注认证方式
 sshx --host-test-all
@@ -404,7 +400,7 @@ export SUDO_PASSWORD=your_sudo_password
 通过 `SSHX_LOG_LEVEL` 环境变量可以控制日志输出级别：
 
 ```bash
-# 设置日志级别为 DEBUG（显示详细的调试信息，包括 MCP 请求和响应）
+# 设置日志级别为 DEBUG（显示详细的调试信息）
 export SSHX_LOG_LEVEL=debug
 
 # 设置日志级别为 INFO（默认）
@@ -417,41 +413,10 @@ export SSHX_LOG_LEVEL=warning
 export SSHX_LOG_LEVEL=error
 ```
 
-**MCP 模式下的调试日志：**
-
-在 MCP stdio 模式下，为了不干扰 JSON-RPC 通信，日志会输出到文件而不是标准输出。有两种方式启用 DEBUG 级别：
-
-**方式 1：使用 --debug 参数（推荐）**
-
-```bash
-# 使用 --debug 参数启动 MCP 服务器
-sshx mcp-stdio --debug
-
-# 日志文件位置: ~/.sshx/sshx.log
-# 可以实时查看日志
-tail -f ~/.sshx/sshx.log
-```
-
-**方式 2：使用环境变量**
-
-```bash
-# 设置环境变量启用 debug 日志
-export SSHX_LOG_LEVEL=debug
-sshx mcp-stdio
-
-# 日志文件位置: ~/.sshx/sshx.log
-# 可以实时查看日志
-tail -f ~/.sshx/sshx.log
-```
-
-**注意：** `--debug` 参数优先级高于环境变量。
-
 DEBUG 级别下会记录：
 
-- MCP 接收到的所有请求（JSON 格式）
-- MCP 发送的所有响应（JSON 格式）
-- 工具调用的详细参数和结果
 - SSH/SFTP 操作的详细过程
+- 认证方式的选择与回退细节
 
 ### 示例工作流
 

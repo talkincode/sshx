@@ -51,6 +51,7 @@ func handleHostAdd(config *sshclient.Config) error {
 			Host:        config.Host,
 			Port:        config.Port,
 			User:        config.User,
+			Key:         config.KeyPath,
 			PasswordKey: config.SudoKey,
 			Type:        config.HostType,
 		}
@@ -92,6 +93,12 @@ func handleHostAdd(config *sshclient.Config) error {
 		fmt.Print("User (default: master): ")
 		if user, err := reader.ReadString('\n'); err == nil {
 			host.User = strings.TrimSpace(user)
+		}
+
+		// SSH private key (optional, overrides global key)
+		fmt.Print("SSH private key path (optional, overrides global key): ")
+		if keyPath, err := reader.ReadString('\n'); err == nil {
+			host.Key = strings.TrimSpace(keyPath)
 		}
 
 		// Password key (optional)
@@ -189,6 +196,12 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.PasswordKey = existingHost.PasswordKey
 	}
 
+	if config.KeyPath != "" {
+		host.Key = config.KeyPath
+	} else {
+		host.Key = existingHost.Key
+	}
+
 	if config.HostType != "" {
 		host.Type = config.HostType
 	} else if existingHost.Type != "" {
@@ -242,6 +255,9 @@ func handleHostList(config *sshclient.Config) error {
 		}
 		if host.User != "" {
 			fmt.Printf("    User:        %s\n", host.User)
+		}
+		if host.Key != "" {
+			fmt.Printf("    Key:         %s\n", host.Key)
 		}
 		if host.PasswordKey != "" {
 			fmt.Printf("    Password Key: %s\n", host.PasswordKey)
@@ -457,8 +473,13 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 
 	if !testConfig.UseKeyAuth {
 		testConfig.KeyPath = ""
-	} else if testConfig.KeyPath == "" && settings != nil && settings.Key != "" {
-		testConfig.KeyPath = settings.Key
+	} else if testConfig.KeyPath == "" {
+		switch {
+		case hostConfig.Key != "":
+			testConfig.KeyPath = hostConfig.Key
+		case settings != nil && settings.Key != "":
+			testConfig.KeyPath = settings.Key
+		}
 	}
 
 	if hostConfig.PasswordKey != "" {

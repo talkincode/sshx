@@ -104,7 +104,7 @@ jobs:
         with:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
-            ## SSHX - Secure SSH & SFTP Client with MCP Protocol Support
+            ## SSHX - Secure SSH & SFTP Client with Built-in Password Manager
 
             ### 📋 What's Changed
 
