@@ -1007,11 +1007,11 @@ func (s *MCPServer) getPoolStats() (string, error) {
 	var output strings.Builder
 	output.WriteString("SSH Connection Pool Statistics:\n")
 	output.WriteString("================================\n")
-	output.WriteString(fmt.Sprintf("Total Connections:      %v\n", stats["total_connections"]))
-	output.WriteString(fmt.Sprintf("Recently Used:          %v\n", stats["recently_used_connections"]))
-	output.WriteString(fmt.Sprintf("Idle Connections:       %v\n", stats["idle_connections"]))
-	output.WriteString(fmt.Sprintf("Max Idle Duration:      %v\n", stats["max_idle_duration"]))
-	output.WriteString(fmt.Sprintf("Health Check Interval:  %v\n", stats["health_check_interval"]))
+	fmt.Fprintf(&output, "Total Connections:      %v\n", stats["total_connections"])
+	fmt.Fprintf(&output, "Recently Used:          %v\n", stats["recently_used_connections"])
+	fmt.Fprintf(&output, "Idle Connections:       %v\n", stats["idle_connections"])
+	fmt.Fprintf(&output, "Max Idle Duration:      %v\n", stats["max_idle_duration"])
+	fmt.Fprintf(&output, "Health Check Interval:  %v\n", stats["health_check_interval"])
 
 	return output.String(), nil
 }
@@ -1097,25 +1097,25 @@ func (s *MCPServer) executeHostList(args map[string]interface{}) (string, error)
 
 	// Build output
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("=== Configured Hosts (%d) ===\n\n", len(hosts)))
+	fmt.Fprintf(&output, "=== Configured Hosts (%d) ===\n\n", len(hosts))
 
 	for i, host := range hosts {
-		output.WriteString(fmt.Sprintf("[%d] %s\n", i+1, host.Name))
-		output.WriteString(fmt.Sprintf("    Host:        %s\n", host.Host))
+		fmt.Fprintf(&output, "[%d] %s\n", i+1, host.Name)
+		fmt.Fprintf(&output, "    Host:        %s\n", host.Host)
 		if host.Description != "" {
-			output.WriteString(fmt.Sprintf("    Description: %s\n", host.Description))
+			fmt.Fprintf(&output, "    Description: %s\n", host.Description)
 		}
 		if host.Port != "" && host.Port != "22" {
-			output.WriteString(fmt.Sprintf("    Port:        %s\n", host.Port))
+			fmt.Fprintf(&output, "    Port:        %s\n", host.Port)
 		}
 		if host.User != "" {
-			output.WriteString(fmt.Sprintf("    User:        %s\n", host.User))
+			fmt.Fprintf(&output, "    User:        %s\n", host.User)
 		}
 		if host.PasswordKey != "" {
-			output.WriteString(fmt.Sprintf("    Password Key: %s\n", host.PasswordKey))
+			fmt.Fprintf(&output, "    Password Key: %s\n", host.PasswordKey)
 		}
 		if host.Type != "" {
-			output.WriteString(fmt.Sprintf("    Type:        %s\n", host.Type))
+			fmt.Fprintf(&output, "    Type:        %s\n", host.Type)
 		}
 		output.WriteString("\n")
 	}
