@@ -1,5 +1,3 @@
-.PHONY: help build test test-verbose test-coverage clean install run fmt vet lint deps
-
 # Default target
 .DEFAULT_GOAL := help
 
@@ -8,6 +6,17 @@ BINARY_NAME=sshx
 BUILD_DIR=bin
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
+
+# Version information (injected into the binary via -ldflags -X main.Version)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
+RELEASE_LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION)"
+
+# Install locations
+LOCAL_BIN_DIR=$(HOME)/.local/bin
+SKILL_NAME=sshx
+SKILLS_SRC_DIR=skills/$(SKILL_NAME)
+SKILLS_INSTALL_DIR=$(HOME)/.agents/skills
 
 # Go parameters
 GOBASE=$(shell pwd)
@@ -21,6 +30,11 @@ GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
 
+.PHONY: help build build-all test test-verbose test-coverage clean install uninstall run fmt vet lint deps version
+
+version: ## Show the version string used for builds
+	@echo "$(VERSION)"
+
 help: ## Show help information
 	@echo "Available Make targets:"
 	@echo ""
@@ -28,24 +42,24 @@ help: ## Show help information
 	@echo ""
 
 build: ## Build binary
-	@echo "Building..."
+	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) -o $(GOBIN)/$(BINARY_NAME) ./cmd/sshx
+	$(GOBUILD) $(LDFLAGS) -o $(GOBIN)/$(BINARY_NAME) ./cmd/sshx
 	@echo "Build complete: $(GOBIN)/$(BINARY_NAME)"
 
 build-all: ## Build binaries for all platforms
-	@echo "Building all platforms..."
+	@echo "Building all platforms ($(VERSION))..."
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building Linux (amd64)..."
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(GOBIN)/$(BINARY_NAME)-linux-amd64 ./cmd/sshx
+	GOOS=linux GOARCH=amd64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-linux-amd64 ./cmd/sshx
 	@echo "Building Linux (arm64)..."
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(GOBIN)/$(BINARY_NAME)-linux-arm64 ./cmd/sshx
+	GOOS=linux GOARCH=arm64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-linux-arm64 ./cmd/sshx
 	@echo "Building macOS (amd64)..."
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(GOBIN)/$(BINARY_NAME)-darwin-amd64 ./cmd/sshx
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-darwin-amd64 ./cmd/sshx
 	@echo "Building macOS (arm64)..."
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(GOBIN)/$(BINARY_NAME)-darwin-arm64 ./cmd/sshx
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-darwin-arm64 ./cmd/sshx
 	@echo "Building Windows (amd64)..."
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(GOBIN)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sshx
+	GOOS=windows GOARCH=amd64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sshx
 	@echo "All platform builds complete!"
 
 test: ## Run all tests
@@ -85,27 +99,29 @@ clean: ## Clean build files and test cache
 	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
 	@echo "Clean complete!"
 
-install: build ## Install to $GOPATH/bin and ~/bin
-	@echo "Installing to system..."
-	@if [ -n "$(GOPATH)" ] && [ -d "$(GOPATH)/bin" ]; then \
-		cp $(GOBIN)/$(BINARY_NAME) $(GOPATH)/bin/; \
-		echo "✓ Installed to $(GOPATH)/bin/$(BINARY_NAME)"; \
-	fi
-	@if [ -d ~/bin ]; then \
-		cp $(GOBIN)/$(BINARY_NAME) ~/bin/$(BINARY_NAME) && chmod +x ~/bin/$(BINARY_NAME); \
-		echo "✓ Installed to ~/bin/$(BINARY_NAME)"; \
-	fi
+install: build ## Install binary to ~/.local/bin and skill to ~/.agents/skills
+	@echo "Installing $(BINARY_NAME) $(VERSION)..."
+	@mkdir -p $(LOCAL_BIN_DIR)
+	@cp $(GOBIN)/$(BINARY_NAME) $(LOCAL_BIN_DIR)/$(BINARY_NAME) && chmod +x $(LOCAL_BIN_DIR)/$(BINARY_NAME)
+	@echo "✓ Installed binary to $(LOCAL_BIN_DIR)/$(BINARY_NAME)"
+	@mkdir -p $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)
+	@cp -R $(SKILLS_SRC_DIR)/. $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)/
+	@echo "✓ Installed skill to $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)"
+	@case ":$$PATH:" in \
+		*":$(LOCAL_BIN_DIR):"*) ;; \
+		*) echo "⚠  $(LOCAL_BIN_DIR) is not in your PATH; add it to use '$(BINARY_NAME)' directly" ;; \
+	esac
 	@echo "Installation complete! You can now use '$(BINARY_NAME)' command"
 
-uninstall: ## Uninstall from system
+uninstall: ## Uninstall binary and skill
 	@echo "Uninstalling..."
-	@if [ -f "$(GOPATH)/bin/$(BINARY_NAME)" ]; then \
-		rm -f $(GOPATH)/bin/$(BINARY_NAME); \
-		echo "✓ Uninstalled from $(GOPATH)/bin"; \
+	@if [ -f $(LOCAL_BIN_DIR)/$(BINARY_NAME) ]; then \
+		rm -f $(LOCAL_BIN_DIR)/$(BINARY_NAME); \
+		echo "✓ Removed $(LOCAL_BIN_DIR)/$(BINARY_NAME)"; \
 	fi
-	@if [ -f ~/bin/$(BINARY_NAME) ]; then \
-		rm -f ~/bin/$(BINARY_NAME); \
-		echo "✓ Uninstalled from ~/bin"; \
+	@if [ -d $(SKILLS_INSTALL_DIR)/$(SKILL_NAME) ]; then \
+		rm -rf $(SKILLS_INSTALL_DIR)/$(SKILL_NAME); \
+		echo "✓ Removed skill $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)"; \
 	fi
 	@echo "Uninstall complete!"
 
@@ -175,6 +191,7 @@ release: clean test-coverage build-all ## Prepare release (clean, test, build al
 info: ## Show project information
 	@echo "Project information:"
 	@echo "  Name: $(BINARY_NAME)"
+	@echo "  Version: $(VERSION)"
 	@echo "  Go version: $(shell go version)"
 	@echo "  Build directory: $(BUILD_DIR)"
 	@echo "  Current path: $(GOBASE)"

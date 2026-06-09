@@ -174,8 +174,15 @@ cd sshx
 # Build command-line tool
 go build -o bin/sshx ./cmd/sshx
 
+# Print the version (also exposed via the binary's --version flag)
+make version
+
 # Install to system (optional)
+# Installs the binary to ~/.local/bin and the agent skill to ~/.agents/skills/sshx
 make install
+
+# Check the installed version
+sshx --version
 ```
 
 ## Quick Start

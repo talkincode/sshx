@@ -172,8 +172,15 @@ cd sshx
 # 构建命令行工具
 go build -o bin/sshx ./cmd/sshx
 
+# 查看版本号（也可通过二进制的 --version 参数查看）
+make version
+
 # 安装到系统（可选）
+# 将二进制安装到 ~/.local/bin，并将 agent 技能安装到 ~/.agents/skills/sshx
 make install
+
+# 查看已安装的版本
+sshx --version
 ```
 
 ## 快速开始

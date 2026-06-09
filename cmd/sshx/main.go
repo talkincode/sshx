@@ -8,7 +8,16 @@ import (
 	"github.com/talkincode/sshx/internal/app"
 )
 
+// Version is the sshx version string. The default is overridden at build time
+// via -ldflags "-X main.Version=<version>" (see the Makefile and the release
+// workflow).
+var Version = "dev"
+
 func main() {
+	if handleVersionFlag(os.Args) {
+		os.Exit(0)
+	}
+
 	err := app.Run(os.Args)
 	if err == nil {
 		os.Exit(0)
@@ -33,4 +42,17 @@ func main() {
 	// Any other sshx-level failure.
 	fmt.Fprintf(os.Stderr, "sshx: %v\n", err)
 	os.Exit(255)
+}
+
+// handleVersionFlag prints the version string and reports whether a version
+// flag (--version, -v, or -V) was present in args.
+func handleVersionFlag(args []string) bool {
+	for _, arg := range args[1:] {
+		switch arg {
+		case "--version", "-v", "-V":
+			fmt.Printf("sshx %s\n", Version)
+			return true
+		}
+	}
+	return false
 }
