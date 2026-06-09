@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Host Configuration Management** - Store and manage frequently used host configurations
-  - Configuration file: `~/.sshmcp/settings.json`
+  - Configuration file: `~/.sshx/settings.json`
   - Add hosts interactively with `--host-add`
   - List configured hosts with `--host-list`
   - Test host connections with `--host-test=<name>`
@@ -139,11 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshmcp/compare/v0.0.7...HEAD
-[0.0.7]: https://github.com/talkincode/sshmcp/compare/v0.0.6...v0.0.7
-[0.0.6]: https://github.com/talkincode/sshmcp/compare/v0.0.5...v0.0.6
-[0.0.5]: https://github.com/talkincode/sshmcp/compare/v0.0.4...v0.0.5
-[0.0.4]: https://github.com/talkincode/sshmcp/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/talkincode/sshmcp/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/talkincode/sshmcp/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/talkincode/sshmcp/releases/tag/v0.0.1
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/talkincode/sshx/compare/v0.0.6...v0.0.7
+[0.0.6]: https://github.com/talkincode/sshx/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/talkincode/sshx/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/talkincode/sshx/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/talkincode/sshx/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/talkincode/sshx/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/talkincode/sshx/releases/tag/v0.0.1

@@ -236,17 +236,17 @@ func EnhanceError(err error, stdout, stderr string) error {
 	errMsg.WriteString(err.Error())
 
 	if stderr != "" {
-		errMsg.WriteString(fmt.Sprintf("\nStderr: %s", stderr))
+		fmt.Fprintf(&errMsg, "\nStderr: %s", stderr)
 	}
 
 	if stdout != "" {
-		errMsg.WriteString(fmt.Sprintf("\nStdout: %s", stdout))
+		fmt.Fprintf(&errMsg, "\nStdout: %s", stdout)
 	}
 
 	// 添加退出码信息
 	var exitErr *ssh.ExitError
 	if errors.As(err, &exitErr) {
-		errMsg.WriteString(fmt.Sprintf("\nExit Code: %d", exitErr.ExitStatus()))
+		fmt.Fprintf(&errMsg, "\nExit Code: %d", exitErr.ExitStatus())
 	}
 
 	return fmt.Errorf("%s", errMsg.String())

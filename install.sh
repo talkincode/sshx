@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="talkincode/sshmcp"
+REPO="talkincode/sshx"
 VERSION="${1:-latest}" # Use argument or default to latest
 BINARY_NAME="sshx"
 INSTALL_DIR="/usr/local/bin"

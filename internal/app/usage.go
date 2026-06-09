@@ -96,7 +96,7 @@ Host Management:
     -pk=<key>                         Password key name
     --host-type=<type>                System type (linux/windows/macos)
 
-  Configuration file: ~/.sshmcp/settings.json
+  Configuration file: ~/.sshx/settings.json
 
 Environment Variables (.env):
   SSH_PASSWORD          SSH password (not recommended, use SSH keys or keyring)
@@ -218,5 +218,5 @@ Note:
   - SFTP operations use the same SSH connection
   - Password manager works across macOS/Linux/Windows
   - Default user: master, Default sudo key: master
-  - Host configurations are stored in ~/.sshmcp/settings.json`)
+  - Host configurations are stored in ~/.sshx/settings.json`)
 }

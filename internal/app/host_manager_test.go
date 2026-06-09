@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/talkincode/sshmcp/internal/sshclient"
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 func TestFormatAuthDescription(t *testing.T) {

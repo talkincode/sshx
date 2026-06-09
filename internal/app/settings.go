@@ -9,7 +9,7 @@ import (
 
 const (
 	// SettingsDir is the directory where settings are stored
-	SettingsDir = ".sshmcp"
+	SettingsDir = ".sshx"
 	// SettingsFile is the name of the settings file
 	SettingsFile = "settings.json"
 )

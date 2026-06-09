@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/pkg/logger"
 	"github.com/zalando/go-keyring"
 )
 

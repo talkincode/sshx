@@ -72,7 +72,7 @@ After pushing the tag, GitHub Actions will automatically:
 Visit the GitHub Releases page to verify:
 
 ```
-https://github.com/talkincode/sshmcp/releases
+https://github.com/talkincode/sshx/releases
 ```
 
 Check:

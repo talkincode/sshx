@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-We take security seriously. The following versions of SSHMCP are currently supported with security updates:
+We take security seriously. The following versions of SSHX are currently supported with security updates:
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -17,11 +17,11 @@ We appreciate your efforts to responsibly disclose your findings and will make e
 
 ### How to Report
 
-If you discover a security vulnerability in SSHMCP, please report it by **one** of the following methods:
+If you discover a security vulnerability in SSHX, please report it by **one** of the following methods:
 
 1. **GitHub Security Advisories** (Recommended)
 
-   - Navigate to the [Security tab](https://github.com/talkincode/sshmcp/security/advisories)
+   - Navigate to the [Security tab](https://github.com/talkincode/sshx/security/advisories)
    - Click "Report a vulnerability"
    - Fill in the details of the vulnerability
 
@@ -63,22 +63,22 @@ When reporting a vulnerability, please include:
 
 ## Security Best Practices
 
-When using SSHMCP, we recommend:
+When using SSHX, we recommend:
 
 - **Keep Updated**: Always use the latest version with security patches
 - **Secure Credentials**: Use the built-in password management feature to store SSH credentials securely in system keyring
 - **Password Key Management**: Use meaningful and unique password key names for different servers (e.g., `server-A`, `prod-web`, `dev-db`)
 - **SSH Keys**: Prefer SSH key authentication over password authentication when possible
 - **Review Commands**: Always review commands before execution, especially with the `--force` flag
-- **Limit Permissions**: Run SSHMCP with minimum required privileges
-- **Network Security**: Use SSHMCP only on trusted networks when handling sensitive credentials
+- **Limit Permissions**: Run SSHX with minimum required privileges
+- **Network Security**: Use SSHX only on trusted networks when handling sensitive credentials
 - **Avoid Inline Passwords**: Never use inline passwords in commands (e.g., `--password-set=key:password`); always use interactive prompts
 
 ## Known Security Considerations
 
 ### Command Validation
 
-SSHMCP includes built-in validation to prevent dangerous commands (e.g., `rm -rf /`, `:(){ :|:& };:`). However:
+SSHX includes built-in validation to prevent dangerous commands (e.g., `rm -rf /`, `:(){ :|:& };:`). However:
 
 - The `--force` flag bypasses these checks
 - Always review commands before using `--force`

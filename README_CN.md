@@ -16,26 +16,26 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
 
 <div align="center">
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/talkincode/sshmcp?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
-[![Release](https://img.shields.io/github/v/release/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshmcp/blob/main/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshmcp?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshmcp)
-[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshmcp)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/talkincode/sshx?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
+[![Release](https://img.shields.io/github/v/release/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshx/blob/main/LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshx?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshx)
+[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
 
-[![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/issues)
-[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/pulls)
+[![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/network/members)
+[![GitHub Issues](https://img.shields.io/github/issues/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/issues)
+[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/pulls)
 
-[![GitHub Downloads](https://img.shields.io/github/downloads/talkincode/sshmcp/total?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/releases)
-[![GitHub Contributors](https://img.shields.io/github/contributors/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/graphs/contributors)
-[![Last Commit](https://img.shields.io/github/last-commit/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/commits/main)
-[![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp)
+[![GitHub Downloads](https://img.shields.io/github/downloads/talkincode/sshx/total?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
+[![GitHub Contributors](https://img.shields.io/github/contributors/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/graphs/contributors)
+[![Last Commit](https://img.shields.io/github/last-commit/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/commits/main)
+[![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx)
 
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshmcp/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshx/releases)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-orange?style=flat-square)](https://modelcontextprotocol.io)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshmcp/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshx/pulls)
 
 [English](./README.md) | 简体中文
 
@@ -43,7 +43,7 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
 
 ---
 
-# SSHMCP
+# SSHX
 
 `sshx` 提供了一个无障碍的 SSH 命令行客户端，同时实现了 MCP（Model Context Protocol，模型上下文协议）接口，使 AI 助手能够轻松调用远程 SSH/SFTP 功能。
 
@@ -74,17 +74,17 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$ |\$  /$$ |$$ |  $$\ $$ |
 
 ```bash
 # 运行最新版本
-go run github.com/talkincode/sshmcp/cmd/sshx@latest --help
+go run github.com/talkincode/sshx/cmd/sshx@latest --help
 
 # 运行指定版本
-go run github.com/talkincode/sshmcp/cmd/sshx@v0.0.6 -h=192.168.1.100 "uptime"
+go run github.com/talkincode/sshx/cmd/sshx@v0.0.6 -h=192.168.1.100 "uptime"
 ```
 
 #### 全局安装
 
 ```bash
 # 安装最新版本到 $GOPATH/bin
-go install github.com/talkincode/sshmcp/cmd/sshx@latest
+go install github.com/talkincode/sshx/cmd/sshx@latest
 
 # 然后可以在任何地方使用
 sshx --help
@@ -98,13 +98,13 @@ sshx -h=192.168.1.100 "uptime"
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/talkincode/sshmcp/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
 或下载后运行：
 
 ```bash
-wget https://raw.githubusercontent.com/talkincode/sshmcp/main/install.sh
+wget https://raw.githubusercontent.com/talkincode/sshx/main/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -120,13 +120,13 @@ chmod +x install.sh
 以管理员身份打开 PowerShell 并运行：
 
 ```powershell
-irm https://raw.githubusercontent.com/talkincode/sshmcp/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/talkincode/sshx/main/install.ps1 | iex
 ```
 
 或下载后运行：
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/talkincode/sshmcp/main/install.ps1" -OutFile "install.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/talkincode/sshx/main/install.ps1" -OutFile "install.ps1"
 .\install.ps1
 ```
 
@@ -138,7 +138,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/talkincode/sshmcp/main
 
 ### 手动安装
 
-从 [Releases](https://github.com/talkincode/sshmcp/releases) 下载预编译二进制文件：
+从 [Releases](https://github.com/talkincode/sshx/releases) 下载预编译二进制文件：
 
 **Linux / macOS:**
 
@@ -167,8 +167,8 @@ sshx --help
 
 ```bash
 # 克隆仓库
-git clone https://github.com/talkincode/sshmcp.git
-cd sshmcp
+git clone https://github.com/talkincode/sshx.git
+cd sshx
 
 # 构建命令行工具
 go build -o bin/sshx ./cmd/sshx
@@ -396,7 +396,7 @@ export SUDO_PASSWORD=your_sudo_password
 
 - `sshx` 仍然会优先尝试 SSH 密钥认证，但如果服务器拒绝公钥（例如只允许密码登录），并且已经提供了密码，客户端会自动回退到“仅密码”重连，无需手动重试。
 - 使用 `--no-key`（或 `--password-only`）即可在单次命令中禁用密钥认证；如果随后提供 `--key=<路径>`，会重新启用公钥登录。
-- 如果长期不需要公钥，可以设置环境变量 `SSH_DISABLE_KEY=true`，即便 `~/.sshmcp/settings.json` 中存在默认密钥路径也会被忽略。
+- 如果长期不需要公钥，可以设置环境变量 `SSH_DISABLE_KEY=true`，即便 `~/.sshx/settings.json` 中存在默认密钥路径也会被忽略。
 - 当密钥认证启用且未手动指定路径时，`sshx` 仍会自动加载 `~/.ssh/id_rsa`（或设置文件中的默认值），然后再按需回退到密码。
 
 #### 日志级别配置
@@ -427,9 +427,9 @@ export SSHX_LOG_LEVEL=error
 # 使用 --debug 参数启动 MCP 服务器
 sshx mcp-stdio --debug
 
-# 日志文件位置: ~/.sshmcp/sshx.log
+# 日志文件位置: ~/.sshx/sshx.log
 # 可以实时查看日志
-tail -f ~/.sshmcp/sshx.log
+tail -f ~/.sshx/sshx.log
 ```
 
 **方式 2：使用环境变量**
@@ -439,9 +439,9 @@ tail -f ~/.sshmcp/sshx.log
 export SSHX_LOG_LEVEL=debug
 sshx mcp-stdio
 
-# 日志文件位置: ~/.sshmcp/sshx.log
+# 日志文件位置: ~/.sshx/sshx.log
 # 可以实时查看日志
-tail -f ~/.sshmcp/sshx.log
+tail -f ~/.sshx/sshx.log
 ```
 
 **注意：** `--debug` 参数优先级高于环境变量。
@@ -540,10 +540,10 @@ make lint
 
 <div align="center">
 
-**[文档](https://github.com/talkincode/sshmcp/wiki)** •
-**[问题](https://github.com/talkincode/sshmcp/issues)** •
-**[讨论](https://github.com/talkincode/sshmcp/discussions)** •
-**[发布版本](https://github.com/talkincode/sshmcp/releases)**
+**[文档](https://github.com/talkincode/sshx/wiki)** •
+**[问题](https://github.com/talkincode/sshx/issues)** •
+**[讨论](https://github.com/talkincode/sshx/discussions)** •
+**[发布版本](https://github.com/talkincode/sshx/releases)**
 
 用 ❤️ 制作，作者 [talkincode](https://github.com/talkincode)
 
