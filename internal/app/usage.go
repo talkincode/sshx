@@ -28,7 +28,28 @@ SSH Options:
   -u, --user=USER          SSH username (default: master)
   -i, --key=PATH           SSH private key path (default: ~/.ssh/id_rsa)
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
+  --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
+  --json                   Emit a single structured JSON result on stdout
+  --pty                    Request a PTY (merges stderr into stdout; off by default)
   --help                   Show this help message
+
+Agent / Scripting Mode:
+  By default command output streams live with stdout and stderr kept on
+  separate channels (no PTY), and the remote command's exit status is
+  propagated as sshx's own exit code.
+
+  --json emits one JSON object on stdout:
+    {host, port, user, command, exit_code, success, stdout, stderr,
+     stdout_truncated, stderr_truncated, duration_ms, auth_method,
+     error_kind, error}
+
+  Exit codes:
+    0          command succeeded
+    1..254     remote command's exit status (propagated verbatim)
+    255        sshx-level failure (connect/auth/host-key/timeout/blocked/...)
+    In --json mode an sshx-level failure has exit_code -1 and a non-empty
+    error_kind (timeout, auth, host_key, connect, blocked, exit_missing,
+    config, error), so it is always distinguishable from a remote exit 255.
 
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
@@ -88,6 +109,7 @@ Environment Variables (.env):
   SSH_SUDO_KEY          Sudo password keyring key name (default: master)
   SSH_NO_SAFETY_CHECK   Disable safety checks (true/false)
   SSH_FORCE             Force execution mode (true/false)
+  SSH_TIMEOUT           Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
 
 SSH Examples:
   # Execute simple command (default user: master)
@@ -102,6 +124,12 @@ SSH Examples:
 
   # Custom SSH port
   sshx -h=192.168.1.100 -p=2222 "ps aux | grep nginx"
+
+  # Structured JSON output for scripts/agents (one object on stdout)
+  sshx -h=192.168.1.100 --json "systemctl is-active nginx"
+
+  # Bound a command with a timeout (kills it after 30s)
+  sshx -h=192.168.1.100 --timeout=30s "apt-get update"
 
   # Dangerous command will be blocked
   sshx -h=192.168.1.100 "sudo rm -rf /tmp/*"  # Safe

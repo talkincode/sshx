@@ -10,6 +10,19 @@ import (
 
 const KeyringServiceName = "sshx"
 
+// CommandBlockedError is returned by ValidateCommand when a command matches a
+// known destructive pattern. Its message is unchanged from the previous plain
+// error so existing output and substring checks keep working, while callers can
+// now detect a safety block via errors.As.
+type CommandBlockedError struct {
+	Command string
+	Reason  string
+}
+
+func (e *CommandBlockedError) Error() string {
+	return fmt.Sprintf("⚠️  Dangerous command blocked\nCommand: %s\nReason: %s\nIf you are sure, use --force or -f flag", e.Command, e.Reason)
+}
+
 // ValidateCommand performs a best-effort safety check against a small set of
 // well-known destructive commands (for example "rm -rf /" or a fork bomb).
 //
@@ -51,10 +64,10 @@ func ValidateCommand(command string) error {
 		if strings.HasSuffix(pattern.pattern, "$") {
 			patternLower = strings.TrimSuffix(patternLower, "$")
 			if strings.HasSuffix(cmdLower, patternLower) {
-				return fmt.Errorf("⚠️  Dangerous command blocked\nCommand: %s\nReason: %s\nIf you are sure, use --force or -f flag", cmd, pattern.reason)
+				return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
 			}
 		} else if strings.Contains(cmdWithSpaces, patternLower) {
-			return fmt.Errorf("⚠️  Dangerous command blocked\nCommand: %s\nReason: %s\nIf you are sure, use --force or -f flag", cmd, pattern.reason)
+			return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
 		}
 	}
 
@@ -110,7 +123,7 @@ func ValidateCommand(command string) error {
 			}
 		}
 		if allMatch {
-			return fmt.Errorf("⚠️  Dangerous command blocked\nCommand: %s\nReason: %s\nIf you are sure, use --force or -f flag", cmd, pattern.reason)
+			return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
 		}
 	}
 

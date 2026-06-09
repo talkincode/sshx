@@ -51,6 +51,16 @@ type Config struct {
 	Command     string
 	Mode        string
 	DialTimeout time.Duration
+	// Timeout bounds the execution of a single remote command. Zero means no
+	// command timeout (the dial timeout still applies).
+	Timeout time.Duration
+	// JSONOutput emits a single structured JSON result instead of streaming
+	// human-readable output. It implies clean, separated stdout/stderr capture.
+	JSONOutput bool
+	// UsePTY requests a pseudo-terminal for command execution. It is off by
+	// default because a PTY merges stderr into stdout and injects terminal
+	// control characters; it is ignored in JSON/capture mode.
+	UsePTY bool
 
 	SafetyCheck bool
 	Force       bool
@@ -410,13 +420,26 @@ func shouldFallbackToPassword(err error, hadKeyAuth bool, hasPassword bool) bool
 	return errors.As(err, &serverErr)
 }
 
-// ExecuteCommand executes a command
-func (c *SSHClient) ExecuteCommand() (err error) {
+// RunCommand executes the configured command and returns a structured result.
+//
+// When capture is true, stdout and stderr are buffered separately (used for
+// --json output). When capture is false they stream live to os.Stdout and
+// os.Stderr on independent channels with no PTY, which keeps output clean and
+// machine-parseable. A PTY is only requested when UsePTY is set and capture is
+// false; note that a PTY merges stderr into stdout.
+//
+// The returned error is non-nil only for sshx-level failures (validation,
+// session setup, timeout, or an abnormal teardown). A remote command that
+// exits non-zero is NOT an error here: the status is reported in
+// ExecResult.ExitCode with a nil error.
+func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
 	lg := logger.GetLogger()
+	var result ExecResult
 
 	if c.config.SafetyCheck && !c.config.Force {
 		if validateErr := ValidateCommand(c.config.Command); validateErr != nil {
-			return validateErr
+			result.ExitCode = -1
+			return result, validateErr
 		}
 	} else if c.config.Force {
 		lg.Warning("Safety check skipped (--force mode)")
@@ -424,17 +447,99 @@ func (c *SSHClient) ExecuteCommand() (err error) {
 
 	session, err := c.client.NewSession()
 	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
+		result.ExitCode = -1
+		return result, fmt.Errorf("failed to create session: %w", err)
 	}
-	// Use new error handling mechanism that automatically ignores common errors like EOF
-	defer errutil.HandleCloseError(&err, session)
+	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
 
-	if c.config.Password != "" && CommandUsesSudo(c.config.Command) {
-		return c.executeInteractive(session)
+	command := c.config.Command
+	if c.config.Password != "" && commandStartsWithSudo(command) {
+		lg.Info("Auto-filling sudo password...")
+		command = sudoStdinCommand(command)
+		session.Stdin = strings.NewReader(c.config.Password + "\n")
 	}
 
-	return c.executeWithPTY(session)
-} // ExecuteCommandWithOutput executes a command and returns the output
+	if c.config.UsePTY && !capture {
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.TTY_OP_ISPEED: 14400,
+			ssh.TTY_OP_OSPEED: 14400,
+		}
+		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
+			lg.Warning("failed to request PTY: %v", ptyErr)
+		}
+	}
+
+	var stdoutBuf, stderrBuf *cappedBuffer
+	if capture {
+		stdoutBuf = newCappedBuffer(MaxCaptureBytes)
+		stderrBuf = newCappedBuffer(MaxCaptureBytes)
+		session.Stdout = stdoutBuf
+		session.Stderr = stderrBuf
+	} else {
+		session.Stdout = os.Stdout
+		session.Stderr = os.Stderr
+	}
+
+	lg.Debug("Executing: %s", c.config.Command)
+	runErr := runSession(session, command, c.config.Timeout)
+
+	if capture {
+		result.Stdout = stdoutBuf.String()
+		result.Stderr = stderrBuf.String()
+		result.StdoutTruncated = stdoutBuf.Truncated()
+		result.StderrTruncated = stderrBuf.Truncated()
+	}
+
+	switch {
+	case runErr == nil:
+		result.ExitCode = 0
+		return result, nil
+	case errors.Is(runErr, ErrCommandTimeout):
+		result.ExitCode = -1
+		return result, runErr
+	}
+
+	var exitErr *ssh.ExitError
+	if errors.As(runErr, &exitErr) {
+		result.ExitCode = exitErr.ExitStatus()
+		return result, nil
+	}
+
+	var missingErr *ssh.ExitMissingError
+	if errors.As(runErr, &missingErr) {
+		result.ExitCode = -1
+		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
+	}
+
+	result.ExitCode = -1
+	return result, fmt.Errorf("command failed: %w", runErr)
+}
+
+// runSession runs command on session, optionally bounded by timeout. When the
+// timeout fires the session is closed (which unblocks Run) and we wait for the
+// run goroutine to finish before returning, so capture buffers are no longer
+// being written and are safe to read.
+func runSession(session *ssh.Session, command string, timeout time.Duration) error {
+	if timeout <= 0 {
+		return session.Run(command)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(command) }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		_ = session.Signal(ssh.SIGKILL) //nolint:errcheck // best-effort kill on timeout
+		_ = session.Close()             //nolint:errcheck // best-effort close on timeout
+		<-done
+		return ErrCommandTimeout
+	}
+}
+
+// ExecuteCommandWithOutput executes a command and returns the output
 func (c *SSHClient) ExecuteCommandWithOutput() (output string, err error) {
 	lg := logger.GetLogger()
 
@@ -497,68 +602,66 @@ func (c *SSHClient) ExecuteCommandWithOutput() (output string, err error) {
 	return output, nil
 }
 
-// executeWithPTY executes a command using PTY
-func (c *SSHClient) executeWithPTY(session *ssh.Session) error {
-	lg := logger.GetLogger()
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-
-	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
-		lg.Warning("failed to request PTY, falling back to normal execution: %v", err)
-		return c.executeNormal(session)
-	}
-
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	lg.Debug("Executing (with PTY): %s", c.config.Command)
-
-	if err := session.Run(c.config.Command); err != nil && !errutil.IsEOFError(err) {
-		// Only report non-EOF errors
-		if stderr.Len() > 0 {
-			fmt.Fprintf(os.Stderr, "STDERR:\n%s", stderr.String())
-		}
-		return fmt.Errorf("command failed: %w", err)
-	}
-
-	if stdout.Len() > 0 {
-		fmt.Print(stdout.String())
-	}
-	if stderr.Len() > 0 {
-		fmt.Fprintf(os.Stderr, "%s", stderr.String())
-	}
-
-	return nil
+// ExecResult captures the outcome of running a remote command.
+type ExecResult struct {
+	ExitCode        int
+	Stdout          string
+	Stderr          string
+	StdoutTruncated bool
+	StderrTruncated bool
 }
 
-// executeNormal executes a normal command (without PTY)
-func (c *SSHClient) executeNormal(session *ssh.Session) error {
-	lg := logger.GetLogger()
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
+// MaxCaptureBytes bounds how much stdout/stderr is buffered in capture mode so
+// a runaway command cannot exhaust memory.
+const MaxCaptureBytes = 10 << 20 // 10 MiB
 
-	lg.Debug("Executing: %s", c.config.Command)
+var (
+	// ErrCommandTimeout indicates the command exceeded the configured timeout.
+	ErrCommandTimeout = errors.New("command execution timed out")
+	// ErrNoExitStatus indicates the remote closed the session without reporting
+	// an exit status (for example, the command was terminated by a signal).
+	ErrNoExitStatus = errors.New("remote command terminated without exit status")
+)
 
-	if err := session.Run(c.config.Command); err != nil {
-		if stderr.Len() > 0 {
-			fmt.Fprintf(os.Stderr, "STDERR:\n%s", stderr.String())
+// cappedBuffer accumulates output up to a byte limit and records truncation.
+// Writes beyond the limit are discarded but still reported as fully consumed so
+// the underlying ssh copy loop keeps draining the channel without blocking.
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newCappedBuffer(limit int) *cappedBuffer {
+	return &cappedBuffer{limit: limit}
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.limit > 0 {
+		remaining := c.limit - c.buf.Len()
+		if remaining <= 0 {
+			c.truncated = true
+			return len(p), nil
 		}
-		return fmt.Errorf("command failed: %w", err)
+		if len(p) > remaining {
+			if _, err := c.buf.Write(p[:remaining]); err != nil {
+				return 0, err
+			}
+			c.truncated = true
+			return len(p), nil
+		}
 	}
+	return c.buf.Write(p)
+}
 
-	if stdout.Len() > 0 {
-		fmt.Print(stdout.String())
-	}
-	if stderr.Len() > 0 {
-		fmt.Fprintf(os.Stderr, "%s", stderr.String())
-	}
+func (c *cappedBuffer) String() string  { return c.buf.String() }
+func (c *cappedBuffer) Truncated() bool { return c.truncated }
 
-	return nil
+// commandStartsWithSudo reports whether the command's first token is sudo, which
+// is the only form sudoStdinCommand can safely rewrite for password injection.
+func commandStartsWithSudo(command string) bool {
+	trimmed := strings.TrimLeft(command, " \t")
+	return trimmed == "sudo" || strings.HasPrefix(trimmed, "sudo ")
 }
 
 // sudoStdinCommand rewrites a command that begins with "sudo" so that sudo
@@ -576,39 +679,6 @@ func sudoStdinCommand(command string) string {
 	default:
 		return command
 	}
-}
-
-// executeInteractive executes an interactive command (supports auto sudo password input)
-func (c *SSHClient) executeInteractive(session *ssh.Session) error {
-	lg := logger.GetLogger()
-	command := c.config.Command
-	if c.config.Password != "" {
-		lg.Info("Auto-filling sudo password...")
-		command = sudoStdinCommand(command)
-		session.Stdin = strings.NewReader(c.config.Password + "\n")
-	}
-
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	lg.Debug("Executing (no PTY): %s", "sudo command")
-
-	if err := session.Run(command); err != nil {
-		if stderr.Len() > 0 {
-			fmt.Fprintf(os.Stderr, "STDERR:\n%s", stderr.String())
-		}
-		return fmt.Errorf("command failed: %w", err)
-	}
-
-	if stdout.Len() > 0 {
-		fmt.Print(stdout.String())
-	}
-	if stderr.Len() > 0 {
-		fmt.Fprintf(os.Stderr, "%s", stderr.String())
-	}
-
-	return nil
 }
 
 // ExecuteSftp executes SFTP operations

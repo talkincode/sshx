@@ -195,6 +195,63 @@ sshx -h=192.168.1.100 -u=root "df -h"
 sshx --host-test-all
 ```
 
+## Agent / 脚本模式
+
+`sshx` 不仅面向人类终端，也专为脚本和 AI agent 调用而设计，命令执行路径提供稳定、可被机器解析的契约。
+
+默认行为：
+
+- **stdout 与 stderr 分离**并实时流式输出（不使用 PTY，不混入终端控制字符）。
+- **透传远程命令的退出码**，作为 `sshx` 自身的进程退出码。
+
+### 退出码
+
+| 退出码    | 含义                                                       |
+| -------- | --------------------------------------------------------- |
+| `0`      | 命令成功                                                   |
+| `1..254` | 远程命令的退出码，原样透传                                  |
+| `255`    | `sshx` 层面的失败（连接 / 认证 / 主机密钥 / 超时 / 被拦截） |
+
+### `--json` 结构化输出
+
+加上 `--json` 即可在 stdout 得到单个 JSON 对象（诊断日志仍走 stderr，保证 stdout 纯净）：
+
+```bash
+sshx -h=prod-web --json "systemctl is-active nginx"
+```
+
+```json
+{
+  "host": "192.168.1.100",
+  "port": "22",
+  "user": "root",
+  "command": "systemctl is-active nginx",
+  "exit_code": 0,
+  "success": true,
+  "stdout": "active\n",
+  "stderr": "",
+  "duration_ms": 142,
+  "auth_method": "key"
+}
+```
+
+当发生 `sshx` 层面的失败时，对象中 `exit_code` 为 `-1` 且 `error_kind` 非空（取值为
+`timeout`、`auth`、`host_key`、`connect`、`blocked`、`exit_missing`、`config`、`error`
+之一），因此始终可以与"远程命令恰好退出 255"区分开来。
+
+### `--timeout` 与 `--pty`
+
+```bash
+# 命令运行超过 30 秒则杀掉（也支持 2m 等写法，纯数字按秒处理）
+sshx -h=prod-web --timeout=30s "apt-get update"
+
+# 对必须要终端的命令重新启用 PTY
+# （注意：PTY 会把 stderr 合并进 stdout，且不能与 --json 同时使用）
+sshx -h=prod-web --pty "top -b -n1"
+```
+
+超时也可以通过环境变量 `SSH_TIMEOUT` 设置。
+
 ## 主机密钥校验 🔐
 
 `sshx` 现在默认与 OpenSSH 一样严格验证主机密钥。程序会读取 `~/.ssh/known_hosts`（或你指定的路径），当主机不存在或密钥发生变化时会立即中断连接并给出修复方案，从源头降低中间人攻击风险。

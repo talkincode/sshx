@@ -1,11 +1,36 @@
 package app
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/talkincode/sshx/internal/sshclient"
 )
+
+// parseTimeout parses a command timeout. It accepts a Go duration string
+// (e.g. "30s", "2m") or a bare integer interpreted as seconds.
+func parseTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("empty timeout")
+	}
+	if d, err := time.ParseDuration(value); err == nil {
+		if d < 0 {
+			return 0, fmt.Errorf("negative timeout: %s", value)
+		}
+		return d, nil
+	}
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs < 0 {
+			return 0, fmt.Errorf("negative timeout: %s", value)
+		}
+		return time.Duration(secs) * time.Second, nil
+	}
+	return 0, fmt.Errorf("invalid timeout %q (use e.g. 30s, 2m, or 30)", value)
+}
 
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
@@ -41,6 +66,13 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 	if os.Getenv("SSH_FORCE") == "true" {
 		config.Force = true
+	}
+	if timeoutStr := os.Getenv("SSH_TIMEOUT"); timeoutStr != "" {
+		if d, err := parseTimeout(timeoutStr); err == nil {
+			config.Timeout = d
+		} else {
+			config.Timeout = -1
+		}
 	}
 
 	sudoKey := os.Getenv("SSH_SUDO_KEY")
@@ -80,6 +112,17 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-safety-check":
 			config.SafetyCheck = false
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--pty":
+			config.UsePTY = true
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
 		case arg == "--sftp":
 			config.Mode = "sftp"
 		case strings.HasPrefix(arg, "--upload="):

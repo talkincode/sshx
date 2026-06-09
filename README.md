@@ -194,6 +194,67 @@ sshx --password-set=192.168.1.100-root
 sshx -h=192.168.1.100 -u=root "df -h"
 ```
 
+## Agent / Scripting Mode
+
+`sshx` is designed to be driven by scripts and AI agents, not just humans. The
+command-execution path gives you a stable, machine-readable contract.
+
+By default:
+
+- **stdout and stderr stay separate** and stream live (no PTY, no terminal
+  control characters mixed in).
+- **The remote command's exit status is propagated** as `sshx`'s own exit code.
+
+### Exit codes
+
+| Code     | Meaning                                                             |
+| -------- | ------------------------------------------------------------------- |
+| `0`      | Command succeeded                                                   |
+| `1..254` | Remote command's exit status, propagated verbatim                  |
+| `255`    | `sshx`-level failure (connect / auth / host-key / timeout / blocked) |
+
+### `--json` structured output
+
+Add `--json` to get a single JSON object on stdout (diagnostics still go to
+stderr, so stdout stays pure):
+
+```bash
+sshx -h=prod-web --json "systemctl is-active nginx"
+```
+
+```json
+{
+  "host": "192.168.1.100",
+  "port": "22",
+  "user": "root",
+  "command": "systemctl is-active nginx",
+  "exit_code": 0,
+  "success": true,
+  "stdout": "active\n",
+  "stderr": "",
+  "duration_ms": 142,
+  "auth_method": "key"
+}
+```
+
+On an `sshx`-level failure the object has `exit_code: -1` and a non-empty
+`error_kind` (one of `timeout`, `auth`, `host_key`, `connect`, `blocked`,
+`exit_missing`, `config`, `error`), so it is always distinguishable from a
+remote command that happens to exit `255`.
+
+### `--timeout` and `--pty`
+
+```bash
+# Kill the command if it runs longer than 30 seconds (also accepts 2m, etc.)
+sshx -h=prod-web --timeout=30s "apt-get update"
+
+# Opt back into a PTY for commands that insist on a terminal
+# (note: a PTY merges stderr into stdout; it cannot be combined with --json)
+sshx -h=prod-web --pty "top -b -n1"
+```
+
+The timeout can also be set via the `SSH_TIMEOUT` environment variable.
+
 ## Host Configuration Management
 
 **NEW!** Manage your frequently used hosts in `~/.sshx/settings.json` for quick access.
