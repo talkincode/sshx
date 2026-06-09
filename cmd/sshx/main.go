@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/talkincode/sshx/internal/app"
 )
@@ -47,9 +48,14 @@ func main() {
 }
 
 // handleVersionFlag prints the version string and reports whether a version
-// flag (--version, -v, or -V) was present in args.
+// flag (--version, -v, or -V) was present in args. The scan stops at the first
+// positional argument so that a token inside the remote command (e.g.
+// `sshx -h=host grep -v foo`) is never mistaken for a version request.
 func handleVersionFlag(args []string) bool {
 	for _, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			break
+		}
 		switch arg {
 		case "--version", "-v", "-V":
 			fmt.Printf("sshx %s\n", Version)

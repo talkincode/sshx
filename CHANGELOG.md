@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `--help` and the no-argument usage screen now print the build version (`Version: <version>`)
+- Version flag detection (`--version`/`-v`/`-V`) now stops at the start of the remote command, so a `-v` token inside an unquoted command is no longer mistaken for a version request
 
 ## [0.0.10] - 2026-06-09
 
