@@ -2,11 +2,14 @@ package app
 
 import "fmt"
 
+// Version is the sshx build version, set by the main package at startup
+// (injected via -ldflags). Defaults to "dev" for go test / go run builds.
+var Version = "dev"
+
 // PrintUsage prints the usage information for the sshx command.
 func PrintUsage() {
+	fmt.Printf("\nSSH & SFTP Remote Tool with Password Manager (Cross-Platform)\nVersion: %s\n", Version)
 	fmt.Println(`
-SSH & SFTP Remote Tool with Password Manager (Cross-Platform)
-
 Usage:
   sshx -h=<host> [options] <command>              # SSH mode
   sshx -h=<host> [options] --upload=<file>        # SFTP upload

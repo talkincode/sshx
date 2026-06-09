@@ -14,6 +14,8 @@ import (
 var Version = "dev"
 
 func main() {
+	app.Version = Version
+
 	if handleVersionFlag(os.Args) {
 		os.Exit(0)
 	}
