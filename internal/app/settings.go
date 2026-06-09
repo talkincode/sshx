@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 const (
@@ -12,6 +14,8 @@ const (
 	SettingsDir = ".sshx"
 	// SettingsFile is the name of the settings file
 	SettingsFile = "settings.json"
+	// DefaultHostType is the default system type assigned to a host
+	DefaultHostType = "linux"
 )
 
 // HostConfig represents a configured host
@@ -105,9 +109,29 @@ func SaveSettings(settings *Settings) error {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	// Write settings file with secure permissions
-	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
+	// Write atomically: write to a temp file in the same directory, then
+	// rename over the destination so a crash mid-write cannot corrupt or
+	// truncate the existing settings file.
+	tmpFile, err := os.CreateTemp(settingsDir, "settings-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp settings file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }() //nolint:errcheck // best-effort cleanup
+
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close() //nolint:errcheck
+		return fmt.Errorf("failed to set settings file permissions: %w", err)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close() //nolint:errcheck
 		return fmt.Errorf("failed to write settings file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to flush settings file: %w", err)
+	}
+	if err := os.Rename(tmpPath, settingsPath); err != nil {
+		return fmt.Errorf("failed to replace settings file: %w", err)
 	}
 
 	return nil
@@ -133,10 +157,10 @@ func AddHost(settings *Settings, host HostConfig) error {
 
 	// Set default values before checking duplicates
 	if host.Port == "" {
-		host.Port = "22"
+		host.Port = sshclient.DefaultSSHPort
 	}
 	if host.User == "" {
-		host.User = "master"
+		host.User = sshclient.DefaultSSHUser
 	}
 
 	// Check for duplicate host names and host+port combinations
@@ -148,7 +172,7 @@ func AddHost(settings *Settings, host HostConfig) error {
 		// Check for duplicate host+port combination
 		existingPort := h.Port
 		if existingPort == "" {
-			existingPort = "22"
+			existingPort = sshclient.DefaultSSHPort
 		}
 		if h.Host == host.Host && existingPort == host.Port {
 			return fmt.Errorf("host with address '%s:%s' already exists (name: '%s')", host.Host, host.Port, h.Name)
@@ -174,9 +198,10 @@ func RemoveHost(settings *Settings, name string) error {
 
 // GetHost retrieves a host configuration by name
 func GetHost(settings *Settings, name string) (*HostConfig, error) {
-	for _, h := range settings.Hosts {
-		if h.Name == name {
-			return &h, nil
+	for i := range settings.Hosts {
+		if settings.Hosts[i].Name == name {
+			host := settings.Hosts[i]
+			return &host, nil
 		}
 	}
 	return nil, fmt.Errorf("host '%s' not found", name)
@@ -191,10 +216,10 @@ func UpdateHost(settings *Settings, host HostConfig) error {
 
 	// Set default values before checking duplicates
 	if host.Port == "" {
-		host.Port = "22"
+		host.Port = sshclient.DefaultSSHPort
 	}
 	if host.User == "" {
-		host.User = "master"
+		host.User = sshclient.DefaultSSHUser
 	}
 
 	// Check for duplicate host+port combination (excluding the host being updated)
@@ -207,7 +232,7 @@ func UpdateHost(settings *Settings, host HostConfig) error {
 		// Check for duplicate host+port combination
 		existingPort := h.Port
 		if existingPort == "" {
-			existingPort = "22"
+			existingPort = sshclient.DefaultSSHPort
 		}
 		if h.Host == host.Host && existingPort == host.Port {
 			return fmt.Errorf("host with address '%s:%s' already exists (name: '%s')", host.Host, host.Port, h.Name)

@@ -10,7 +10,6 @@ import (
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
-		Command:     strings.Join(args[1:], " "),
 		Mode:        "ssh",
 		SafetyCheck: true,
 		Force:       false,
@@ -168,10 +167,6 @@ func ParseArgs(args []string) *sshclient.Config {
 		case arg == "--help":
 			PrintUsage()
 			os.Exit(0)
-		default:
-			if config.Mode == "ssh" && config.Command == "" {
-				config.Command = arg
-			}
 		}
 	}
 

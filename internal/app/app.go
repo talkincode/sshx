@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 
@@ -62,7 +61,7 @@ func Run(args []string) (err error) {
 	}
 
 	// Auto-fill sudo password if needed
-	if strings.Contains(config.Command, "sudo") && config.SudoKey != "" {
+	if sshclient.CommandUsesSudo(config.Command) && config.SudoKey != "" {
 		password, pwdErr := sshclient.GetSudoPassword(config.SudoKey)
 		if pwdErr != nil {
 			logger.GetLogger().Warning("failed to get sudo password from keyring: %v", pwdErr)
@@ -127,12 +126,12 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 
 	// Update config with host settings
 	config.Host = hostConfig.Host
-	if config.Port == "" || config.Port == "22" {
+	if config.Port == "" || config.Port == sshclient.DefaultSSHPort {
 		if hostConfig.Port != "" {
 			config.Port = hostConfig.Port
 		}
 	}
-	if config.User == "" || config.User == "master" {
+	if config.User == "" || config.User == sshclient.DefaultSSHUser {
 		if hostConfig.User != "" {
 			config.User = hostConfig.User
 		}

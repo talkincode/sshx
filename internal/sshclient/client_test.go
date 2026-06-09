@@ -334,3 +334,26 @@ func generateTestPublicKey(t *testing.T) ssh.PublicKey {
 	require.NoError(t, err)
 	return signer.PublicKey()
 }
+
+func TestSudoStdinCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{"leading sudo", "sudo apt update", "sudo -S -p '' apt update"},
+		{"sudo only", "sudo", "sudo -S -p ''"},
+		{"leading whitespace", "  sudo systemctl restart x", "sudo -S -p '' systemctl restart x"},
+		{"single quotes preserved", "sudo sh -c 'echo hi'", "sudo -S -p '' sh -c 'echo hi'"},
+		{"no leading sudo unchanged", "ls && sudo reboot", "ls && sudo reboot"},
+		{"no sudo unchanged", "ls -la", "ls -la"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sudoStdinCommand(tt.command); got != tt.want {
+				t.Errorf("sudoStdinCommand(%q) = %q, want %q", tt.command, got, tt.want)
+			}
+		})
+	}
+}
