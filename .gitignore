@@ -8,4 +8,4 @@ coverage.out
 __debug_bin*
 coverage.*
 bin/*
-sshx
+/sshx

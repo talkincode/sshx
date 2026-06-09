@@ -31,6 +31,7 @@ SSH Options:
   --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
   --json                   Emit a single structured JSON result on stdout
   --pty                    Request a PTY (merges stderr into stdout; off by default)
+  --version                Show version information (alias: -v)
   --help                   Show this help message
 
 Agent / Scripting Mode:

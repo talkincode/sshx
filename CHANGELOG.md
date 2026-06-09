@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Flexible authentication controls**
   - `--no-key`/`--password-only` flag and `SSH_DISABLE_KEY` environment variable to force password-only sessions
   - Automatic password fallback when public key authentication fails on hosts that reject keys
+- **`--version` flag** (alias `-v`) prints the build version, which is injected at build time via `-ldflags "-X main.Version=<version>"`
+- **Agent skill** (`skills/sshx/SKILL.md`) documenting how to drive `sshx` from an AI agent (JSON mode, exit codes, safety checks, host/secret management)
 
 ### Removed
 
@@ -37,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Now displays process exit codes for better debugging
   - Provides command and host context in error messages
 - Updated usage documentation with host management commands
+- `make install` now installs the binary to `~/.local/bin` and the agent skill to `~/.agents/skills/sshx` (previously installed to `$GOPATH/bin` and `~/bin`); `make uninstall` removes both
 
 ### Fixed
 
