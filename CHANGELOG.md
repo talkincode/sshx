@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--help` and the no-argument usage screen now print the build version (`Version: <version>`)
+
 ## [0.0.10] - 2026-06-09
 
 ### Added
