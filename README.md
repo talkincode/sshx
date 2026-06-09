@@ -50,7 +50,7 @@ English | [简体中文](./README_CN.md)
 
 Managing multiple servers means juggling different passwords and repeatedly entering sudo passwords. `sshx` securely stores passwords in your system keyring and auto-fills sudo passwords, so you can run commands across many servers without the password hassle. One command, multiple servers, zero password hassle.
 
-**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Each host can have its own SSH private key. Import from your existing `~/.ssh/config` or add hosts interactively!
+**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Each host can have its own SSH private key. Add hosts interactively!
 
 ## Project Structure
 
@@ -201,10 +201,7 @@ sshx -h=192.168.1.100 -u=root "df -h"
 ### Quick Setup
 
 ```bash
-# Import hosts from your existing ~/.ssh/config
-sshx --host-import
-
-# Or add hosts interactively
+# Add hosts interactively
 sshx --host-add
 
 # Add host with command line options
@@ -261,7 +258,6 @@ Location: `~/.sshx/settings.json`
 ### Host Management Commands
 
 - `--host-add` - Add new host (interactive or with options)
-- `--host-import` - Import hosts from `~/.ssh/config`
 - `--host-list` - List all configured hosts
 - `--host-test=<name>` - Test connection to a host
 - `--host-test-all` - Test connections to all hosts (per-host 10s dial timeout) and show auth method used
@@ -271,7 +267,6 @@ Location: `~/.sshx/settings.json`
 
 - 📝 Store connection details once, use everywhere
 - 🚀 Connect with just a name: `sshx -h=prod-web "command"`
-- 🔄 Import from existing `~/.ssh/config`
 - 🔐 Integrate with password manager for each host
 - ✅ Test connections before use
 

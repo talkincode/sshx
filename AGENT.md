@@ -216,8 +216,6 @@ A living, maintainer-adjustable plan. Items must respect the boundaries in §3.
 
 **Near-term**
 
-- ⬜ Implement `--host-import` (advertised in the README but not yet implemented)
-   to import hosts from `~/.ssh/config`.
 - ⬜ Raise test coverage across `internal/app` and `internal/sshclient`.
 - ⬜ Host config UX: tags/groups, richer `--host-list` output, edit ergonomics.
 - ⬜ Better `--password-list` discovery and consistent keyring key naming.
