@@ -11,9 +11,9 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/talkincode/sshmcp/internal/sshclient"
-	"github.com/talkincode/sshmcp/pkg/errutil"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/internal/sshclient"
+	"github.com/talkincode/sshx/pkg/errutil"
+	"github.com/talkincode/sshx/pkg/logger"
 )
 
 // ErrUsage is returned when only the usage information was printed.

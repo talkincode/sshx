@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/talkincode/sshmcp/internal/sshclient"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/internal/sshclient"
+	"github.com/talkincode/sshx/pkg/logger"
 )
 
 // MCP Protocol types

@@ -1,4 +1,4 @@
-module github.com/talkincode/sshmcp
+module github.com/talkincode/sshx
 
 go 1.24.0
 

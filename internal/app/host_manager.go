@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/talkincode/sshmcp/internal/sshclient"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/internal/sshclient"
+	"github.com/talkincode/sshx/pkg/logger"
 )
 
 const hostTestDialTimeout = 10 * time.Second

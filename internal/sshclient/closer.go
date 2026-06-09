@@ -4,8 +4,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/talkincode/sshmcp/pkg/errutil"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/pkg/errutil"
+	"github.com/talkincode/sshx/pkg/logger"
 )
 
 // CloseIgnore closes the closer and handles errors appropriately.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/talkincode/sshmcp/internal/app"
+	"github.com/talkincode/sshx/internal/app"
 )
 
 func main() {

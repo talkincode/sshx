@@ -25,7 +25,7 @@ const (
 
 const (
 	// DefaultLogDir 默认日志目录
-	DefaultLogDir = "~/.sshmcp"
+	DefaultLogDir = "~/.sshx"
 	// DefaultLogFile 默认日志文件名
 	DefaultLogFile = "sshx.log"
 	// DefaultMaxFiles 默认保留的日志文件数量
@@ -108,7 +108,7 @@ func (l *Logger) initLoggers() {
 }
 
 // EnableFileLogging 启用文件日志
-// logPath: 日志文件路径，如果为空则使用默认路径 ~/.sshmcp/sshx.log
+// logPath: 日志文件路径，如果为空则使用默认路径 ~/.sshx/sshx.log
 func (l *Logger) EnableFileLogging(logPath string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -119,7 +119,7 @@ func (l *Logger) EnableFileLogging(logPath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
-		logDir := filepath.Join(home, ".sshmcp")
+		logDir := filepath.Join(home, ".sshx")
 		logPath = filepath.Join(logDir, DefaultLogFile)
 	}
 

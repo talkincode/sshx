@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/talkincode/sshmcp/pkg/errutil"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/pkg/errutil"
+	"github.com/talkincode/sshx/pkg/logger"
 	"golang.org/x/crypto/ssh"
 )
 

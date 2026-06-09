@@ -8,7 +8,7 @@ echo "=== Testing MCP Debug Logging with --debug Flag ==="
 echo ""
 
 # Setup
-LOG_FILE="$HOME/.sshmcp/sshx.log"
+LOG_FILE="$HOME/.sshx/sshx.log"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARY="$PROJECT_ROOT/bin/sshx"

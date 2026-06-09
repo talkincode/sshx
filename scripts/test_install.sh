@@ -87,7 +87,7 @@ echo ""
 
 # Test 6: Check if GitHub repo URL is correct
 echo "Test 6: Validating GitHub repository URL..."
-expected_repo="talkincode/sshmcp"
+expected_repo="talkincode/sshx"
 if grep -q "REPO=\"${expected_repo}\"" "$PROJECT_ROOT/install.sh"; then
     echo "✓ Correct repository in install.sh"
 else

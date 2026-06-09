@@ -16,26 +16,26 @@ Secure SSH & SFTP Client with MCP Protocol Support
 
 <div align="center">
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/talkincode/sshmcp?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
-[![Release](https://img.shields.io/github/v/release/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshmcp/blob/main/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshmcp?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshmcp)
-[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshmcp)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/talkincode/sshx?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
+[![Release](https://img.shields.io/github/v/release/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshx/blob/main/LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshx?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshx)
+[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
 
-[![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/issues)
-[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/pulls)
+[![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/network/members)
+[![GitHub Issues](https://img.shields.io/github/issues/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/issues)
+[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/pulls)
 
-[![GitHub Downloads](https://img.shields.io/github/downloads/talkincode/sshmcp/total?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/releases)
-[![GitHub Contributors](https://img.shields.io/github/contributors/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/graphs/contributors)
-[![Last Commit](https://img.shields.io/github/last-commit/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp/commits/main)
-[![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshmcp?style=flat-square&logo=github)](https://github.com/talkincode/sshmcp)
+[![GitHub Downloads](https://img.shields.io/github/downloads/talkincode/sshx/total?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
+[![GitHub Contributors](https://img.shields.io/github/contributors/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/graphs/contributors)
+[![Last Commit](https://img.shields.io/github/last-commit/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/commits/main)
+[![Repo Size](https://img.shields.io/github/repo-size/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx)
 
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshmcp/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square&logo=linux&logoColor=white)](https://github.com/talkincode/sshx/releases)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-orange?style=flat-square)](https://modelcontextprotocol.io)
 [![Made with Go](https://img.shields.io/badge/Made%20with-Go-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshmcp/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/talkincode/sshx/pulls)
 
 English | [简体中文](./README_CN.md)
 
@@ -43,7 +43,7 @@ English | [简体中文](./README_CN.md)
 
 ---
 
-# SSHMCP
+# SSHX
 
 `sshx` provides a barrier-free SSH command-line client while implementing the MCP (Model Context Protocol) interface, enabling AI assistants to easily invoke remote SSH/SFTP functionality.
 
@@ -51,7 +51,7 @@ English | [简体中文](./README_CN.md)
 
 Managing multiple servers means juggling different passwords, repeatedly entering sudo passwords, and manually executing SSH commands in AI assistants. `sshx` securely stores passwords in your system keyring, auto-fills sudo passwords, and enables AI assistants to directly operate remote servers through MCP protocol. One command, multiple servers, zero password hassle.
 
-**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshmcp/settings.json` and connect with just a name instead of typing full connection details every time. Import from your existing `~/.ssh/config` or add hosts interactively!
+**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Import from your existing `~/.ssh/config` or add hosts interactively!
 
 ## Project Structure
 
@@ -76,17 +76,17 @@ If you have Go 1.21+ installed, you can use Go's built-in tools:
 
 ```bash
 # Run the latest version
-go run github.com/talkincode/sshmcp/cmd/sshx@latest --help
+go run github.com/talkincode/sshx/cmd/sshx@latest --help
 
 # Run specific version
-go run github.com/talkincode/sshmcp/cmd/sshx@v0.0.6 -h=192.168.1.100 "uptime"
+go run github.com/talkincode/sshx/cmd/sshx@v0.0.6 -h=192.168.1.100 "uptime"
 ```
 
 #### Install globally
 
 ```bash
 # Install latest version to $GOPATH/bin
-go install github.com/talkincode/sshmcp/cmd/sshx@latest
+go install github.com/talkincode/sshx/cmd/sshx@latest
 
 # Then use it anywhere
 sshx --help
@@ -100,13 +100,13 @@ sshx -h=192.168.1.100 "uptime"
 #### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/talkincode/sshmcp/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
 Or download and run:
 
 ```bash
-wget https://raw.githubusercontent.com/talkincode/sshmcp/main/install.sh
+wget https://raw.githubusercontent.com/talkincode/sshx/main/install.sh
 chmod +x install.sh
 ./install.sh
 ```
@@ -122,13 +122,13 @@ Install specific version:
 Open PowerShell as Administrator and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/talkincode/sshmcp/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/talkincode/sshx/main/install.ps1 | iex
 ```
 
 Or download and run:
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/talkincode/sshmcp/main/install.ps1" -OutFile "install.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/talkincode/sshx/main/install.ps1" -OutFile "install.ps1"
 .\install.ps1
 ```
 
@@ -140,7 +140,7 @@ Install specific version:
 
 ### Manual Installation
 
-Download pre-built binaries from [Releases](https://github.com/talkincode/sshmcp/releases):
+Download pre-built binaries from [Releases](https://github.com/talkincode/sshx/releases):
 
 **Linux / macOS:**
 
@@ -169,8 +169,8 @@ sshx --help
 
 ```bash
 # Clone repository
-git clone https://github.com/talkincode/sshmcp.git
-cd sshmcp
+git clone https://github.com/talkincode/sshx.git
+cd sshx
 
 # Build command-line tool
 go build -o bin/sshx ./cmd/sshx
@@ -200,7 +200,7 @@ sshx mcp-stdio
 
 ## Host Configuration Management
 
-**NEW!** Manage your frequently used hosts in `~/.sshmcp/settings.json` for quick access.
+**NEW!** Manage your frequently used hosts in `~/.sshx/settings.json` for quick access.
 
 ### Quick Setup
 
@@ -229,7 +229,7 @@ sshx --host-test-all
 
 ### Configuration File Format
 
-Location: `~/.sshmcp/settings.json`
+Location: `~/.sshx/settings.json`
 
 ```json
 {
@@ -462,7 +462,7 @@ export SUDO_PASSWORD=your_sudo_password
 
 - `sshx` now prioritizes SSH keys and automatically falls back to password authentication when the server rejects your key (for example when a host only allows passwords). As long as a password is available, the client will transparently retry with a password-only session.
 - Use `--no-key` (alias `--password-only`) to disable key authentication for a single command. You can re-enable it by supplying `--key=<path>` again.
-- Set `SSH_DISABLE_KEY=true` in your environment to permanently disable key authentication (useful on hosts that never accept keys). This override is respected even if a default key path exists in `~/.sshmcp/settings.json`.
+- Set `SSH_DISABLE_KEY=true` in your environment to permanently disable key authentication (useful on hosts that never accept keys). This override is respected even if a default key path exists in `~/.sshx/settings.json`.
 - When key auth is enabled and no explicit path is provided, `sshx` still auto-loads `~/.ssh/id_rsa` (or the path specified in settings) before falling back to passwords.
 
 #### Log Level Configuration
@@ -493,9 +493,9 @@ In MCP stdio mode, to avoid interfering with JSON-RPC communication, logs are wr
 # Start MCP server with --debug flag
 sshx mcp-stdio --debug
 
-# Log file location: ~/.sshmcp/sshx.log
+# Log file location: ~/.sshx/sshx.log
 # You can monitor logs in real-time
-tail -f ~/.sshmcp/sshx.log
+tail -f ~/.sshx/sshx.log
 ```
 
 **Method 2: Using environment variable**
@@ -505,9 +505,9 @@ tail -f ~/.sshmcp/sshx.log
 export SSHX_LOG_LEVEL=debug
 sshx mcp-stdio
 
-# Log file location: ~/.sshmcp/sshx.log
+# Log file location: ~/.sshx/sshx.log
 # You can monitor logs in real-time
-tail -f ~/.sshmcp/sshx.log
+tail -f ~/.sshx/sshx.log
 ```
 
 **Note:** The `--debug` flag takes precedence over the environment variable.
@@ -606,10 +606,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**[Documentation](https://github.com/talkincode/sshmcp/wiki)** •
-**[Issues](https://github.com/talkincode/sshmcp/issues)** •
-**[Discussions](https://github.com/talkincode/sshmcp/discussions)** •
-**[Releases](https://github.com/talkincode/sshmcp/releases)**
+**[Documentation](https://github.com/talkincode/sshx/wiki)** •
+**[Issues](https://github.com/talkincode/sshx/issues)** •
+**[Discussions](https://github.com/talkincode/sshx/discussions)** •
+**[Releases](https://github.com/talkincode/sshx/releases)**
 
 Made with ❤️ by [talkincode](https://github.com/talkincode)
 

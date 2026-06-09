@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$Repo = "talkincode/sshmcp"
+$Repo = "talkincode/sshx"
 $BinaryName = "sshx.exe"
 
 # Functions

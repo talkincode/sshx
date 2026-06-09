@@ -7,8 +7,8 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/talkincode/sshmcp/internal/sshclient"
-	"github.com/talkincode/sshmcp/pkg/logger"
+	"github.com/talkincode/sshx/internal/sshclient"
+	"github.com/talkincode/sshx/pkg/logger"
 )
 
 // HandlePasswordManagement handles all password management operations.

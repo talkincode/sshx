@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/talkincode/sshmcp/internal/sshclient"
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 // TestExecuteHostTest_SingleClient tests that executeHostTest uses only one client
