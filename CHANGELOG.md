@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-06-13
+
 ### Security
 
 - `--password-get` no longer prints the stored secret to an interactive terminal (where it would linger in scrollback). On a TTY it now only confirms the key exists; the raw value is emitted **only** when stdout is piped or redirected (e.g. `PW=$(sshx --password-get=key)` or `sshx --password-get=key | pbcopy`), with no decoration for clean capture
