@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--help` and the no-argument usage screen now print the build version (`Version: <version>`)
 - Version flag detection (`--version`/`-v`/`-V`) now stops at the start of the remote command, so a `-v` token inside an unquoted command is no longer mistaken for a version request
 
+### Documentation
+
+- Agent skill (`skills/sshx/SKILL.md`): clarified that the sudo keyring key is resolved per host (named hosts use their own `password_key`; `-pk=`/`SSH_SUDO_KEY` override) and `master` is only the last-resort fallback — so agents no longer assume every host uses `master`
+
 ## [0.0.10] - 2026-06-09
 
 ### Added

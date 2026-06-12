@@ -78,17 +78,37 @@ sshx -h=prod-web --pty "top -b -n1"
 
 ### sudo with auto-filled password
 
-If the command uses `sudo`, sshx fetches the password from the keyring (key set by
-`-pk=`/`--password-key=`, default `master`) and feeds it over stdin — never
-interpolated into the command string.
+If the command contains `sudo`, sshx pulls the password from the OS keyring and
+feeds it over stdin (never interpolated into the command string). The keyring key
+is **not always `master`** — it is resolved per invocation in this order:
+
+1. `-pk=<key>` / `--password-key=<key>` on the command line (highest priority).
+2. The `SSH_SUDO_KEY` environment variable.
+3. The named host's own `password_key` from `~/.sshx/settings.json`, applied
+   automatically when you address the host by name and no `-pk=`/`SSH_SUDO_KEY` is set.
+4. `master`, only as the final fallback when nothing above is configured.
+
+So **do not assume every host uses `master`.** Each server can (and usually should)
+have its own keyring entry. For a named host the right key is chosen automatically;
+for an ad-hoc IP, pass `-pk=<key>` matching the entry that holds that host's secret.
 
 ```bash
-# Uses keyring entry "master".
-sshx -h=192.168.1.100 "sudo systemctl status docker"
+# Named host: sshx auto-uses prod-web's configured password_key — no -pk needed.
+sshx -h=prod-web "sudo systemctl status docker"
 
-# Per-server password keys (same username, different secrets).
+# Ad-hoc IP: name the keyring key explicitly (don't rely on "master").
 sshx -h=192.168.1.100 -pk=server-A "sudo systemctl restart nginx"
 sshx -h=192.168.1.101 -pk=server-B "sudo systemctl restart nginx"
+
+# Falls back to the "master" entry only when no per-host key and no -pk are given.
+sshx -h=10.0.0.9 "sudo whoami"
+```
+
+Check what a host is set to use, and that the secret exists, before relying on it:
+
+```bash
+sshx --host-list                 # shows each host's Password Key
+sshx --password-check=server-A   # verify the keyring entry exists
 ```
 
 ## Safety checks (block destructive commands)
@@ -174,5 +194,7 @@ sshx --help      # full reference
 1. Use `--json` and branch on `success` / `error_kind`, not on stdout text.
 2. Add `--timeout=` to anything that can hang (package installs, network ops).
 3. Prefer named hosts; store secrets in the keyring, never inline in shared scripts.
+   Don't assume the sudo key is `master` — named hosts resolve their own `password_key`;
+   for ad-hoc IPs pass `-pk=<key>`. Use `--host-list` to see each host's key.
 4. Trust the safety check — only `--force` a blocked command when you are certain.
 5. Treat `exit_code` 1..254 as the remote program's status; `255` / `-1` is an sshx error.
