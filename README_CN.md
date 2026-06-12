@@ -332,15 +332,16 @@ sshx --password-list
 #### 获取密码
 
 ```bash
-# 获取存储的密码（用于调试）
-sshx --password-get=master
+# 读取已存储的密码。在终端中 sshx 只确认该 key 是否存在；
+# 如需取出明文，请将 stdout 通过管道传出——此时原样输出，无任何修饰。
+PW=$(sshx --password-get=master)        # 捕获到变量
+sshx --password-get=master | pbcopy     # 复制到剪贴板（macOS）
 
-# 输出示例：
-# ✓ Password retrieved from system keyring
-#   Service: sshx
-#   Key: master
-#
-# Password: yourpassword
+# 终端下的输出示例（不会把密码打印到终端）：
+# ✓ Password exists for key 'master' (service: sshx)
+#   Not printing the secret to a terminal. To use it, pipe stdout:
+#     sshx --password-get=master | pbcopy
+#     sshx --password-get=master | cat
 ```
 
 #### 删除密码

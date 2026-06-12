@@ -162,7 +162,7 @@ Windows Credential Manager) under service name `sshx`.
 ```bash
 sshx --password-set=master            # prompt (no echo) — preferred
 sshx --password-set=master:secret     # inline (convenient but warned against)
-sshx --password-get=master            # read back
+sshx --password-get=master            # confirm exists on a TTY; pipe (e.g. `| pbcopy`) to emit the raw value
 sshx --password-check=server-A        # exists? (alias: --password-exists)
 sshx --password-list                  # common keys (alias: --password-ls)
 sshx --password-delete=server-A       # delete (alias: --password-del)
