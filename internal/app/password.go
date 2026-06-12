@@ -80,12 +80,22 @@ func getPassword(serviceName, key string) error {
 		return fmt.Errorf("failed to get password: %w", err)
 	}
 
-	logger.GetLogger().Success("Password retrieved from system keyring")
-	logger.GetLogger().Info("  Service: %s", serviceName)
-	logger.GetLogger().Info("  Key: %s", key)
-	fmt.Printf("\nPassword: %s\n", password)
-	logger.GetLogger().Warning("Password printed in plaintext; clear your terminal scrollback if it is sensitive.")
+	// Never dump a secret onto an interactive terminal, where it would linger in
+	// scrollback and shoulder-surfing range. sshx already uses the keyring
+	// internally (it auto-fills sudo over stdin), so the plaintext value is only
+	// needed when handing it to another program. When stdout is a pipe or file we
+	// emit just the raw value (no decoration, no trailing newline) so it can be
+	// captured cleanly, e.g. PW=$(sshx --password-get=key) or `... | pbcopy`.
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		logger.GetLogger().Success("Password exists for key '%s' (service: %s)", key, serviceName)
+		logger.GetLogger().Info("Not printing the secret to a terminal. To use it, pipe stdout:")
+		logger.GetLogger().Info("  sshx --password-get=%s | pbcopy   # copy to clipboard (macOS)", key)
+		logger.GetLogger().Info("  sshx --password-get=%s | cat      # show on screen if you must", key)
+		return nil
+	}
 
+	logger.GetLogger().Warning("Emitting the plaintext password for key '%s' on stdout.", key)
+	fmt.Print(password)
 	return nil
 }
 
@@ -173,7 +183,7 @@ func listPasswords() error {
 	fmt.Println("Custom password keys you've set (like 'test-password') are stored")
 	fmt.Println("but not listed here due to keyring API limitations.")
 	fmt.Println("\nTo check a custom key:")
-	fmt.Println("  sshx --password-get=<your-key-name>")
+	fmt.Println("  sshx --password-check=<your-key-name>")
 	fmt.Println("\nPlatform-specific commands to list all:")
 	if isMacOS() {
 		fmt.Println("  macOS: security find-generic-password -s sshx")

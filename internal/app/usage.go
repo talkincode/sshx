@@ -77,7 +77,7 @@ SFTP Options:
 Password Management (Cross-Platform):
   --password-set=<key>[:<password>]   Set password in system keyring
                                       If password omitted, will prompt
-  --password-get=<key>                Get password from keyring
+  --password-get=<key>                Output the password (raw value only when piped; on a terminal just confirms it exists)
   --password-check=<key>              Check if password exists (alias: --password-exists)
   --password-delete=<key>             Delete password from keyring (alias: --password-del)
   --password-list                     List common password keys (alias: --password-ls)

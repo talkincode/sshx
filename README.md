@@ -398,15 +398,16 @@ sshx --password-list
 #### Get Password
 
 ```bash
-# Get stored password (for debugging)
-sshx --password-get=master
+# Read a stored password. On a terminal sshx only confirms the key exists; to
+# obtain the value, pipe stdout — it is emitted raw, with no decoration.
+PW=$(sshx --password-get=master)        # capture into a variable
+sshx --password-get=master | pbcopy     # copy to clipboard (macOS)
 
-# Output example:
-# ✓ Password retrieved from system keyring
-#   Service: sshx
-#   Key: master
-#
-# Password: yourpassword
+# Interactive output example (the secret is NOT printed to the terminal):
+# ✓ Password exists for key 'master' (service: sshx)
+#   Not printing the secret to a terminal. To use it, pipe stdout:
+#     sshx --password-get=master | pbcopy
+#     sshx --password-get=master | cat
 ```
 
 #### Delete Password
