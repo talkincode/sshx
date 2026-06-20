@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,41 +131,59 @@ func TestClassifyError(t *testing.T) {
 // even though the host is never reachable.
 func TestRun_BlockedCommandShortCircuits(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
 	// 192.0.2.1 is RFC 5737 TEST-NET-1: if validation did not short-circuit,
 	// the dial would block instead of returning instantly.
-	runErr := Run([]string{"sshx", "-h=192.0.2.1", "--json", "rm -rf /"})
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("failed to copy pipe output: %v", copyErr)
-	}
-
-	if !errors.Is(runErr, ErrReported) {
-		t.Fatalf("expected ErrReported, got %v", runErr)
-	}
-	var result map[string]any
-	if jErr := json.Unmarshal(buf.Bytes(), &result); jErr != nil {
-		t.Fatalf("invalid JSON output %q: %v", buf.String(), jErr)
-	}
+	result := runReportedJSON(t, []string{"sshx", "-h=192.0.2.1", "--json", "rm -rf /"})
 	if result["error_kind"] != "blocked" {
-		t.Errorf("expected error_kind=blocked, got %v (full: %s)", result["error_kind"], buf.String())
+		t.Errorf("expected error_kind=blocked, got %v", result["error_kind"])
 	}
 	if code, ok := result["exit_code"].(float64); !ok || code != -1 {
 		t.Errorf("expected exit_code=-1, got %v", result["exit_code"])
 	}
 	if result["success"] != false {
 		t.Errorf("expected success=false, got %v", result["success"])
+	}
+}
+
+func TestRun_JSONConfigFailuresDoNotConnect(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		wantErrorText string
+	}{
+		{
+			name:          "pty conflicts with json",
+			args:          []string{"sshx", "-h=192.0.2.1", "--json", "--pty", "--no-audit", "uptime"},
+			wantErrorText: "--pty cannot be combined with --json",
+		},
+		{
+			name:          "invalid timeout",
+			args:          []string{"sshx", "-h=192.0.2.1", "--json", "--timeout=banana", "--no-audit", "uptime"},
+			wantErrorText: "invalid --timeout value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			result := runReportedJSON(t, tt.args)
+			if result["error_kind"] != "config" {
+				t.Fatalf("expected error_kind=config, got %v", result["error_kind"])
+			}
+			if result["success"] != false {
+				t.Errorf("expected success=false, got %v", result["success"])
+			}
+			if code, ok := result["exit_code"].(float64); !ok || code != -1 {
+				t.Errorf("expected exit_code=-1, got %v", result["exit_code"])
+			}
+			errText, ok := result["error"].(string)
+			if !ok {
+				t.Fatalf("expected error string, got %T", result["error"])
+			}
+			if !strings.Contains(errText, tt.wantErrorText) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErrorText, errText)
+			}
+		})
 	}
 }
 
@@ -360,6 +379,37 @@ func runDryRunJSON(t *testing.T, args []string) map[string]any {
 
 	if runErr != nil {
 		t.Fatalf("Run() error = %v, output=%s", runErr, buf.String())
+	}
+	var result map[string]any
+	if jErr := json.Unmarshal(buf.Bytes(), &result); jErr != nil {
+		t.Fatalf("invalid JSON output %q: %v", buf.String(), jErr)
+	}
+	return result
+}
+
+func runReportedJSON(t *testing.T, args []string) map[string]any {
+	t.Helper()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdout = w
+
+	runErr := Run(args)
+
+	if closeErr := w.Close(); closeErr != nil {
+		t.Logf("failed to close pipe writer: %v", closeErr)
+	}
+	os.Stdout = old
+	var buf bytes.Buffer
+	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
+		t.Logf("failed to copy pipe output: %v", copyErr)
+	}
+
+	if !errors.Is(runErr, ErrReported) {
+		t.Fatalf("expected ErrReported, got %v, output=%s", runErr, buf.String())
 	}
 	var result map[string]any
 	if jErr := json.Unmarshal(buf.Bytes(), &result); jErr != nil {
