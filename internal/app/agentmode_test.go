@@ -244,6 +244,7 @@ func TestRun_DryRunMissingHostDoesNotPlanConnection(t *testing.T) {
 func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	passwordKeyName := "prod-web-sudo" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	err := SaveSettings(&Settings{
 		Key: "/keys/default.pem",
 		Hosts: []HostConfig{
@@ -253,7 +254,7 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 				Port:        "2222",
 				User:        "root",
 				Key:         "/keys/prod-web.pem",
-				PasswordKey: "prod-web-sudo",
+				PasswordKey: passwordKeyName,
 			},
 		},
 	})
@@ -281,7 +282,7 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 	if result["uses_sudo"] != true {
 		t.Errorf("expected uses_sudo=true, got %v", result["uses_sudo"])
 	}
-	if result["sudo_key"] != "prod-web-sudo" {
+	if result["sudo_key"] != passwordKeyName {
 		t.Errorf("expected per-host sudo key, got %v", result["sudo_key"])
 	}
 	if result["would_read_secret"] != true {
@@ -292,6 +293,7 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	passwordKeyName := "prod-web-password" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	err := SaveSettings(&Settings{
 		Key: "/keys/default.pem",
 		Hosts: []HostConfig{
@@ -301,7 +303,7 @@ func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 				Port:        "2222",
 				User:        "root",
 				Key:         "/keys/prod-web.pem",
-				PasswordKey: "prod-web-password",
+				PasswordKey: passwordKeyName,
 			},
 		},
 	})
@@ -323,7 +325,7 @@ func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	if result["key_path"] != "/keys/prod-web.pem" {
 		t.Errorf("expected configured host key path, got %v", result["key_path"])
 	}
-	if result["sudo_key"] != "prod-web-password" {
+	if result["sudo_key"] != passwordKeyName {
 		t.Errorf("expected configured password key, got %v", result["sudo_key"])
 	}
 	if result["would_connect"] != true {
