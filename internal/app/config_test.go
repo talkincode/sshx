@@ -133,6 +133,21 @@ func TestParseArgs_NoSafetyCheck(t *testing.T) {
 	}
 }
 
+func TestParseArgs_DryRun(t *testing.T) {
+	args := []string{"sshx", "-h=host", "--dry-run", "--json", "uptime"}
+	config := ParseArgs(args)
+
+	if !config.DryRun {
+		t.Errorf("Expected DryRun to be true")
+	}
+	if !config.JSONOutput {
+		t.Errorf("Expected JSONOutput to be true")
+	}
+	if config.Command != "uptime" {
+		t.Errorf("Expected command 'uptime', got %s", config.Command)
+	}
+}
+
 func TestParseArgs_SFTPUpload(t *testing.T) {
 	args := []string{"sshx", "-h=host", "--upload=local.txt", "--to=/remote/path.txt"}
 	config := ParseArgs(args)

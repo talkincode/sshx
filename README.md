@@ -63,7 +63,8 @@ Managing multiple servers means juggling different passwords and repeatedly ente
 1. Cross-platform SSH/SFTP operations (supports sudo auto-fill).
 2. Password management (Keychain / Secret Service / Credential Manager).
 3. Host configuration management with per-host SSH keys.
-4. Script execution and command security validation.
+4. Dry-run execution plan preview for humans and agents.
+5. Script execution and command security validation.
 
 ## Installation
 
@@ -248,6 +249,22 @@ On an `sshx`-level failure the object has `exit_code: -1` and a non-empty
 `error_kind` (one of `timeout`, `auth`, `host_key`, `connect`, `blocked`,
 `exit_missing`, `config`, `error`), so it is always distinguishable from a
 remote command that happens to exit `255`.
+
+### `--dry-run` execution plan preview
+
+Add `--dry-run` to see how `sshx` would interpret an invocation before it opens
+an SSH connection, executes a command, performs an SFTP operation, reads keyring
+secrets, updates `known_hosts`, or writes settings. Combine it with `--json` for
+agent-readable output:
+
+```bash
+sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
+```
+
+Dry-run is a local plan preview. It reports host resolution, mode/action,
+sudo-key selection, safety-check result, and whether a real run would connect,
+execute, read a secret, or mutate state. It does **not** prove the remote command
+would succeed.
 
 ### `--timeout` and `--pty`
 

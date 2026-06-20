@@ -112,6 +112,8 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-safety-check":
 			config.SafetyCheck = false
+		case arg == "--dry-run":
+			config.DryRun = true
 		case arg == "--json":
 			config.JSONOutput = true
 		case arg == "--pty":

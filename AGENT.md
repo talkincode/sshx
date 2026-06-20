@@ -36,6 +36,8 @@ The core value proposition:
    auth fallback, and helpful error messages.
 5. **Multi-server ergonomics** — per-host SSH keys and per-host/per-server
    password keys so one tool covers a whole fleet.
+6. **Execution preview** — `--dry-run` explains the local execution plan without
+   connecting, executing, reading keyring secrets, or mutating state.
 
 ## 3. Scope & Boundaries (Non-Goals)
 
@@ -74,6 +76,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   settings.go             → ~/.sshx/settings.json load/save (atomic, 0600)
   password.go             → keyring-backed password get/set/list + secure input
   usage.go                → PrintUsage() help text (keep in sync with flags)
+  dryrun.go               → --dry-run local execution plan preview
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   validate.go             → command safety checks + CommandUsesSudo

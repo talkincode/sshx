@@ -32,6 +32,7 @@ SSH Options:
   -i, --key=PATH           SSH private key path (default: ~/.ssh/id_rsa)
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
                            Used only when the remote command starts with sudo
+  --dry-run                Print the local execution plan without side effects
   --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
   --json                   Emit a single structured JSON result on stdout
   --pty                    Request a PTY (merges stderr into stdout; off by default)
@@ -68,6 +69,18 @@ Sudo Auto-fill:
   This keeps keyring lookup, stdin password injection, and future audit fields
   on one clear rule. Put sudo at the beginning of the remote command when you
   want sshx to auto-fill it.
+
+Dry-run Plan Preview:
+  Add --dry-run to see how sshx would interpret an invocation before any
+  connection, command execution, keyring secret lookup, known_hosts mutation, or
+  settings write. Use --json with --dry-run for an agent-readable plan.
+
+  Examples:
+    sshx -h=prod-web --dry-run "sudo systemctl restart nginx"
+    sshx -h=prod-web --dry-run --json --upload=local.txt --to=/tmp/local.txt
+
+  Dry-run is a local plan preview only. It does not prove the remote command
+  would succeed.
 
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
@@ -145,6 +158,9 @@ SSH Examples:
 
   # Structured JSON output for scripts/agents (one object on stdout)
   sshx -h=192.168.1.100 --json "systemctl is-active nginx"
+
+  # Preview the execution plan without connecting or reading secrets
+  sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
   # Bound a command with a timeout (kills it after 30s)
   sshx -h=192.168.1.100 --timeout=30s "apt-get update"
@@ -251,6 +267,7 @@ Host Management Examples:
 Note:
   - SSH key authentication is tried first, then password authentication
   - Sudo password is auto-filled only when the remote command starts with sudo
+  - Dry-run never connects, executes, reads keyring secrets, or writes state
   - SFTP operations use the same SSH connection
   - Password manager works across macOS/Linux/Windows
   - Default user: master, Default sudo key: master
