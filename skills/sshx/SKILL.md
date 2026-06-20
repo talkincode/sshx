@@ -56,6 +56,25 @@ Dry-run reports host resolution, mode/action, sudo key selection, safety-check
 status, and whether a real run would connect, execute, read a secret, or mutate
 state. It does not simulate remote command success.
 
+## Audit trail
+
+Every non-dry-run invocation writes one JSONL audit event by default:
+`~/.sshx/audit/sshx-YYYY-MM-DD.jsonl`.
+
+Use `--audit-output=<dir>` when the audit record should live with a project or
+incident folder:
+
+```bash
+sshx -h=prod-web --audit-output=./.sshx-audit --json "systemctl reload nginx"
+```
+
+Audit events record metadata and outcomes such as mode/action, host resolution,
+sudo/keyring decisions, safety status, auth method, exit code, and error kind.
+They do not record plaintext passwords, private key contents, or stdout/stderr.
+Command text is included but best-effort redacted for password/token-style
+arguments. Use `--no-audit` only when the user explicitly wants no local audit
+event for that invocation.
+
 ## Exit codes (and how to read failures)
 
 | Exit code | Meaning                                                       |

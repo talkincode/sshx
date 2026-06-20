@@ -64,6 +64,10 @@ type Config struct {
 	// DryRun emits a local execution plan without connecting, executing, reading
 	// keyring secrets, or mutating local/remote state.
 	DryRun bool
+	// AuditEnabled controls whether sshx writes a local structured audit event.
+	AuditEnabled bool
+	// AuditOutput overrides the directory where audit JSONL files are written.
+	AuditOutput string
 
 	SafetyCheck bool
 	Force       bool

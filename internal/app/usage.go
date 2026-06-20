@@ -33,6 +33,8 @@ SSH Options:
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
                            Used only when the remote command starts with sudo
   --dry-run                Print the local execution plan without side effects
+  --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
+  --no-audit               Disable local audit event writing for this invocation
   --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
   --json                   Emit a single structured JSON result on stdout
   --pty                    Request a PTY (merges stderr into stdout; off by default)
@@ -81,6 +83,17 @@ Dry-run Plan Preview:
 
   Dry-run is a local plan preview only. It does not prove the remote command
   would succeed.
+
+Audit Trail:
+  sshx writes one structured JSONL audit event per non-dry-run invocation to
+  ~/.sshx/audit/sshx-YYYY-MM-DD.jsonl by default. Use --audit-output=<dir> to
+  save audit events next to a project or incident record.
+
+  Audit events record metadata and outcomes such as mode/action, host
+  resolution, sudo/keyring decisions, safety status, auth method, exit code, and
+  error kind. They do not record plaintext passwords, private key contents, or
+  stdout/stderr. Command text is best-effort redacted for password/token-style
+  arguments.
 
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
@@ -141,6 +154,8 @@ Environment Variables (.env):
   SSH_NO_SAFETY_CHECK   Disable safety checks (true/false)
   SSH_FORCE             Force execution mode (true/false)
   SSH_TIMEOUT           Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
+  SSHX_AUDIT_OUTPUT     Audit output directory (default: ~/.sshx/audit)
+  SSHX_NO_AUDIT         Disable audit writing (true/false)
 
 SSH Examples:
   # Execute simple command (default user: master)
@@ -161,6 +176,9 @@ SSH Examples:
 
   # Preview the execution plan without connecting or reading secrets
   sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
+
+  # Save audit events for this project
+  sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
 
   # Bound a command with a timeout (kills it after 30s)
   sshx -h=192.168.1.100 --timeout=30s "apt-get update"
@@ -268,6 +286,7 @@ Note:
   - SSH key authentication is tried first, then password authentication
   - Sudo password is auto-filled only when the remote command starts with sudo
   - Dry-run never connects, executes, reads keyring secrets, or writes state
+  - Audit events are JSONL files under ~/.sshx/audit by default
   - SFTP operations use the same SSH connection
   - Password manager works across macOS/Linux/Windows
   - Default user: master, Default sudo key: master

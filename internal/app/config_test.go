@@ -148,6 +148,21 @@ func TestParseArgs_DryRun(t *testing.T) {
 	}
 }
 
+func TestParseArgs_AuditOptions(t *testing.T) {
+	config := ParseArgs([]string{"sshx", "-h=host", "--audit-output=/tmp/sshx-audit", "uptime"})
+	if !config.AuditEnabled {
+		t.Error("Expected audit to be enabled by default")
+	}
+	if config.AuditOutput != "/tmp/sshx-audit" {
+		t.Errorf("Expected audit output path, got %q", config.AuditOutput)
+	}
+
+	config = ParseArgs([]string{"sshx", "-h=host", "--no-audit", "uptime"})
+	if config.AuditEnabled {
+		t.Error("Expected audit to be disabled by --no-audit")
+	}
+}
+
 func TestParseArgs_SFTPUpload(t *testing.T) {
 	args := []string{"sshx", "-h=host", "--upload=local.txt", "--to=/remote/path.txt"}
 	config := ParseArgs(args)

@@ -35,10 +35,11 @@ func parseTimeout(value string) (time.Duration, error) {
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
-		Mode:        "ssh",
-		SafetyCheck: true,
-		Force:       false,
-		UseKeyAuth:  true,
+		Mode:         "ssh",
+		SafetyCheck:  true,
+		Force:        false,
+		UseKeyAuth:   true,
+		AuditEnabled: true,
 	}
 
 	if password := os.Getenv("SSH_PASSWORD"); password != "" {
@@ -53,6 +54,12 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 	if knownHosts := os.Getenv("SSH_KNOWN_HOSTS"); knownHosts != "" {
 		config.KnownHostsPath = knownHosts
+	}
+	if auditOutput := os.Getenv("SSHX_AUDIT_OUTPUT"); auditOutput != "" {
+		config.AuditOutput = auditOutput
+	}
+	if noAudit := os.Getenv("SSHX_NO_AUDIT"); strings.EqualFold(noAudit, "true") || noAudit == "1" {
+		config.AuditEnabled = false
 	}
 	if acceptUnknown := os.Getenv("SSH_ACCEPT_UNKNOWN_HOST"); strings.EqualFold(acceptUnknown, "true") || acceptUnknown == "1" {
 		config.AcceptUnknownHost = true
@@ -114,6 +121,10 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.SafetyCheck = false
 		case arg == "--dry-run":
 			config.DryRun = true
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
 		case arg == "--json":
 			config.JSONOutput = true
 		case arg == "--pty":

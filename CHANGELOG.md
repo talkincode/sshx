@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local structured audit events are written by default to
+  `~/.sshx/audit/sshx-YYYY-MM-DD.jsonl`. Use `--audit-output=<dir>` to choose a
+  directory or `--no-audit` / `SSHX_NO_AUDIT=true` to disable audit writing.
+  Audit events omit stdout/stderr and never store plaintext passwords or private
+  key contents.
 - `--dry-run` prints a local execution plan without connecting, executing,
   reading keyring secrets, mutating `known_hosts`, or writing local/remote
   state. Combine with `--json` for agent-readable plan output.

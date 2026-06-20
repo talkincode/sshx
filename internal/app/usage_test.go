@@ -40,6 +40,7 @@ func TestPrintUsage(t *testing.T) {
 		"SSH Options:",
 		"Sudo Auto-fill:",
 		"Dry-run Plan Preview:",
+		"Audit Trail:",
 		"Safety Options:",
 		"SFTP Options:",
 		"Password Management",
@@ -63,6 +64,7 @@ func TestPrintUsage(t *testing.T) {
 		"--password-set=",
 		"--password-get=",
 		"--dry-run",
+		"--audit-output",
 		"--force",
 		"--no-safety-check",
 	}
@@ -89,6 +91,7 @@ func TestPrintUsage(t *testing.T) {
 		"remote command starts with sudo",
 		"Non-leading sudo is not auto-filled",
 		"Dry-run never connects",
+		"Audit events are JSONL",
 	}
 
 	for _, keyword := range safetyKeywords {
@@ -165,6 +168,7 @@ func TestPrintUsage_Examples(t *testing.T) {
 		`sshx --password-set=master`,
 		`--upload=local.txt --to=/tmp/remote.txt`,
 		`--download=/var/log/app.log`,
+		`--audit-output=./.sshx-audit`,
 	}
 
 	for _, example := range examples {

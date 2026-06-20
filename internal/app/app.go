@@ -71,6 +71,12 @@ func Run(args []string) (err error) {
 
 	// Parse command-line arguments
 	config := ParseArgs(args)
+	audit := newAuditRecorder(config)
+	defer func() {
+		if auditErr := audit.finish(config, err); auditErr != nil {
+			logger.GetLogger().Warning("failed to write audit event: %v", auditErr)
+		}
+	}()
 
 	if config.DryRun {
 		return emitDryRunPlan(config)
@@ -95,11 +101,11 @@ func Run(args []string) (err error) {
 	// Validate flags that only apply to command execution.
 	if config.Mode == "ssh" {
 		if config.Timeout < 0 {
-			return reportSSHFailure(config, sshclient.AuthMethodUnknown, "config",
+			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config",
 				fmt.Errorf("invalid --timeout value (use e.g. 30s, 2m, or 30)"))
 		}
 		if config.JSONOutput && config.UsePTY {
-			return reportSSHFailure(config, sshclient.AuthMethodUnknown, "config",
+			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config",
 				fmt.Errorf("--pty cannot be combined with --json (a PTY merges stderr into stdout)"))
 		}
 
@@ -108,7 +114,7 @@ func Run(args []string) (err error) {
 		// error_kind ("blocked") instead of being masked by a connect error.
 		if config.SafetyCheck && !config.Force {
 			if blockErr := sshclient.ValidateCommand(config.Command); blockErr != nil {
-				return reportSSHFailure(config, sshclient.AuthMethodUnknown, classifyError(blockErr), blockErr)
+				return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, classifyError(blockErr), blockErr)
 			}
 		}
 	}
@@ -135,15 +141,18 @@ func Run(args []string) (err error) {
 	// Create SSH client
 	client, err := sshclient.NewSSHClient(config)
 	if err != nil {
-		return reportSSHFailure(config, sshclient.AuthMethodUnknown, "config",
+		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config",
 			fmt.Errorf("failed to create SSH client: %w", err))
 	}
 	defer errutil.HandleCloseError(&err, client)
 
 	// Connect to remote host (use direct connection for CLI mode, no need for pooling)
 	if err = client.ConnectDirect(); err != nil {
-		return reportSSHFailure(config, sshclient.AuthMethodUnknown, classifyError(err),
+		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, classifyError(err),
 			fmt.Errorf("failed to connect: %w", err))
+	}
+	if audit != nil {
+		audit.event.AuthMethod = string(client.AuthMethodUsed())
 	}
 
 	// Handle SFTP mode
@@ -155,16 +164,17 @@ func Run(args []string) (err error) {
 	}
 
 	// Handle SSH command execution
-	return runCommand(client, config)
+	return runCommand(client, config, audit)
 }
 
 // runCommand runs the configured command and translates the result into either
 // streamed human output or a single JSON object, then returns an error whose
 // type tells the entry point which exit code to use.
-func runCommand(client *sshclient.SSHClient, config *sshclient.Config) error {
+func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *auditRecorder) error {
 	start := time.Now()
 	res, execErr := client.RunCommand(config.JSONOutput)
 	dur := time.Since(start)
+	audit.recordCommandResult(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
 
 	if config.JSONOutput {
 		emitCommandJSON(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
@@ -189,7 +199,8 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config) error {
 // reportSSHFailure emits a JSON error object in --json command mode (and returns
 // ErrReported so the caller exits silently), or returns the error unchanged for
 // the normal streamed path.
-func reportSSHFailure(config *sshclient.Config, authMethod sshclient.AuthMethod, kind string, err error) error {
+func reportSSHFailure(config *sshclient.Config, audit *auditRecorder, authMethod sshclient.AuthMethod, kind string, err error) error {
+	audit.recordFailure(config, authMethod, kind, err)
 	if config.JSONOutput && config.Mode == "ssh" {
 		emitCommandJSON(config, authMethod, sshclient.ExecResult{ExitCode: -1}, 0, kind, err)
 		return ErrReported

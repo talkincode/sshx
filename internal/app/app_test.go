@@ -115,6 +115,7 @@ func TestRun_ArgumentParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
 			// Suppress output
 			oldStdout := os.Stdout
 			oldStderr := os.Stderr
