@@ -263,7 +263,7 @@ func writeAuditEvent(config *sshclient.Config, event auditEvent, now time.Time) 
 		return fmt.Errorf("failed to create audit directory %s: %w", dir, mkdirErr)
 	}
 	path := filepath.Join(dir, fmt.Sprintf("sshx-%s.jsonl", now.Format("2006-01-02")))
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // audit path is user-configurable by design.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- audit path is user-configurable by design.
 	if err != nil {
 		return fmt.Errorf("failed to open audit log %s: %w", path, err)
 	}
