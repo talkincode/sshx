@@ -62,7 +62,8 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
 2. 密码管理（Keychain / Secret Service / Credential Manager）。
 3. 主机配置管理，支持为每台主机配置独立的 SSH 密钥。
 4. 面向人和 agent 的 dry-run 执行计划预览。
-5. 脚本执行和命令安全验证。
+5. 本地结构化审计日志，并默认做安全脱敏。
+6. 脚本执行和命令安全验证。
 
 ## 安装
 
@@ -259,6 +260,24 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
 dry-run 只是本地计划预览。它会说明主机解析、模式/动作、sudo key 选择、安全检查结果，
 以及真实执行时是否会连接、执行、读取 secret 或修改状态；它不承诺远程命令一定成功。
+
+### 本地审计日志
+
+每次非 dry-run 调用都会默认写入一条 JSONL 审计事件：
+
+```text
+~/.sshx/audit/sshx-YYYY-MM-DD.jsonl
+```
+
+可以使用 `--audit-output=<目录>` 把审计事件保存到项目目录、运维记录或事故目录旁边：
+
+```bash
+sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
+```
+
+审计事件记录模式/动作、主机解析、sudo/keyring 决策、安全检查状态、认证方式、退出码和错误类型等元数据。
+它不会记录明文密码、私钥内容或 stdout/stderr。命令文本会作为溯源信息写入，但会对常见 password/token
+类参数做尽力脱敏。可以用 `--no-audit` 或 `SSHX_NO_AUDIT=true` 禁用单次调用或当前环境的审计写入。
 
 ### `--timeout` 与 `--pty`
 
@@ -465,6 +484,16 @@ export SUDO_PASSWORD=your_sudo_password
 
 # 然后运行命令时无需标志
 ./bin/sshx "uptime"
+```
+
+### 审计环境变量
+
+```bash
+# 将审计事件写到项目目录
+export SSHX_AUDIT_OUTPUT=./.sshx-audit
+
+# 禁用审计写入
+export SSHX_NO_AUDIT=true
 ```
 
 ### SSH 认证偏好设置

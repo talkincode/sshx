@@ -129,6 +129,7 @@ func TestClassifyError(t *testing.T) {
 // before any network work, so it reports error_kind "blocked" (not "connect")
 // even though the host is never reachable.
 func TestRun_BlockedCommandShortCircuits(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

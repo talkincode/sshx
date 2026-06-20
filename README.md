@@ -64,7 +64,8 @@ Managing multiple servers means juggling different passwords and repeatedly ente
 2. Password management (Keychain / Secret Service / Credential Manager).
 3. Host configuration management with per-host SSH keys.
 4. Dry-run execution plan preview for humans and agents.
-5. Script execution and command security validation.
+5. Local structured audit trail with safe default redaction.
+6. Script execution and command security validation.
 
 ## Installation
 
@@ -265,6 +266,28 @@ Dry-run is a local plan preview. It reports host resolution, mode/action,
 sudo-key selection, safety-check result, and whether a real run would connect,
 execute, read a secret, or mutate state. It does **not** prove the remote command
 would succeed.
+
+### Local audit trail
+
+Every non-dry-run invocation writes one JSONL audit event by default:
+
+```text
+~/.sshx/audit/sshx-YYYY-MM-DD.jsonl
+```
+
+Use `--audit-output=<dir>` to place audit events next to a project, runbook, or
+incident record:
+
+```bash
+sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
+```
+
+Audit events record metadata and outcomes such as mode/action, host resolution,
+sudo/keyring decisions, safety status, auth method, exit code, and error kind.
+They do **not** record plaintext passwords, private key contents, or
+stdout/stderr. Command text is included for provenance but redacted for common
+password/token-style arguments. Use `--no-audit` or `SSHX_NO_AUDIT=true` to
+disable audit writing for a single invocation or environment.
 
 ### `--timeout` and `--pty`
 
@@ -547,6 +570,16 @@ export SUDO_PASSWORD=your_sudo_password
 
 # Then run commands without flags
 ./bin/sshx "uptime"
+```
+
+### Audit Environment Variables
+
+```bash
+# Write audit events to a project-specific directory
+export SSHX_AUDIT_OUTPUT=./.sshx-audit
+
+# Disable audit writing
+export SSHX_NO_AUDIT=true
 ```
 
 ### SSH Authentication Preferences

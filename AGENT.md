@@ -38,6 +38,9 @@ The core value proposition:
    password keys so one tool covers a whole fleet.
 6. **Execution preview** — `--dry-run` explains the local execution plan without
    connecting, executing, reading keyring secrets, or mutating state.
+7. **Auditability** — non-dry-run invocations write structured JSONL audit
+   events under `~/.sshx/audit` by default, with secrets and stdout/stderr
+   excluded.
 
 ## 3. Scope & Boundaries (Non-Goals)
 
@@ -77,6 +80,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   password.go             → keyring-backed password get/set/list + secure input
   usage.go                → PrintUsage() help text (keep in sync with flags)
   dryrun.go               → --dry-run local execution plan preview
+  audit.go                → local structured JSONL audit events + redaction
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   validate.go             → command safety checks + CommandUsesSudo
@@ -103,6 +107,9 @@ pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
 - **Secrets:** OS keyring under service name `sshx`
   (macOS Keychain / Linux Secret Service / Windows Credential Manager).
 - **Trust store:** `~/.ssh/known_hosts` (or `--known-hosts` / `SSH_KNOWN_HOSTS`).
+- **Audit trail:** `~/.sshx/audit/sshx-YYYY-MM-DD.jsonl` by default; override
+  with `--audit-output=<dir>` / `SSHX_AUDIT_OUTPUT`, or disable with
+  `--no-audit` / `SSHX_NO_AUDIT=true`.
 
 ## 5. Tech Stack
 
@@ -235,7 +242,6 @@ A living, maintainer-adjustable plan. Items must respect the boundaries in §3.
 
 **Long-term / under consideration**
 
-- ⬜ Optional structured audit log of executed commands.
 - ⬜ Pluggable secret backends behind the existing keyring abstraction.
 
 Anything implying a daemon, MCP, tunneling, or a GUI is explicitly **rejected**
