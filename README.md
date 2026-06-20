@@ -425,7 +425,7 @@ sshx --password-delete=root
 
 ### Using Stored Passwords
 
-Once a password is saved, sudo commands will automatically retrieve the password from system keyring:
+Once a password is saved, commands that start with `sudo` will automatically retrieve the password from system keyring:
 
 ```bash
 # 1. First save sudo password

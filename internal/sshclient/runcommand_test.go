@@ -223,18 +223,21 @@ func TestCappedBufferTruncates(t *testing.T) {
 	assert.Equal(t, "hellowor", buf.String())
 }
 
-func TestCommandStartsWithSudo(t *testing.T) {
+func TestCommandUsesSudoLeadingOnly(t *testing.T) {
 	cases := map[string]bool{
 		"sudo apt update":     true,
 		"sudo":                true,
 		"  sudo ls":           true,
+		"\tsudo ls":           true,
+		"\nsudo ls":           true,
 		"ls -la":              false,
 		"echo sudo":           false,
 		"echo do sudo things": false,
+		"sh -c 'sudo whoami'": false,
 		"sudoedit /etc/hosts": false,
 	}
 	for command, want := range cases {
-		assert.Equalf(t, want, commandStartsWithSudo(command), "command=%q", command)
+		assert.Equalf(t, want, CommandUsesSudo(command), "command=%q", command)
 	}
 }
 

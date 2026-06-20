@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sudo auto-fill detection now uses one consistent rule across keyring lookup
+  and command execution: only commands that start with `sudo` trigger password
+  auto-fill. Non-leading `sudo` inside shell wrappers or pipelines is left
+  untouched.
+
 ## [0.0.11] - 2026-06-13
 
 ### Security

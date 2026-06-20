@@ -181,8 +181,10 @@ tests.
 3. **Sudo password over stdin.** Never interpolate the password into the command
    string. `sudoStdinCommand` rewrites a leading `sudo` to `sudo -S -p ''` and the
    password is fed via `session.Stdin`. This avoids quote breakage and injection.
-4. **Sudo detected by token, not substring.** `CommandUsesSudo` matches the
-   `sudo` word (so `pseudo`/`sudoers` do not false-positive).
+4. **Sudo auto-fill only supports leading `sudo`.** `CommandUsesSudo` returns
+   true only when the remote command starts with `sudo`, matching the exact
+   form `sudoStdinCommand` can safely rewrite. Non-leading sudo inside shell
+   wrappers or pipelines is left untouched.
 5. **Command safety checks.** Destructive patterns (`rm -rf /`, `mkfs`, `dd`,
    fork bombs, `curl | sh`, critical file edits, shutdown/reboot) are blocked
    unless `--force`/`-f` or `--no-safety-check` is given. The validator is a

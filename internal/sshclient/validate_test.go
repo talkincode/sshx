@@ -472,10 +472,15 @@ func TestCommandUsesSudo(t *testing.T) {
 		{"plain sudo", "sudo apt update", true},
 		{"sudo only", "sudo", true},
 		{"leading spaces", "   sudo ls", true},
-		{"sudo later in pipeline", "ls && sudo reboot", true},
+		{"leading tab", "\tsudo ls", true},
+		{"leading newline", "\nsudo ls", true},
+		{"sudo later in pipeline", "ls && sudo reboot", false},
+		{"sudo inside shell wrapper", "sh -c 'sudo whoami'", false},
+		{"echo sudo", "echo sudo", false},
 		{"no sudo", "ls -la", false},
 		{"pseudo substring", "pseudo-terminal --help", false},
 		{"sudoers substring", "cat /etc/sudoers", false},
+		{"sudoedit command", "sudoedit /etc/hosts", false},
 		{"empty", "", false},
 	}
 
