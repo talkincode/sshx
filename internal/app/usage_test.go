@@ -38,6 +38,7 @@ func TestPrintUsage(t *testing.T) {
 		"SSH & SFTP Remote Tool",
 		"Usage:",
 		"SSH Options:",
+		"Sudo Auto-fill:",
 		"Safety Options:",
 		"SFTP Options:",
 		"Password Management",
@@ -83,6 +84,8 @@ func TestPrintUsage(t *testing.T) {
 		"rm -rf /",
 		"BLOCKED",
 		"safety check",
+		"remote command starts with sudo",
+		"Non-leading sudo is not auto-filled",
 	}
 
 	for _, keyword := range safetyKeywords {
