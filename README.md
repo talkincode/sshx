@@ -199,8 +199,8 @@ sshx --password-set=root
 # Or set password for specific host
 sshx --password-set=192.168.1.100-root
 
-# Execute command without password flag (uses saved password)
-sshx -h=192.168.1.100 -u=root "df -h"
+# Use the saved password for sudo auto-fill
+sshx -h=192.168.1.100 -u=root "sudo df -h"
 ```
 
 ## Agent / Scripting Mode
@@ -552,7 +552,7 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 
 - ✅ Passwords are stored using OS-native encryption
 - ✅ Passwords are never stored in plaintext
-- ✅ Each host+user combination has a separate password entry
+- ✅ Password keys can be named per host, user, or environment
 - ✅ Password input is hidden during entry
 - ⚠️ Requires OS credential manager to be available
 - ⚠️ On Linux, requires Secret Service daemon running (usually automatic with desktop environments)
@@ -563,13 +563,12 @@ You can use environment variables to avoid typing credentials repeatedly:
 
 ```bash
 # Set in .env file or export in shell
-export SSH_HOST=192.168.1.100
-export SSH_USER=root
-export SSH_PORT=22
-export SUDO_PASSWORD=your_sudo_password
+export SSH_KEY_PATH=~/.ssh/prod.pem
+export SSH_SUDO_KEY=prod-web
+export SSH_TIMEOUT=30s
 
-# Then run commands without flags
-./bin/sshx "uptime"
+# Then run with fewer repeated options
+sshx -h=prod-web "sudo uptime"
 ```
 
 ### Audit Environment Variables
@@ -584,7 +583,7 @@ export SSHX_NO_AUDIT=true
 
 ### SSH Authentication Preferences
 
-- `sshx` now prioritizes SSH keys and automatically falls back to password authentication when the server rejects your key (for example when a host only allows passwords). As long as a password is available, the client will transparently retry with a password-only session.
+- `sshx` prioritizes SSH keys and falls back to password authentication only when an SSH login password is already provided, for example through `SSH_PASSWORD`. Keyring passwords are used for sudo auto-fill, not silently loaded for ordinary SSH login.
 - Use `--no-key` (alias `--password-only`) to disable key authentication for a single command. You can re-enable it by supplying `--key=<path>` again.
 - Set `SSH_DISABLE_KEY=true` in your environment to permanently disable key authentication (useful on hosts that never accept keys). This override is respected even if a default key path exists in `~/.sshx/settings.json`.
 - When key auth is enabled and no explicit path is provided, `sshx` still auto-loads `~/.ssh/id_rsa` (or the path specified in settings) before falling back to passwords.

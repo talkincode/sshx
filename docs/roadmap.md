@@ -67,7 +67,7 @@ internal/sshclient
 
 - 认证路径
 
-  默认先尝试 SSH key，服务端拒绝 key 后可回退到密码；也支持 `--no-key` / `--password-only` 强制密码模式。每个命名主机可有自己的 SSH key 和 password key。证据：`internal/sshclient/client.go`、`internal/app/host_manager.go`、`skills/sshx/SKILL.md`。
+  默认先尝试 SSH key；只有调用方已提供 SSH 登录密码时，服务端拒绝 key 后才会回退到密码认证。`--no-key` / `--password-only` 可强制密码模式；命名主机的 `password_key` 主要用于 sudo 自动填充。证据：`internal/sshclient/client.go`、`internal/app/host_manager.go`、`skills/sshx/SKILL.md`。
 
 - host-key 校验
 

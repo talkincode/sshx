@@ -92,6 +92,52 @@ get_latest_version() {
     echo "$latest_version"
 }
 
+verify_checksum() {
+    local filename="$1"
+    local version="$2"
+    local checksums_url="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+    local checksum_file="checksums.txt"
+
+    print_info "Downloading checksums..."
+    if command -v wget &> /dev/null; then
+        wget -q -O "$checksum_file" "$checksums_url" || {
+            print_error "Failed to download checksums"
+            exit 1
+        }
+    else
+        curl -fsSL -o "$checksum_file" "$checksums_url" || {
+            print_error "Failed to download checksums"
+            exit 1
+        }
+    fi
+
+    local expected
+    expected=$(grep " ${filename}$" "$checksum_file" | awk '{print $1}')
+    if [ -z "$expected" ]; then
+        print_error "Checksum for $filename not found"
+        exit 1
+    fi
+
+    local actual
+    if command -v sha256sum &> /dev/null; then
+        actual=$(sha256sum "$filename" | awk '{print $1}')
+    elif command -v shasum &> /dev/null; then
+        actual=$(shasum -a 256 "$filename" | awk '{print $1}')
+    else
+        print_error "Neither sha256sum nor shasum found. Cannot verify download."
+        exit 1
+    fi
+
+    if [ "$actual" != "$expected" ]; then
+        print_error "Checksum verification failed"
+        print_error "Expected: $expected"
+        print_error "Actual:   $actual"
+        exit 1
+    fi
+
+    print_success "Checksum verified"
+}
+
 # Download and install
 install_sshx() {
     local platform=$(detect_platform)
@@ -135,6 +181,7 @@ install_sshx() {
     fi
     
     print_success "Downloaded successfully"
+    verify_checksum "$filename" "$version"
     
     # Extract
     print_info "Extracting..."
@@ -230,7 +277,7 @@ main() {
     echo "  sshx -h=192.168.1.100 -u=root 'uptime'"
     echo ""
     echo "  # Save password (optional)"
-    echo "  sshx --set-password host=192.168.1.100 user=root"
+    echo "  sshx --password-set=master"
     echo ""
     print_info "Documentation: https://github.com/${REPO}"
 }

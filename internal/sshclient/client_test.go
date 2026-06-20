@@ -288,6 +288,11 @@ func TestShouldFallbackToPassword(t *testing.T) {
 	})
 }
 
+func TestRemotePathJoinUsesSFTPSlashSeparator(t *testing.T) {
+	assert.Equal(t, "/var/log/nginx/access.log", remotePathJoin("/var/log", "nginx", "access.log"))
+	assert.Equal(t, "relative/path/file.txt", remotePathJoin("relative", "path", "file.txt"))
+}
+
 func TestGetHostKeyCallbackAcceptsUnknownHost(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

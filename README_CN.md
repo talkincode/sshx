@@ -197,8 +197,8 @@ sshx --password-set=root
 # 或者为特定主机设置密码
 sshx --password-set=192.168.1.100-root
 
-# 执行命令时无需密码标志（使用已保存的密码）
-sshx -h=192.168.1.100 -u=root "df -h"
+# 执行 sudo 命令时自动使用已保存的 sudo 密码
+sshx -h=192.168.1.100 -u=root "sudo df -h"
 
 # 一次性测试所有已配置的主机（每台主机 10 秒拨号超时），并在报告中标注认证方式
 sshx --host-test-all
@@ -466,7 +466,7 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 
 - ✅ 密码使用操作系统原生加密存储
 - ✅ 密码永远不会以明文形式存储
-- ✅ 每个主机+用户组合都有单独的密码条目
+- ✅ 密码 key 可按主机、用户或环境分别命名
 - ✅ 输入时密码被隐藏
 - ⚠️ 需要操作系统凭据管理器可用
 - ⚠️ 在 Linux 上，需要 Secret Service 守护进程运行（桌面环境通常自动运行）
@@ -477,13 +477,12 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 
 ```bash
 # 在 .env 文件中设置或在 shell 中导出
-export SSH_HOST=192.168.1.100
-export SSH_USER=root
-export SSH_PORT=22
-export SUDO_PASSWORD=your_sudo_password
+export SSH_KEY_PATH=~/.ssh/prod.pem
+export SSH_SUDO_KEY=prod-web
+export SSH_TIMEOUT=30s
 
-# 然后运行命令时无需标志
-./bin/sshx "uptime"
+# 然后减少重复输入的选项
+sshx -h=prod-web "sudo uptime"
 ```
 
 ### 审计环境变量
@@ -498,7 +497,7 @@ export SSHX_NO_AUDIT=true
 
 ### SSH 认证偏好设置
 
-- `sshx` 仍然会优先尝试 SSH 密钥认证，但如果服务器拒绝公钥（例如只允许密码登录），并且已经提供了密码，客户端会自动回退到“仅密码”重连，无需手动重试。
+- `sshx` 仍然会优先尝试 SSH 密钥认证；只有调用方已经通过 `SSH_PASSWORD` 等方式提供 SSH 登录密码时，服务器拒绝公钥后才会自动回退到“仅密码”重连。keyring 中的密码用于 sudo 自动填充，不会静默用于普通 SSH 登录。
 - 使用 `--no-key`（或 `--password-only`）即可在单次命令中禁用密钥认证；如果随后提供 `--key=<路径>`，会重新启用公钥登录。
 - 如果长期不需要公钥，可以设置环境变量 `SSH_DISABLE_KEY=true`，即便 `~/.sshx/settings.json` 中存在默认密钥路径也会被忽略。
 - 当密钥认证启用且未手动指定路径时，`sshx` 仍会自动加载 `~/.ssh/id_rsa`（或设置文件中的默认值），然后再按需回退到密码。

@@ -283,7 +283,7 @@ Host Management Examples:
   sshx -h=prod-web "uptime"
 
 Note:
-  - SSH key authentication is tried first, then password authentication
+  - SSH key authentication is tried first; password auth is used only when SSH_PASSWORD is provided
   - Sudo password is auto-filled only when the remote command starts with sudo
   - Dry-run never connects, executes, reads keyring secrets, or writes state
   - Audit events are JSONL files under ~/.sshx/audit by default
