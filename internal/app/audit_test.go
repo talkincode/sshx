@@ -107,6 +107,67 @@ func TestRun_BlockedCommandWritesRedactedAuditEvent(t *testing.T) {
 	}
 }
 
+//nolint:gosec // test inputs intentionally contain credential-like command arguments.
+func TestRedactSensitiveTextCoversQuotedAndUnquotedValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		want      string
+		forbidden []string
+	}{
+		{
+			name:      "quoted assignment with spaces",
+			input:     `deploy password="alpha bravo" tail`,
+			want:      `deploy password=<redacted> tail`,
+			forbidden: []string{"alpha", "bravo"},
+		},
+		{
+			name:      "single quoted assignment with spaces",
+			input:     `deploy token='charlie delta' tail`,
+			want:      `deploy token=<redacted> tail`,
+			forbidden: []string{"charlie", "delta"},
+		},
+		{
+			name:      "quoted flag with spaces",
+			input:     `curl --token "echo foxtrot" done`,
+			want:      `curl --token <redacted> done`,
+			forbidden: []string{"echo", "foxtrot"},
+		},
+		{
+			name:      "quoted equals flag with spaces",
+			input:     `curl --api-key="golf hotel" done`,
+			want:      `curl --api-key=<redacted> done`,
+			forbidden: []string{"golf", "hotel"},
+		},
+		{
+			name:      "unquoted assignment",
+			input:     `deploy access_key=india tail`,
+			want:      `deploy access_key=<redacted> tail`,
+			forbidden: []string{"india"},
+		},
+		{
+			name:      "unquoted flag",
+			input:     `curl --secret juliet done`,
+			want:      `curl --secret <redacted> done`,
+			forbidden: []string{"juliet"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := redactSensitiveText(tt.input)
+			if got != tt.want {
+				t.Fatalf("redactSensitiveText() = %q, want %q", got, tt.want)
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("redactSensitiveText() leaked %q in %q", forbidden, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRun_DryRunDoesNotWriteAuditEvent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	auditDir := filepath.Join(t.TempDir(), "audit")

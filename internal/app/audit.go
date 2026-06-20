@@ -95,8 +95,10 @@ type auditRecorder struct {
 }
 
 var (
-	sensitiveAssignmentRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)=([^\s&;]+)`)
-	sensitiveFlagRE       = regexp.MustCompile(`(?i)(--(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s]+)`)
+	sensitiveQuotedAssignmentRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)=("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
+	sensitiveQuotedFlagRE       = regexp.MustCompile(`(?i)(--(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
+	sensitiveAssignmentRE       = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)=([^\s&;]+)`)
+	sensitiveFlagRE             = regexp.MustCompile(`(?i)(--(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s]+)`)
 )
 
 func newAuditRecorder(config *sshclient.Config) *auditRecorder {
@@ -361,6 +363,8 @@ func redactSensitiveText(value string) string {
 	if value == "" {
 		return ""
 	}
+	value = sensitiveQuotedAssignmentRE.ReplaceAllString(value, "$1=<redacted>")
+	value = sensitiveQuotedFlagRE.ReplaceAllString(value, "$1<redacted>")
 	value = sensitiveAssignmentRE.ReplaceAllString(value, "$1=<redacted>")
 	value = sensitiveFlagRE.ReplaceAllString(value, "$1<redacted>")
 	return value
