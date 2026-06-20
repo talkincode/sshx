@@ -326,6 +326,45 @@ func TestGetHostKeyCallbackStrictModeRejectsUnknownHost(t *testing.T) {
 	assert.Equal(t, "", string(data))
 }
 
+func TestGetHostKeyCallbackRejectsChangedKnownHostKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	hostWithPort := net.JoinHostPort("changed-host", "22")
+	remote := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}
+	oldKey := generateTestPublicKey(t)
+	newKey := generateTestPublicKey(t)
+
+	require.NoError(t, ensureKnownHostsFile(knownHostsPath))
+	require.NoError(t, appendHostKey(knownHostsPath, normalizeHostPatterns(hostWithPort, remote), oldKey))
+	callback, err := getHostKeyCallback(&Config{KnownHostsPath: knownHostsPath})
+	require.NoError(t, err)
+
+	err = callback(hostWithPort, remote, newKey)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HOST KEY VERIFICATION FAILED")
+	assert.Contains(t, err.Error(), "man-in-the-middle")
+}
+
+func TestGetHostKeyCallbackInsecureFallbackRequiresExplicitOptIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	knownHostsPath := filepath.Join(home, ".ssh")
+	require.NoError(t, os.MkdirAll(knownHostsPath, 0o700))
+
+	_, err := getHostKeyCallback(&Config{KnownHostsPath: knownHostsPath})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "known_hosts path")
+
+	callback, err := getHostKeyCallback(&Config{KnownHostsPath: knownHostsPath, AllowInsecureHostKey: true})
+	require.NoError(t, err)
+	require.NotNil(t, callback)
+
+	remote := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}
+	key := generateTestPublicKey(t)
+	require.NoError(t, callback(net.JoinHostPort("insecure-host", "22"), remote, key))
+}
+
 func generateTestPublicKey(t *testing.T) ssh.PublicKey {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
