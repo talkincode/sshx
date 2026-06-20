@@ -344,9 +344,12 @@ func TestSudoStdinCommand(t *testing.T) {
 		{"leading sudo", "sudo apt update", "sudo -S -p '' apt update"},
 		{"sudo only", "sudo", "sudo -S -p ''"},
 		{"leading whitespace", "  sudo systemctl restart x", "sudo -S -p '' systemctl restart x"},
+		{"leading tab", "\tsudo whoami", "sudo -S -p '' whoami"},
+		{"leading newline", "\nsudo whoami", "sudo -S -p '' whoami"},
 		{"single quotes preserved", "sudo sh -c 'echo hi'", "sudo -S -p '' sh -c 'echo hi'"},
 		{"no leading sudo unchanged", "ls && sudo reboot", "ls && sudo reboot"},
 		{"no sudo unchanged", "ls -la", "ls -la"},
+		{"sudoedit unchanged", "sudoedit /etc/hosts", "sudoedit /etc/hosts"},
 	}
 
 	for _, tt := range tests {

@@ -78,9 +78,11 @@ sshx -h=prod-web --pty "top -b -n1"
 
 ### sudo with auto-filled password
 
-If the command contains `sudo`, sshx pulls the password from the OS keyring and
-feeds it over stdin (never interpolated into the command string). The keyring key
-is **not always `master`** — it is resolved per invocation in this order:
+If the remote command starts with `sudo`, sshx pulls the password from the OS
+keyring and feeds it over stdin (never interpolated into the command string).
+Non-leading `sudo` inside shell wrappers or pipelines is not auto-filled. The
+keyring key is **not always `master`** — it is resolved per invocation in this
+order:
 
 1. `-pk=<key>` / `--password-key=<key>` on the command line (highest priority).
 2. The `SSH_SUDO_KEY` environment variable.

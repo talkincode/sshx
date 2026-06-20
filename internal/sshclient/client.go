@@ -453,7 +453,7 @@ func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
 	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
 
 	command := c.config.Command
-	if c.config.Password != "" && commandStartsWithSudo(command) {
+	if c.config.Password != "" && CommandUsesSudo(command) {
 		lg.Info("Auto-filling sudo password...")
 		command = sudoStdinCommand(command)
 		session.Stdin = strings.NewReader(c.config.Password + "\n")
@@ -657,28 +657,20 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 func (c *cappedBuffer) String() string  { return c.buf.String() }
 func (c *cappedBuffer) Truncated() bool { return c.truncated }
 
-// commandStartsWithSudo reports whether the command's first token is sudo, which
-// is the only form sudoStdinCommand can safely rewrite for password injection.
-func commandStartsWithSudo(command string) bool {
-	trimmed := strings.TrimLeft(command, " \t")
-	return trimmed == "sudo" || strings.HasPrefix(trimmed, "sudo ")
-}
-
 // sudoStdinCommand rewrites a command that begins with "sudo" so that sudo
 // reads the password from standard input (-S) using an empty prompt. The
 // password itself is supplied through the SSH session's stdin and is never
 // interpolated into the command string, which previously broke on quotes and
 // allowed shell injection.
 func sudoStdinCommand(command string) string {
-	trimmed := strings.TrimLeft(command, " \t")
-	switch {
-	case trimmed == "sudo":
-		return "sudo -S -p ''"
-	case strings.HasPrefix(trimmed, "sudo "):
-		return "sudo -S -p '' " + strings.TrimSpace(trimmed[len("sudo "):])
-	default:
+	remainder, ok := leadingSudoRemainder(command)
+	if !ok {
 		return command
 	}
+	if remainder == "" {
+		return "sudo -S -p ''"
+	}
+	return "sudo -S -p '' " + remainder
 }
 
 // ExecuteSftp executes SFTP operations

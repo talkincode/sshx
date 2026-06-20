@@ -31,6 +31,7 @@ SSH Options:
   -u, --user=USER          SSH username (default: master)
   -i, --key=PATH           SSH private key path (default: ~/.ssh/id_rsa)
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
+                           Used only when the remote command starts with sudo
   --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
   --json                   Emit a single structured JSON result on stdout
   --pty                    Request a PTY (merges stderr into stdout; off by default)
@@ -54,6 +55,19 @@ Agent / Scripting Mode:
     In --json mode an sshx-level failure has exit_code -1 and a non-empty
     error_kind (timeout, auth, host_key, connect, blocked, exit_missing,
     config, error), so it is always distinguishable from a remote exit 255.
+
+Sudo Auto-fill:
+  sshx auto-fills a sudo password only when the remote command starts with
+  sudo, for example:
+    sshx -h=host "sudo systemctl status nginx"
+
+  Non-leading sudo is not auto-filled and does not trigger keyring lookup:
+    sshx -h=host "sh -c 'sudo whoami'"
+    sshx -h=host "echo sudo"
+
+  This keeps keyring lookup, stdin password injection, and future audit fields
+  on one clear rule. Put sudo at the beginning of the remote command when you
+  want sshx to auto-fill it.
 
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
@@ -236,7 +250,7 @@ Host Management Examples:
 
 Note:
   - SSH key authentication is tried first, then password authentication
-  - Sudo password is automatically retrieved from system keyring
+  - Sudo password is auto-filled only when the remote command starts with sudo
   - SFTP operations use the same SSH connection
   - Password manager works across macOS/Linux/Windows
   - Default user: master, Default sudo key: master

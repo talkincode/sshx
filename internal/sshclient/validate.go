@@ -130,16 +130,32 @@ func ValidateCommand(command string) error {
 	return nil
 }
 
-// CommandUsesSudo reports whether the command invokes sudo as a distinct
-// command token. This avoids false positives from substrings such as "pseudo"
-// that merely contain the letters "sudo".
+// CommandUsesSudo reports whether sshx can safely treat the command as a sudo
+// command for password auto-fill. Only a leading sudo command is supported,
+// because that is the only form sudoStdinCommand can rewrite without guessing at
+// shell syntax.
 func CommandUsesSudo(command string) bool {
-	for _, field := range strings.Fields(command) {
-		if field == "sudo" {
-			return true
-		}
+	_, ok := leadingSudoRemainder(command)
+	return ok
+}
+
+func leadingSudoRemainder(command string) (string, bool) {
+	trimmed := strings.TrimLeft(command, " \t\r\n")
+	if trimmed == "sudo" {
+		return "", true
 	}
-	return false
+	if !strings.HasPrefix(trimmed, "sudo") {
+		return "", false
+	}
+	rest := trimmed[len("sudo"):]
+	if rest == "" || !isCommandWhitespace(rest[0]) {
+		return "", false
+	}
+	return strings.TrimSpace(rest), true
+}
+
+func isCommandWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
 }
 
 // GetSudoPassword reads sudo password from system keyring (cross-platform support)
