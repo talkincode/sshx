@@ -63,7 +63,10 @@ func TestRun_BlockedCommandWritesRedactedAuditEvent(t *testing.T) {
 		t.Errorf("blocked command must not audit remote mutation, got %v", event["would_mutate_remote"])
 	}
 
-	auditedCommand, _ := event["command"].(string)
+	auditedCommand, ok := event["command"].(string)
+	if !ok {
+		t.Fatalf("expected command string, got %T", event["command"])
+	}
 	if strings.Contains(auditedCommand, "orange") || strings.Contains(auditedCommand, "purple") {
 		t.Fatalf("audit command was not redacted: %q", auditedCommand)
 	}
@@ -81,7 +84,11 @@ func TestRun_BlockedCommandWritesRedactedAuditEvent(t *testing.T) {
 	if outcome["error_kind"] != "blocked" {
 		t.Errorf("expected blocked error kind, got %v", outcome["error_kind"])
 	}
-	if message, _ := outcome["message"].(string); strings.Contains(message, "orange") || strings.Contains(message, "purple") {
+	message, ok := outcome["message"].(string)
+	if !ok {
+		t.Fatalf("expected outcome message string, got %T", outcome["message"])
+	}
+	if strings.Contains(message, "orange") || strings.Contains(message, "purple") {
 		t.Fatalf("audit error message was not redacted: %q", message)
 	}
 
