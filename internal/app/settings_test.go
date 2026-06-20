@@ -81,6 +81,11 @@ func TestSaveAndLoadSettings(t *testing.T) {
 	if _, statErr := os.Stat(settingsDir); os.IsNotExist(statErr) {
 		t.Error("Settings directory was not created")
 	}
+	if info, statErr := os.Stat(settingsDir); statErr != nil {
+		t.Fatalf("Stat settings dir error = %v", statErr)
+	} else if perm := info.Mode().Perm(); perm != 0700 {
+		t.Errorf("settings dir perm = %o, want 700", perm)
+	}
 
 	// Load settings
 	loadedSettings, err := LoadSettings()
@@ -452,5 +457,47 @@ func TestSaveSettings_AtomicOverwrite(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0600 {
 		t.Errorf("settings file perm = %o, want 600", perm)
+	}
+}
+
+func TestSaveSettings_RenameFailureCleansTempFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	t.Cleanup(func() {
+		if err := os.Setenv("HOME", oldHome); err != nil {
+			t.Logf("Warning: failed to restore HOME: %v", err)
+		}
+	})
+	if err := os.Setenv("HOME", tmpDir); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+
+	settingsDir, err := GetSettingsDir()
+	if err != nil {
+		t.Fatalf("GetSettingsDir() error = %v", err)
+	}
+	if mkdirErr := os.MkdirAll(filepath.Join(settingsDir, SettingsFile), 0700); mkdirErr != nil {
+		t.Fatalf("failed to create blocking settings directory: %v", mkdirErr)
+	}
+
+	err = SaveSettings(&Settings{Hosts: []HostConfig{{Name: "blocked", Host: "10.0.0.9"}}})
+	if err == nil {
+		t.Fatal("expected SaveSettings() to fail when settings path is a directory")
+	}
+
+	leftovers, err := filepath.Glob(filepath.Join(settingsDir, "settings-*.tmp"))
+	if err != nil {
+		t.Fatalf("Glob error = %v", err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("expected temp settings file cleanup after failure, got %v", leftovers)
+	}
+
+	info, err := os.Stat(filepath.Join(settingsDir, SettingsFile))
+	if err != nil {
+		t.Fatalf("expected blocking settings directory to remain: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected settings path to remain a directory after failed rename")
 	}
 }

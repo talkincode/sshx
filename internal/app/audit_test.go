@@ -181,6 +181,130 @@ func TestRun_DryRunDoesNotWriteAuditEvent(t *testing.T) {
 	}
 }
 
+func TestAuditRecorderRefreshRecordsExecutionContract(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	config := &sshclient.Config{
+		AuditEnabled:      true,
+		Host:              "prod-web",
+		Port:              "2222",
+		User:              "root",
+		Mode:              "ssh",
+		Command:           `sudo deploy --token "alpha bravo"`,
+		UseKeyAuth:        true,
+		KeyPath:           "/keys/prod.pem",
+		SudoKey:           "prod-sudo",
+		Timeout:           45 * time.Second,
+		JSONOutput:        true,
+		SafetyCheck:       true,
+		AcceptUnknownHost: true,
+		KnownHostsPath:    "/tmp/known_hosts",
+	}
+	recorder := newAuditRecorder(config)
+	if recorder == nil {
+		t.Fatal("expected audit recorder")
+	}
+
+	config.Host = "10.0.0.5"
+	recorder.refresh(config)
+	event := recorder.event
+
+	if event.HostInput != "prod-web" || event.HostResolved != "10.0.0.5" || event.HostResolvedBy != "settings" {
+		t.Fatalf("unexpected host resolution fields: input=%q resolved=%q by=%q", event.HostInput, event.HostResolved, event.HostResolvedBy)
+	}
+	if event.Command != "sudo deploy --token <redacted>" {
+		t.Fatalf("expected redacted command, got %q", event.Command)
+	}
+	if event.Action != "command" || event.Mode != "ssh" {
+		t.Fatalf("unexpected mode/action: %s/%s", event.Mode, event.Action)
+	}
+	if !event.UsesSudo || !event.WouldReadSecret || !event.WouldMutateRemote || !event.MayMutateKnownHosts {
+		t.Fatalf("unexpected audit effects: sudo=%v read_secret=%v mutate_remote=%v known_hosts=%v",
+			event.UsesSudo, event.WouldReadSecret, event.WouldMutateRemote, event.MayMutateKnownHosts)
+	}
+	if event.KeyPath != "/keys/prod.pem" || event.SudoKey != "prod-sudo" || event.Timeout != "45s" {
+		t.Fatalf("unexpected key/sudo/timeout metadata: key=%q sudo=%q timeout=%q", event.KeyPath, event.SudoKey, event.Timeout)
+	}
+	if !event.JSONOutput || !event.SafetyCheckEnabled || !event.AcceptUnknownHost || event.KnownHostsPath != "/tmp/known_hosts" {
+		t.Fatalf("unexpected execution flags: json=%v safety=%v accept=%v known_hosts=%q",
+			event.JSONOutput, event.SafetyCheckEnabled, event.AcceptUnknownHost, event.KnownHostsPath)
+	}
+}
+
+func TestAuditEffectFlagsByModeAndAction(t *testing.T) {
+	tests := []struct {
+		name                    string
+		config                  sshclient.Config
+		wantReadSecret          bool
+		wantWriteLocalState     bool
+		wantMutateRemote        bool
+		wantMayMutateKnownHosts bool
+	}{
+		{
+			name: "ssh sudo command reads secret mutates remote and may trust host",
+			config: sshclient.Config{
+				Mode:              "ssh",
+				Command:           "sudo systemctl restart nginx",
+				SudoKey:           "prod",
+				AcceptUnknownHost: true,
+			},
+			wantReadSecret:          true,
+			wantMutateRemote:        true,
+			wantMayMutateKnownHosts: true,
+		},
+		{
+			name:                "password set writes only local state",
+			config:              sshclient.Config{Mode: "password", PasswordAction: "set"},
+			wantWriteLocalState: true,
+		},
+		{
+			name:                "password delete reads and writes local state",
+			config:              sshclient.Config{Mode: "password", PasswordAction: "delete"},
+			wantReadSecret:      true,
+			wantWriteLocalState: true,
+		},
+		{
+			name:                "host add writes only local state",
+			config:              sshclient.Config{Mode: "host", HostAction: "add"},
+			wantWriteLocalState: true,
+		},
+		{
+			name:                    "host test reads secret mutates remote and may trust host",
+			config:                  sshclient.Config{Mode: "host", HostAction: "test", AcceptUnknownHost: true},
+			wantReadSecret:          true,
+			wantMutateRemote:        true,
+			wantMayMutateKnownHosts: true,
+		},
+		{
+			name:             "sftp upload mutates remote",
+			config:           sshclient.Config{Mode: "sftp", SftpAction: "upload"},
+			wantMutateRemote: true,
+		},
+		{
+			name:   "sftp download does not mutate remote",
+			config: sshclient.Config{Mode: "sftp", SftpAction: "download"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := auditWouldReadSecret(&tt.config); got != tt.wantReadSecret {
+				t.Errorf("auditWouldReadSecret() = %v, want %v", got, tt.wantReadSecret)
+			}
+			if got := auditWouldWriteLocalState(&tt.config); got != tt.wantWriteLocalState {
+				t.Errorf("auditWouldWriteLocalState() = %v, want %v", got, tt.wantWriteLocalState)
+			}
+			if got := auditWouldMutateRemote(&tt.config); got != tt.wantMutateRemote {
+				t.Errorf("auditWouldMutateRemote() = %v, want %v", got, tt.wantMutateRemote)
+			}
+			recorder := &auditRecorder{started: time.Now()}
+			recorder.refresh(&tt.config)
+			if recorder.event.MayMutateKnownHosts != tt.wantMayMutateKnownHosts {
+				t.Errorf("MayMutateKnownHosts = %v, want %v", recorder.event.MayMutateKnownHosts, tt.wantMayMutateKnownHosts)
+			}
+		})
+	}
+}
+
 func TestWriteAuditEventUsesJSONLWithPrivatePermissions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
