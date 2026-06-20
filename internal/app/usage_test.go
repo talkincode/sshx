@@ -39,6 +39,7 @@ func TestPrintUsage(t *testing.T) {
 		"Usage:",
 		"SSH Options:",
 		"Sudo Auto-fill:",
+		"Dry-run Plan Preview:",
 		"Safety Options:",
 		"SFTP Options:",
 		"Password Management",
@@ -61,6 +62,7 @@ func TestPrintUsage(t *testing.T) {
 		"--download=",
 		"--password-set=",
 		"--password-get=",
+		"--dry-run",
 		"--force",
 		"--no-safety-check",
 	}
@@ -86,6 +88,7 @@ func TestPrintUsage(t *testing.T) {
 		"safety check",
 		"remote command starts with sudo",
 		"Non-leading sudo is not auto-filled",
+		"Dry-run never connects",
 	}
 
 	for _, keyword := range safetyKeywords {

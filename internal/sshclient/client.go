@@ -61,6 +61,9 @@ type Config struct {
 	// default because a PTY merges stderr into stdout and injects terminal
 	// control characters; it is ignored in JSON/capture mode.
 	UsePTY bool
+	// DryRun emits a local execution plan without connecting, executing, reading
+	// keyring secrets, or mutating local/remote state.
+	DryRun bool
 
 	SafetyCheck bool
 	Force       bool

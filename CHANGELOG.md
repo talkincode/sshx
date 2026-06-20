@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--dry-run` prints a local execution plan without connecting, executing,
+  reading keyring secrets, mutating `known_hosts`, or writing local/remote
+  state. Combine with `--json` for agent-readable plan output.
+
 ### Changed
 
 - Sudo auto-fill detection now uses one consistent rule across keyring lookup

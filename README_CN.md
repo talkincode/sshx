@@ -61,7 +61,8 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
 1. 跨平台 SSH/SFTP 操作（支持 sudo 自动填充）。
 2. 密码管理（Keychain / Secret Service / Credential Manager）。
 3. 主机配置管理，支持为每台主机配置独立的 SSH 密钥。
-4. 脚本执行和命令安全验证。
+4. 面向人和 agent 的 dry-run 执行计划预览。
+5. 脚本执行和命令安全验证。
 
 ## 安装
 
@@ -245,6 +246,19 @@ sshx -h=prod-web --json "systemctl is-active nginx"
 当发生 `sshx` 层面的失败时，对象中 `exit_code` 为 `-1` 且 `error_kind` 非空（取值为
 `timeout`、`auth`、`host_key`、`connect`、`blocked`、`exit_missing`、`config`、`error`
 之一），因此始终可以与"远程命令恰好退出 255"区分开来。
+
+### `--dry-run` 执行计划预览
+
+加上 `--dry-run` 可以在真正连接 SSH、执行命令、执行 SFTP 操作、读取 keyring 明文、
+更新 `known_hosts` 或写入配置前，查看 `sshx` 如何解释这次调用。与 `--json` 搭配时
+会输出适合 agent 解析的执行计划：
+
+```bash
+sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
+```
+
+dry-run 只是本地计划预览。它会说明主机解析、模式/动作、sudo key 选择、安全检查结果，
+以及真实执行时是否会连接、执行、读取 secret 或修改状态；它不承诺远程命令一定成功。
 
 ### `--timeout` 与 `--pty`
 

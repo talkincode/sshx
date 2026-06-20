@@ -42,6 +42,20 @@ JSON result fields:
 
 Branch on `success` first; on failure read `error_kind` (do not parse free-form text).
 
+## Preview before executing: use `--dry-run --json`
+
+When you need to verify what sshx would do before touching a server, pass
+`--dry-run --json`. It prints a local execution plan and does not connect,
+execute, read keyring secrets, mutate `known_hosts`, or write settings.
+
+```bash
+sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
+```
+
+Dry-run reports host resolution, mode/action, sudo key selection, safety-check
+status, and whether a real run would connect, execute, read a secret, or mutate
+state. It does not simulate remote command success.
+
 ## Exit codes (and how to read failures)
 
 | Exit code | Meaning                                                       |
