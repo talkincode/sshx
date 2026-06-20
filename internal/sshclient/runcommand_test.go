@@ -1,6 +1,7 @@
 package sshclient
 
 import (
+	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -116,6 +117,18 @@ func runFakeCommand(ch ssh.Channel, command string) uint32 {
 		writeAll(ch, "to-out\n")
 		writeAll(ch.Stderr(), "to-err\n")
 		return 0
+	case "sudo -S -p '' whoami":
+		stdin, err := bufio.NewReader(ch).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			writeAll(ch.Stderr(), "failed to read sudo stdin\n")
+			return 24
+		}
+		if stdin != "sudo-fixture\n" {
+			writeAll(ch.Stderr(), "unexpected sudo stdin\n")
+			return 25
+		}
+		writeAll(ch, "sudo-ok\n")
+		return 0
 	case "sleep":
 		time.Sleep(5 * time.Second)
 		return 0
@@ -202,6 +215,24 @@ func TestRunCommandTimeout(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrCommandTimeout), "expected ErrCommandTimeout, got %v", err)
 	assert.Equal(t, -1, res.ExitCode)
 	assert.Less(t, elapsed, 4*time.Second, "timeout should fire well before the command finishes")
+}
+
+func TestRunCommandSudoFeedsPasswordOnStdin(t *testing.T) {
+	host, port := startTestSSHServer(t)
+	client := dialTestClient(t, host, port)
+	sudoPassword := "sudo-fixture" // #nosec G101 -- fake test password used only for stdin contract coverage.
+	client.config.Command = "sudo whoami"
+	client.config.Password = sudoPassword
+	client.config.Timeout = 2 * time.Second
+
+	res, err := client.RunCommand(true)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.ExitCode)
+	assert.Equal(t, "sudo-ok\n", res.Stdout)
+	assert.Empty(t, res.Stderr)
+	assert.NotContains(t, res.Stdout, sudoPassword)
+	assert.NotContains(t, res.Stderr, sudoPassword)
 }
 
 func TestCappedBufferTruncates(t *testing.T) {
