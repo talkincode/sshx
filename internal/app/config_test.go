@@ -599,3 +599,57 @@ func TestParseArgs_ComplexCommand(t *testing.T) {
 		t.Errorf("Expected command '%s', got '%s'", expected, config.Command)
 	}
 }
+
+func TestParseArgs_RemoteCommandPreservesFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		command string
+		force   bool
+		json    bool
+	}{
+		{
+			name:    "remote grep flag after command start",
+			args:    []string{"sshx", "-h=host", "--json", "grep", "-v", "foo"},
+			command: "grep -v foo",
+			json:    true,
+		},
+		{
+			name:    "remote long help flag after command start",
+			args:    []string{"sshx", "-h=host", "grep", "--help"},
+			command: "grep --help",
+		},
+		{
+			name:    "remote token matching local force after command start",
+			args:    []string{"sshx", "-h=host", "echo", "--force"},
+			command: "echo --force",
+			force:   false,
+		},
+		{
+			name:    "separator allows remote command to start with dash",
+			args:    []string{"sshx", "-h=host", "--", "--version"},
+			command: "--version",
+		},
+		{
+			name:    "local force before command still applies",
+			args:    []string{"sshx", "-h=host", "--force", "reboot"},
+			command: "reboot",
+			force:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := ParseArgs(tt.args)
+			if config.Command != tt.command {
+				t.Fatalf("expected command %q, got %q", tt.command, config.Command)
+			}
+			if config.Force != tt.force {
+				t.Fatalf("expected force=%t, got %t", tt.force, config.Force)
+			}
+			if config.JSONOutput != tt.json {
+				t.Fatalf("expected json=%t, got %t", tt.json, config.JSONOutput)
+			}
+		})
+	}
+}

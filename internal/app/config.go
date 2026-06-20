@@ -88,8 +88,14 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 	config.SudoKey = sudoKey
 
+	commandParts := []string{}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
+		if config.Mode == "ssh" && arg == "--" {
+			commandParts = append(commandParts, args[i+1:]...)
+			break
+		}
+
 		switch {
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
@@ -223,21 +229,17 @@ func ParseArgs(args []string) *sshclient.Config {
 		case arg == "--help":
 			PrintUsage()
 			os.Exit(0)
+		default:
+			if config.Mode == "ssh" {
+				commandParts = append(commandParts, args[i:]...)
+				i = len(args)
+			}
 		}
 	}
 
 	if config.Mode == "ssh" {
-		actualCmd := []string{}
-		for i := 1; i < len(args); i++ {
-			arg := args[i]
-			if strings.HasPrefix(arg, "-") {
-				continue
-			}
-			actualCmd = append(actualCmd, arg)
-		}
-
-		if len(actualCmd) > 0 {
-			config.Command = strings.Join(actualCmd, " ")
+		if len(commandParts) > 0 {
+			config.Command = strings.Join(commandParts, " ")
 		}
 	}
 

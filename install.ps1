@@ -82,6 +82,22 @@ function Install-Sshx {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile -UseBasicParsing
         Write-ColorOutput "Downloaded successfully" "Success"
 
+        # Verify checksum
+        Write-ColorOutput "Downloading checksums..." "Info"
+        $checksumFile = Join-Path $tmpDir "checksums.txt"
+        Invoke-WebRequest -Uri "https://github.com/$Repo/releases/download/$targetVersion/checksums.txt" -OutFile $checksumFile -UseBasicParsing
+        $escapedFilename = [regex]::Escape($filename)
+        $line = Get-Content $checksumFile | Where-Object { $_ -match "\s$escapedFilename$" } | Select-Object -First 1
+        if (-not $line) {
+            throw "Checksum for $filename not found"
+        }
+        $expectedHash = ($line -split '\s+')[0].ToLowerInvariant()
+        $actualHash = (Get-FileHash -Algorithm SHA256 -Path $zipFile).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash) {
+            throw "Checksum verification failed. Expected $expectedHash, got $actualHash"
+        }
+        Write-ColorOutput "Checksum verified" "Success"
+
         # Extract
         Write-ColorOutput "Extracting..." "Info"
         Expand-Archive -Path $zipFile -DestinationPath $tmpDir -Force
@@ -165,7 +181,7 @@ function Show-QuickStart {
     Write-Host "  sshx -h=192.168.1.100 -u=Administrator 'systeminfo'"
     Write-Host ""
     Write-Host "  # Save password (optional)"
-    Write-Host "  sshx --set-password host=192.168.1.100 user=Administrator"
+    Write-Host "  sshx --password-set=master"
     Write-Host ""
     Write-ColorOutput "Documentation: https://github.com/$Repo" "Info"
 }

@@ -92,7 +92,8 @@ In `--json` mode an sshx-level failure has `exit_code: -1` and a non-empty
 ## Command execution
 
 ```bash
-# Default user is "master"; key auth is tried first, then password fallback.
+# Default user is "master"; key auth is tried first.
+# Password auth fallback only happens when SSH_PASSWORD is already provided.
 sshx -h=192.168.1.100 "uptime"
 
 # Address a host by its configured name (resolved from settings.json).
@@ -205,8 +206,10 @@ sshx --password-delete=server-A       # delete (alias: --password-del)
 
 ## Authentication & host-key behavior
 
-- Auth order: SSH key first, automatic fallback to keyring password if keys are
-  rejected. Force password-only with `--no-key` / `--password-only`.
+- Auth order: SSH key first; password fallback only happens when an SSH login
+  password is already provided (for example `SSH_PASSWORD`). Keyring passwords
+  are for sudo auto-fill, not ordinary SSH login. Force password-only with
+  `--no-key` / `--password-only`.
 - Strict `known_hosts` verification by default. Opt-in overrides (loud, last-resort):
   `--accept-unknown-host` (records the key once), `--insecure-hostkey`,
   `--known-hosts=<path>`.

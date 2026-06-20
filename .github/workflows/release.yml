@@ -92,6 +92,7 @@ jobs:
           build darwin amd64
           build darwin arm64
           build windows amd64
+          build windows arm64
 
       - name: Generate checksums
         run: |
@@ -135,6 +136,7 @@ jobs:
             | macOS | Intel | `sshx-darwin-amd64.tar.gz` |
             | macOS | Apple Silicon | `sshx-darwin-arm64.tar.gz` |
             | Windows | x86_64 | `sshx-windows-amd64.zip` |
+            | Windows | ARM64 | `sshx-windows-arm64.zip` |
 
             **Verify downloads:** Use `checksums.txt` for integrity verification
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -822,7 +823,7 @@ func (c *SSHClient) removeDirectory(path string) error {
 	}
 
 	for _, file := range files {
-		fullPath := filepath.Join(path, file.Name())
+		fullPath := remotePathJoin(path, file.Name())
 		if file.IsDir() {
 			if err := c.removeDirectory(fullPath); err != nil {
 				return err
@@ -835,6 +836,10 @@ func (c *SSHClient) removeDirectory(path string) error {
 	}
 
 	return c.sftpClient.RemoveDirectory(path)
+}
+
+func remotePathJoin(elem ...string) string {
+	return path.Join(elem...)
 }
 
 // Close closes the SFTP and SSH connections.

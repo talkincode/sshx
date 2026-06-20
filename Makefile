@@ -60,6 +60,8 @@ build-all: ## Build binaries for all platforms
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-darwin-arm64 ./cmd/sshx
 	@echo "Building Windows (amd64)..."
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sshx
+	@echo "Building Windows (arm64)..."
+	GOOS=windows GOARCH=arm64 $(GOBUILD) $(RELEASE_LDFLAGS) -o $(GOBIN)/$(BINARY_NAME)-windows-arm64.exe ./cmd/sshx
 	@echo "All platform builds complete!"
 
 test: ## Run all tests

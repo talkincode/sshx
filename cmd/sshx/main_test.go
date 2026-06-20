@@ -34,6 +34,7 @@ func TestHandleVersionFlag(t *testing.T) {
 		{"no args", []string{"sshx"}, false},
 		{"token inside remote command is ignored", []string{"sshx", "-h=host", "grep", "-v", "foo"}, false},
 		{"version after positional command is ignored", []string{"sshx", "-h=host", "run", "--version"}, false},
+		{"version after separator is remote command", []string{"sshx", "-h=host", "--", "--version"}, false},
 	}
 
 	for _, tc := range cases {

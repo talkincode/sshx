@@ -53,6 +53,9 @@ func main() {
 // `sshx -h=host grep -v foo`) is never mistaken for a version request.
 func handleVersionFlag(args []string) bool {
 	for _, arg := range args[1:] {
+		if arg == "--" {
+			break
+		}
 		if !strings.HasPrefix(arg, "-") {
 			break
 		}
