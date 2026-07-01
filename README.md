@@ -96,6 +96,14 @@ sshx -h=192.168.1.100 "uptime"
 
 **Note:** Make sure `$GOPATH/bin` (typically `~/go/bin`) is in your PATH.
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install talkincode/tap/sshx
+```
+
+This pulls prebuilt binaries from the [talkincode/homebrew-tap](https://github.com/talkincode/homebrew-tap) repository, updated automatically on every tagged release.
+
 ### One-Line Installation Script
 
 #### Linux / macOS

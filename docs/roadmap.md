@@ -83,7 +83,7 @@ internal/sshclient
 
 - 构建、发布和质量守护
 
-  Makefile 提供构建、测试、覆盖率、lint、跨平台编译和安装目标；CI 在 Ubuntu 和 macOS 上使用 Go 1.24 运行测试、race、覆盖率、lint 和安全扫描；release workflow 在 tag push 时构建 Linux、macOS、Windows 产物并生成 checksums。证据：`Makefile`、`.github/workflows/ci.yml`、`.github/workflows/release.yml`、`RELEASE.md`。
+  Makefile 提供构建、测试、覆盖率、lint、跨平台编译和安装目标；CI 在 Ubuntu 和 macOS 上使用 Go 1.24 运行测试、race、覆盖率、lint 和安全扫描；release workflow 在 tag push 时构建 Linux、macOS、Windows 产物并生成 checksums，并在配置 `HOMEBREW_TAP_TOKEN` 后自动渲染、推送 Homebrew tap formula（`talkincode/homebrew-tap`）。证据：`Makefile`、`.github/workflows/ci.yml`、`.github/workflows/release.yml`、`RELEASE.md`。
 
 ## 非目标（铁律）
 

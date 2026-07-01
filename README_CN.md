@@ -94,6 +94,14 @@ sshx -h=192.168.1.100 "uptime"
 
 **注意：** 确保 `$GOPATH/bin`（通常是 `~/go/bin`）在您的 PATH 中。
 
+### Homebrew（macOS / Linux）
+
+```bash
+brew install talkincode/tap/sshx
+```
+
+该命令会从 [talkincode/homebrew-tap](https://github.com/talkincode/homebrew-tap) 仓库拉取预编译二进制文件，每次打 tag 发布时自动更新。
+
 ### 一键安装脚本
 
 #### Linux / macOS

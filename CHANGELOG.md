@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An mdBook documentation site with English and Chinese guides for getting
   started, host management, SFTP, scripting, security, scenarios, and
   troubleshooting.
+- Release automation now publishes/updates a Homebrew tap formula
+  (`talkincode/homebrew-tap`) on every tagged release, so macOS/Linux users can
+  `brew install talkincode/tap/sshx`. The step is opt-in via the
+  `HOMEBREW_TAP_TOKEN` repository secret and no-ops otherwise.
 
 ### Changed
 
