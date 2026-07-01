@@ -215,7 +215,7 @@ func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, 
 		Host:            config.Host,
 		Port:            config.Port,
 		User:            config.User,
-		Command:         config.Command,
+		Command:         redactSensitiveText(config.Command),
 		ExitCode:        res.ExitCode,
 		Success:         execErr == nil && res.ExitCode == 0,
 		Stdout:          res.Stdout,
@@ -227,7 +227,7 @@ func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, 
 		ErrorKind:       errKind,
 	}
 	if execErr != nil {
-		result.Error = execErr.Error()
+		result.Error = redactError(execErr)
 		if result.ExitCode == 0 {
 			result.ExitCode = -1
 		}

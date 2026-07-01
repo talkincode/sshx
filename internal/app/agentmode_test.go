@@ -145,6 +145,43 @@ func TestRun_BlockedCommandShortCircuits(t *testing.T) {
 	}
 }
 
+func TestRun_BlockedCommandJSONRedactsSecretLikeArguments(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	secretFragments := []string{"alpha", "bravo", "charlie", "delta"}
+	result := runReportedJSON(t, []string{
+		"sshx",
+		"-h=192.0.2.1",
+		"--json",
+		`sudo rm -rf / password="alpha bravo" --token "charlie delta"`,
+	})
+
+	if result["error_kind"] != "blocked" {
+		t.Fatalf("expected error_kind=blocked, got %v", result["error_kind"])
+	}
+	command, ok := result["command"].(string)
+	if !ok {
+		t.Fatalf("expected command string, got %T", result["command"])
+	}
+	if command != `sudo rm -rf / password=<redacted> --token <redacted>` {
+		t.Fatalf("unexpected redacted command: %q", command)
+	}
+	errText, ok := result["error"].(string)
+	if !ok {
+		t.Fatalf("expected error string, got %T", result["error"])
+	}
+	if !strings.Contains(errText, `password=<redacted> --token <redacted>`) {
+		t.Fatalf("expected redacted command in error, got %q", errText)
+	}
+	for _, fragment := range secretFragments {
+		if strings.Contains(command, fragment) {
+			t.Fatalf("command leaked secret fragment %q in %q", fragment, command)
+		}
+		if strings.Contains(errText, fragment) {
+			t.Fatalf("error leaked secret fragment %q in %q", fragment, errText)
+		}
+	}
+}
+
 func TestRun_JSONConfigFailuresDoNotConnect(t *testing.T) {
 	tests := []struct {
 		name          string
