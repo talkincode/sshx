@@ -284,7 +284,8 @@ unless the mission in §1–§3 is formally revised.
   `scripts/release-note.sh` (`make renote`).
 - `release.yml` cross-compiles and publishes artifacts on tag push.
 - Install paths: `go install`, `install.sh` (Linux/macOS), `install.ps1`
-  (Windows), or manual binary download.
+  (Windows), a Homebrew tap (`talkincode/homebrew-tap`, opt-in via the
+  `HOMEBREW_TAP_TOKEN` secret), or manual binary download.
 
 ## 12. Guidelines for AI Coding Agents
 

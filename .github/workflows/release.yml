@@ -161,3 +161,100 @@ jobs:
           name: binaries
           path: dist/*
           retention-days: 30
+
+  homebrew:
+    name: Update Homebrew tap
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    env:
+      # Set HOMEBREW_TAP_TOKEN (a fine-grained PAT with push access to the tap
+      # repo) to enable this job. Without it the job no-ops, so releases from
+      # forks or before the secret is configured never fail. HOMEBREW_TAP_REPO
+      # is the `homebrew-<tap>` repository backing `brew install <owner>/tap/sshx`.
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HOMEBREW_TAP_REPO: talkincode/homebrew-tap
+    steps:
+      - name: Download release artifacts
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist-artifacts
+
+      - name: Render and push formula
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"   # e.g. v1.2.0
+          VERSION="${TAG#v}"                # e.g. 1.2.0
+          BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          CHECKSUMS="dist-artifacts/checksums.txt"
+
+          # Look up the sha256 for a given archive name from checksums.txt
+          # (format: "<sha256>  <filename>", as produced by `sha256sum *`).
+          sha() {
+            local hash
+            hash="$(awk -v f="$1" '$2 == f { print $1; exit }' "$CHECKSUMS")"
+            [ -n "$hash" ] || { echo "missing checksum for $1" >&2; exit 1; }
+            echo "$hash"
+          }
+
+          DARWIN_ARM64_SHA="$(sha sshx-darwin-arm64.tar.gz)"
+          DARWIN_AMD64_SHA="$(sha sshx-darwin-amd64.tar.gz)"
+          LINUX_ARM64_SHA="$(sha sshx-linux-arm64.tar.gz)"
+          LINUX_AMD64_SHA="$(sha sshx-linux-amd64.tar.gz)"
+
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+
+          cat > tap/Formula/sshx.rb <<EOF
+          class Sshx < Formula
+            desc "Barrier-free SSH/SFTP CLI with a built-in OS-keyring password manager"
+            homepage "https://github.com/talkincode/sshx"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/sshx-darwin-arm64.tar.gz"
+                sha256 "${DARWIN_ARM64_SHA}"
+              else
+                url "${BASE_URL}/sshx-darwin-amd64.tar.gz"
+                sha256 "${DARWIN_AMD64_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/sshx-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM64_SHA}"
+              else
+                url "${BASE_URL}/sshx-linux-amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
+            end
+
+            def install
+              # Each archive contains a single, platform-suffixed binary
+              # (e.g. sshx-darwin-arm64); rename it to the plain "sshx" command.
+              bin.install Dir["sshx-*"].first => "sshx"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/sshx --version")
+            end
+          end
+          EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/sshx.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date for ${VERSION}"
+          else
+            git commit -m "sshx ${VERSION}"
+            git push
+          fi

@@ -67,6 +67,8 @@ After pushing the tag, GitHub Actions will automatically:
 
 5. ✅ Upload all binaries to the Release
 
+6. ✅ Publish/update the Homebrew tap formula (if `HOMEBREW_TAP_TOKEN` is configured; see below)
+
 ### 5. Verify Release
 
 Visit the GitHub Releases page to verify:
@@ -158,6 +160,47 @@ ls -lh bin/
 1. Check file size limits
 2. Verify network connection
 3. Review detailed error messages in Actions logs
+
+## Homebrew Tap Publishing
+
+On every tag push, the `homebrew` job in `.github/workflows/release.yml` renders and
+pushes a `Formula/sshx.rb` file to the `talkincode/homebrew-tap` repository, so
+users can run:
+
+```bash
+brew install talkincode/tap/sshx
+```
+
+The formula is built from the `checksums.txt` produced by the `build` job, and
+covers `darwin`/`linux` on both `amd64` and `arm64`. Windows has no Homebrew
+equivalent, so it is intentionally excluded from the formula.
+
+### One-time setup
+
+1. Create (or reuse) a `talkincode/homebrew-tap` repository with a `Formula/`
+   directory.
+2. Generate a fine-grained GitHub Personal Access Token scoped to `Contents:
+   write` on that repository only.
+3. Add it as a repository secret named `HOMEBREW_TAP_TOKEN` in `talkincode/sshx`
+   (Settings → Secrets and variables → Actions).
+
+If `HOMEBREW_TAP_TOKEN` is not set, the `homebrew` job no-ops (its steps are
+skipped) and the rest of the release is unaffected — this mirrors how the
+project treats other optional publish integrations.
+
+### Verifying a published formula
+
+```bash
+brew tap talkincode/tap
+brew install sshx
+sshx --version
+```
+
+Or inspect the rendered formula directly:
+
+```
+https://github.com/talkincode/homebrew-tap/blob/main/Formula/sshx.rb
+```
 
 ## CI/CD Workflows
 
