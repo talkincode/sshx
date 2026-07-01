@@ -1,0 +1,17 @@
+[book]
+title = "SSHX Documentation"
+authors = ["SSHX contributors"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/talkincode/sshx"
+edit-url-template = "https://github.com/talkincode/sshx/edit/main/{path}"
+additional-css = ["docs/theme/language.css"]
+additional-js = ["docs/theme/language.js"]
+default-theme = "light"
+preferred-dark-theme = "navy"

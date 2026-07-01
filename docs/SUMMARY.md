@@ -1,0 +1,18 @@
+# Summary
+
+- [SSHX Documentation](index.md)
+  - [Getting Started](getting-started.md)
+  - [Host Management](host-management.md)
+  - [SFTP Workflows](sftp.md)
+  - [Agent and Script Mode](agent-scripting.md)
+  - [Usage Scenarios](usage-scenarios.md)
+  - [Security Guidelines](security-guidelines.md)
+  - [Troubleshooting](troubleshooting.md)
+- [中文文档](zh/index.md)
+  - [快速开始](zh/getting-started.md)
+  - [主机管理](zh/host-management.md)
+  - [SFTP 工作流](zh/sftp.md)
+  - [Agent 与脚本模式](zh/agent-scripting.md)
+  - [使用场景](zh/usage-scenarios.md)
+  - [安全准则](zh/security-guidelines.md)
+  - [故障排查](zh/troubleshooting.md)
