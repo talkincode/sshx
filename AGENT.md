@@ -32,8 +32,9 @@ The core value proposition:
 3. **Secure by default** — strict `known_hosts` verification, keyring-backed
    secrets, sudo password delivered over stdin (never interpolated), and command
    safety checks that block obviously destructive operations.
-4. **Low cognitive load** — sensible defaults, named hosts, key-then-password
-   auth fallback, and helpful error messages.
+4. **Low cognitive load** — sensible defaults, named hosts, key-first auth with
+   password fallback only when an SSH login password is already provided, and
+   helpful error messages.
 5. **Multi-server ergonomics** — per-host SSH keys and per-host/per-server
    password keys so one tool covers a whole fleet.
 6. **Execution preview** — `--dry-run` explains the local execution plan without
@@ -199,22 +200,51 @@ tests.
    fork bombs, `curl | sh`, critical file edits, shutdown/reboot) are blocked
    unless `--force`/`-f` or `--no-safety-check` is given. The validator is a
    guardrail against mistakes, **not** a security sandbox.
-6. **Auth order.** SSH key first, automatic fallback to password when the server
-   rejects keys. `--no-key`/`SSH_DISABLE_KEY` forces password-only.
+6. **Auth order.** SSH key first; password fallback happens only when an SSH
+   login password is already provided (for example through `SSH_PASSWORD`).
+   Keyring passwords are for sudo auto-fill, not ordinary SSH login.
+   `--no-key`/`SSH_DISABLE_KEY` forces password-only.
 7. **Config file is `0600`** and written atomically.
 
-## 8. Testing Strategy
+## 8. Boundary Contracts
+
+Most expensive bugs in this project come from crossing boundaries that look
+similar in code but mean different things to users. Before changing any logic in
+these areas, name the boundary and add a regression test or explicit manual
+verification for it:
+
+- **Local CLI flags vs remote command tokens.** Once the remote command starts,
+  tokens such as `-v`, `--help`, `--force`, and `--` belong to the remote
+  command unless a documented separator says otherwise.
+- **Local filesystem paths vs remote/SFTP paths.** Use local OS path semantics
+  only for local files. Remote SFTP paths use slash-separated remote path
+  semantics even when sshx is built or run on Windows.
+- **SSH login password vs sudo password.** `SSH_PASSWORD` is an SSH login
+  credential. Keyring `password_key` / `SSH_SUDO_KEY` values are sudo secrets
+  unless a future change explicitly introduces a separate SSH password key.
+- **Documented behavior vs implemented behavior.** If README, `usage.go`,
+  `skills/sshx/SKILL.md`, or `docs/roadmap.md` says a behavior exists, verify
+  the code path actually implements it.
+- **Installer platform detection vs release artifacts.** Any platform an
+  installer can select must have a matching release artifact, checksum entry,
+  and build path.
+
+## 9. Testing Strategy
 
 - **Table-driven unit tests** per package, colocated (`*_test.go`).
 - **No network in unit tests** — SSH/SFTP behavior is exercised with local
   servers/mocks (`mock_test.go`) and the keyring is mocked.
+- **Boundary-sensitive logic must be tested** — e.g. command parsing keeps
+  remote flags intact, `--` separators work, SFTP remote paths stay POSIX-like,
+  docs examples match implemented flags, and installer platform detection
+  matches release artifacts.
 - **Security-relevant logic must be tested** — e.g. `CommandUsesSudo`,
   `sudoStdinCommand`, command validation, atomic settings save (perms + no temp
   leftovers), and platform detection.
 - Coverage is tracked (Codecov). Coverage is currently modest; **raising it is an
   ongoing goal** — prefer adding tests alongside any change you make.
 
-## 9. Roadmap
+## 10. Roadmap
 
 A living, maintainer-adjustable plan. Items must respect the boundaries in §3.
 
@@ -247,7 +277,7 @@ A living, maintainer-adjustable plan. Items must respect the boundaries in §3.
 Anything implying a daemon, MCP, tunneling, or a GUI is explicitly **rejected**
 unless the mission in §1–§3 is formally revised.
 
-## 10. Release Process
+## 11. Release Process
 
 - Semantic Versioning; changes recorded in `CHANGELOG.md` (Keep a Changelog).
 - Tagging is scripted (`scripts/tag.sh`, `make tag`); release notes via
@@ -256,7 +286,7 @@ unless the mission in §1–§3 is formally revised.
 - Install paths: `go install`, `install.sh` (Linux/macOS), `install.ps1`
   (Windows), or manual binary download.
 
-## 11. Guidelines for AI Coding Agents
+## 12. Guidelines for AI Coding Agents
 
 When working in this repo:
 
@@ -279,6 +309,42 @@ When working in this repo:
    `//nolint:errcheck // reason`. Comment only what needs clarifying.
 7. **Prefer surgical edits.** Don't refactor unrelated code or "drive-by" fix
    pre-existing issues outside the task's scope.
+8. **Do the completion self-check.** Before declaring work complete, list the
+   original failure or risk, the regression test or manual reproduction, and
+   the commands run.
+
+### Completion self-check
+
+Before declaring a change done:
+
+1. Reproduce the original failure or risk case, or explain why it cannot be
+   reproduced locally.
+2. Add or update a regression test for the bug class, not only the exact input.
+3. Check adjacent adversarial examples when relevant:
+   - Remote command flags: `-v`, `--help`, `--force`, `--`.
+   - Remote paths under Windows builds.
+   - README / usage examples against actual parsed flags.
+   - Installer-supported platforms against release artifacts.
+4. Run the relevant verification commands. For code changes this normally means
+   `go test ./...`, `go test -race ./...`, and `go vet ./...`. For installer or
+   release changes, also run shell syntax checks and at least one cross-build
+   smoke test.
+5. Confirm no generated binaries, coverage reports, or unrelated files are left
+   in the working tree.
+
+### Bugfix reflection
+
+For every non-trivial bug fix, include this short reflection in the PR body or
+final agent summary:
+
+```text
+Bug class:
+Missing invariant:
+Why existing tests missed it:
+Regression test added:
+Docs or AGENT.md update needed:
+Verification run:
+```
 
 When committing on behalf of an agent, include the trailer:
 

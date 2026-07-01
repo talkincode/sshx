@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--dry-run` prints a local execution plan without connecting, executing,
   reading keyring secrets, mutating `known_hosts`, or writing local/remote
   state. Combine with `--json` for agent-readable plan output.
+- An mdBook documentation site with English and Chinese guides for getting
+  started, host management, SFTP, scripting, security, scenarios, and
+  troubleshooting.
 
 ### Changed
 
@@ -24,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and command execution: only commands that start with `sudo` trigger password
   auto-fill. Non-leading `sudo` inside shell wrappers or pipelines is left
   untouched.
+- SSH login password fallback now only occurs when an SSH login password is
+  explicitly provided; keyring passwords remain scoped to sudo auto-fill.
+- Install scripts verify downloaded release checksums before extracting.
+
+### Fixed
+
+- Remote command tokens after the command start or `--` separator are preserved,
+  so flags such as `-v`, `--help`, and `--force` are passed to the remote
+  command instead of being consumed as local `sshx` flags.
+- Recursive SFTP removal now joins remote paths with POSIX-style separators on
+  all platforms.
 
 ## [0.0.11] - 2026-06-13
 
