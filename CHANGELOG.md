@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--json` blocked-command results now redact password, token, secret, and API
+  key style arguments in both the `command` field and `error` text, matching the
+  audit trail redaction behavior.
 - Remote command tokens after the command start or `--` separator are preserved,
   so flags such as `-v`, `--help`, and `--force` are passed to the remote
   command instead of being consumed as local `sshx` flags.
