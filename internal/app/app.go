@@ -98,6 +98,14 @@ func Run(args []string) (err error) {
 		return nil
 	}
 
+	// Handle server-to-server transfer mode
+	if config.Mode == "transfer" {
+		if transferErr := HandleTransfer(config); transferErr != nil {
+			return fmt.Errorf("transfer failed: %w", transferErr)
+		}
+		return nil
+	}
+
 	// Validate flags that only apply to command execution.
 	if config.Mode == "ssh" {
 		if config.Timeout < 0 {

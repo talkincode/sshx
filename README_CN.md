@@ -59,11 +59,12 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
 ## 核心特性
 
 1. 跨平台 SSH/SFTP 操作（支持 sudo 自动填充）。
-2. 密码管理（Keychain / Secret Service / Credential Manager）。
-3. 主机配置管理，支持为每台主机配置独立的 SSH 密钥。
-4. 面向人和 agent 的 dry-run 执行计划预览。
-5. 本地结构化审计日志，并默认做安全脱敏。
-6. 脚本执行和命令安全验证。
+2. 服务器到服务器直接文件传输（`--transfer=<host>:<path> --to=<host>:<path>`），数据经本机中转流式传输，不落本地磁盘。
+3. 密码管理（Keychain / Secret Service / Credential Manager）。
+4. 主机配置管理，支持为每台主机配置独立的 SSH 密钥。
+5. 面向人和 agent 的 dry-run 执行计划预览。
+6. 本地结构化审计日志，并默认做安全脱敏。
+7. 脚本执行和命令安全验证。
 
 ## 安装
 
@@ -210,6 +211,9 @@ sshx -h=192.168.1.100 -u=root "sudo df -h"
 
 # 一次性测试所有已配置的主机（每台主机 10 秒拨号超时），并在报告中标注认证方式
 sshx --host-test-all
+
+# 服务器到服务器直接传输文件（流式中转，不落本地磁盘）
+sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.log
 ```
 
 ## Agent / 脚本模式

@@ -85,6 +85,12 @@ type Config struct {
 	LocalPath  string
 	RemotePath string
 
+	// Server-to-server transfer fields (Mode == "transfer").
+	TransferSrcHost string
+	TransferSrcPath string
+	TransferDstHost string
+	TransferDstPath string
+
 	PasswordAction string
 	PasswordKey    string
 	PasswordValue  string
