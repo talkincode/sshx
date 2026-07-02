@@ -33,6 +33,9 @@ type dryRunPlan struct {
 	LocalPath  string `json:"local_path,omitempty"`
 	RemotePath string `json:"remote_path,omitempty"`
 
+	TransferSource string `json:"transfer_source,omitempty"`
+	TransferDest   string `json:"transfer_destination,omitempty"`
+
 	UseKeyAuth       bool   `json:"use_key_auth"`
 	KeyPath          string `json:"key_path,omitempty"`
 	PasswordProvided bool   `json:"password_provided"`
@@ -137,6 +140,10 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Action = config.PasswordAction
 	case "host":
 		plan.Action = config.HostAction
+	case "transfer":
+		plan.Action = "transfer"
+		plan.TransferSource = formatTransferEndpoint(config.TransferSrcHost, config.TransferSrcPath)
+		plan.TransferDest = formatTransferEndpoint(config.TransferDstHost, config.TransferDstPath)
 	}
 }
 
@@ -277,6 +284,26 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 }
 
 func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
+	if config.Mode == "transfer" {
+		if config.TransferSrcHost == "" || config.TransferSrcPath == "" {
+			plan.ConfigCheck = dryRunStatus{
+				Status:    "error",
+				ErrorKind: "config",
+				Message:   "source must be specified as --transfer=<host>:<path>",
+			}
+			plan.Valid = false
+			return
+		}
+		if config.TransferDstHost == "" || config.TransferDstPath == "" {
+			plan.ConfigCheck = dryRunStatus{
+				Status:    "error",
+				ErrorKind: "config",
+				Message:   "destination must be specified as --to=<host>:<path>",
+			}
+			plan.Valid = false
+		}
+		return
+	}
 	if config.Mode == "ssh" {
 		if config.Timeout < 0 {
 			plan.ConfigCheck = dryRunStatus{
@@ -329,6 +356,9 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 	case "sftp":
 		plan.WouldConnect = canProceed
 		plan.WouldMutateRemote = plan.WouldConnect && (config.SftpAction == "upload" || config.SftpAction == "mkdir" || config.SftpAction == "remove")
+	case "transfer":
+		plan.WouldConnect = canProceed
+		plan.WouldMutateRemote = canProceed
 	case "password":
 		plan.WouldReadSecret = canProceed && (config.PasswordAction == "get" || config.PasswordAction == "check" || config.PasswordAction == "delete" || config.PasswordAction == "list")
 		plan.WouldWriteLocalState = canProceed && (config.PasswordAction == "set" || config.PasswordAction == "delete")
@@ -347,7 +377,7 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 }
 
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")
@@ -375,7 +405,7 @@ func printDryRunPlan(plan dryRunPlan) {
 		}
 		fmt.Println()
 	}
-	if plan.User != "" || plan.Port != "" {
+	if plan.Mode != "transfer" && (plan.User != "" || plan.Port != "") {
 		fmt.Printf("Target: %s@%s:%s\n", firstNonEmpty(plan.User, "-"), firstNonEmpty(plan.HostResolved, "-"), firstNonEmpty(plan.Port, "-"))
 	}
 	if plan.Command != "" {
@@ -383,6 +413,9 @@ func printDryRunPlan(plan dryRunPlan) {
 	}
 	if plan.SftpAction != "" {
 		fmt.Printf("SFTP: %s local=%q remote=%q\n", plan.SftpAction, plan.LocalPath, plan.RemotePath)
+	}
+	if plan.TransferSource != "" || plan.TransferDest != "" {
+		fmt.Printf("Transfer: %s → %s\n", plan.TransferSource, plan.TransferDest)
 	}
 	fmt.Printf("Config check: %s\n", statusText(plan.ConfigCheck))
 	fmt.Printf("Safety check: %s\n", statusText(plan.SafetyCheck))

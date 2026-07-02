@@ -14,6 +14,7 @@ Usage:
   sshx -h=<host> [options] <command>              # SSH mode
   sshx -h=<host> [options] --upload=<file>        # SFTP upload
   sshx -h=<host> [options] --download=<file>      # SFTP download
+  sshx --transfer=<host>:<path> --to=<host>:<path> # Server-to-server transfer
   sshx --password-set=<key>[:<password>]          # Set password in keyring
   sshx --password-get=<key>                       # Get password from keyring
   sshx --password-delete=<key>                    # Delete password from keyring
@@ -114,6 +115,15 @@ SFTP Options:
   --mkdir=<path>        Create remote directory
   --rm=<path>           Remove remote file or directory
 
+Server-to-Server Transfer:
+  --transfer=<src-host>:<src-path> --to=<dst-host>:<dst-path>
+
+  Streams files directly from one server to another through the local
+  machine (nothing is written to local disk). Supports single files and
+  recursive directory transfers, and preserves file permission bits.
+  Both hosts can be configured host names (from ~/.sshx/settings.json)
+  or IP addresses, each using its own SSH key/user/port from settings.
+
 Password Management (Cross-Platform):
   --password-set=<key>[:<password>]   Set password in system keyring
                                       If password omitted, will prompt
@@ -211,6 +221,22 @@ SFTP Examples:
   for file in *.txt; do
     sshx -h=192.168.1.100 --upload=$file --to=/backup/$file
   done
+
+Server-to-Server Transfer Examples:
+  # Transfer a file directly between two servers (by IP)
+  sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.log
+
+  # Transfer between configured hosts (from settings.json)
+  sshx --transfer=prod-web:/etc/nginx/nginx.conf --to=staging-web:/etc/nginx/nginx.conf
+
+  # Transfer a whole directory recursively
+  sshx --transfer=prod-db:/var/backups --to=backup-server:/mnt/archive/db
+
+  # If the destination is an existing directory, the source is placed inside it
+  sshx --transfer=prod-web:/var/log/app.log --to=log-server:/var/logs/
+
+  # Preview the transfer plan without connecting
+  sshx --transfer=prod-web:/data --to=prod-db:/data --dry-run
 
 Password Management Examples:
   # Set default sudo password (interactive prompt)

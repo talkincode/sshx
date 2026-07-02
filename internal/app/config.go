@@ -32,6 +32,16 @@ func parseTimeout(value string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid timeout %q (use e.g. 30s, 2m, or 30)", value)
 }
 
+// splitHostPath splits a "host:path" transfer spec at the first colon.
+// If there is no colon, the whole value is treated as a host with an empty path.
+func splitHostPath(spec string) (host, path string) {
+	parts := strings.SplitN(spec, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return spec, ""
+}
+
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
@@ -152,11 +162,16 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.Mode = "sftp"
 			config.SftpAction = "download"
 			config.RemotePath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--transfer="):
+			config.Mode = "transfer"
+			config.TransferSrcHost, config.TransferSrcPath = splitHostPath(strings.SplitN(arg, "=", 2)[1])
 		case strings.HasPrefix(arg, "--to="):
-			switch config.SftpAction {
-			case "upload":
+			switch {
+			case config.Mode == "transfer":
+				config.TransferDstHost, config.TransferDstPath = splitHostPath(strings.SplitN(arg, "=", 2)[1])
+			case config.SftpAction == "upload":
 				config.RemotePath = strings.SplitN(arg, "=", 2)[1]
-			case "download":
+			case config.SftpAction == "download":
 				config.LocalPath = strings.SplitN(arg, "=", 2)[1]
 			}
 		case strings.HasPrefix(arg, "--list="), strings.HasPrefix(arg, "--ls="):

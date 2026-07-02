@@ -61,11 +61,12 @@ Managing multiple servers means juggling different passwords and repeatedly ente
 ## Key Features
 
 1. Cross-platform SSH/SFTP operations (supports sudo auto-fill).
-2. Password management (Keychain / Secret Service / Credential Manager).
-3. Host configuration management with per-host SSH keys.
-4. Dry-run execution plan preview for humans and agents.
-5. Local structured audit trail with safe default redaction.
-6. Script execution and command security validation.
+2. Direct server-to-server file transfer (`--transfer=<host>:<path> --to=<host>:<path>`), streamed through the local machine without touching local disk.
+3. Password management (Keychain / Secret Service / Credential Manager).
+4. Host configuration management with per-host SSH keys.
+5. Dry-run execution plan preview for humans and agents.
+6. Local structured audit trail with safe default redaction.
+7. Script execution and command security validation.
 
 ## Installation
 
@@ -209,6 +210,9 @@ sshx --password-set=192.168.1.100-root
 
 # Use the saved password for sudo auto-fill
 sshx -h=192.168.1.100 -u=root "sudo df -h"
+
+# Transfer a file directly from one server to another (streamed, no local copy)
+sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.log
 ```
 
 ## Agent / Scripting Mode

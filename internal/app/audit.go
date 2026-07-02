@@ -59,6 +59,9 @@ type auditEvent struct {
 	LocalPath  string `json:"local_path,omitempty"`
 	RemotePath string `json:"remote_path,omitempty"`
 
+	TransferSource string `json:"transfer_source,omitempty"`
+	TransferDest   string `json:"transfer_destination,omitempty"`
+
 	UseKeyAuth            bool   `json:"use_key_auth"`
 	KeyPath               string `json:"key_path,omitempty"`
 	PasswordProvided      bool   `json:"password_provided"`
@@ -230,6 +233,10 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.SftpAction = config.SftpAction
 	r.event.LocalPath = config.LocalPath
 	r.event.RemotePath = config.RemotePath
+	if config.Mode == "transfer" {
+		r.event.TransferSource = formatTransferEndpoint(config.TransferSrcHost, config.TransferSrcPath)
+		r.event.TransferDest = formatTransferEndpoint(config.TransferDstHost, config.TransferDstPath)
+	}
 	r.event.UseKeyAuth = config.UseKeyAuth
 	r.event.KeyPath = config.KeyPath
 	r.event.PasswordProvided = config.Password != ""
@@ -317,9 +324,18 @@ func auditAction(config *sshclient.Config) string {
 		return config.PasswordAction
 	case "host":
 		return config.HostAction
+	case "transfer":
+		return "transfer"
 	default:
 		return ""
 	}
+}
+
+func formatTransferEndpoint(host, path string) string {
+	if host == "" && path == "" {
+		return ""
+	}
+	return host + ":" + path
 }
 
 func auditWouldReadSecret(config *sshclient.Config) bool {
@@ -352,6 +368,8 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 		return config.Command != ""
 	case "sftp":
 		return config.SftpAction == "upload" || config.SftpAction == "mkdir" || config.SftpAction == "remove"
+	case "transfer":
+		return true
 	case "host":
 		return config.HostAction == "test" || config.HostAction == "test-all"
 	default:
