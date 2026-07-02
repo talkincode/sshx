@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-07-02
+
+### Added
+
+- Direct server-to-server file transfer:
+  `sshx --transfer=<src-host>:<src-path> --to=<dst-host>:<dst-path>` streams
+  files from one server to another over SFTP, relaying data through the local
+  machine without writing to local disk. Supports single files and recursive
+  directory transfers, preserves file permission bits, and places the source
+  inside the destination when it is an existing directory. Both endpoints can
+  be configured host names (resolved from `~/.sshx/settings.json` with their
+  own SSH key/user/port) or IP addresses. Transfer invocations are covered by
+  `--dry-run` plan preview (`transfer_source`/`transfer_destination` fields)
+  and the local audit trail.
+
 ## [0.0.12] - 2026-07-01
 
 ### Added
