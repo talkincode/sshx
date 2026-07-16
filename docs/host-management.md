@@ -30,6 +30,49 @@ Then run commands by alias:
 sshx -h=prod-web "hostname && uptime"
 ```
 
+## Import from ~/.ssh/config
+
+If you already maintain hosts in the OpenSSH client config, import them selectively instead of retyping them. Import is never all-or-nothing by default — you choose what enters `~/.sshx/settings.json`.
+
+Interactive selection:
+
+```bash
+sshx --host-import
+```
+
+sshx lists importable entries (with the resolved `user@host:port` and key) plus everything it skipped and why, then asks which entries to import (numbers, names, or `all`).
+
+Non-interactive, by name (script/agent friendly, all-or-nothing):
+
+```bash
+sshx --host-import=web1,db1
+```
+
+Import from a different config file:
+
+```bash
+sshx --host-import --ssh-config=~/work/ssh_config
+```
+
+Preview without writing anything:
+
+```bash
+sshx --host-import=web1 --dry-run --json
+```
+
+What is imported per entry: `HostName` (or the alias itself when absent), `Port`, `User`, and `IdentityFile` (as the per-host `key`).
+
+Pollution guards — the importer always skips:
+
+- wildcard or negated patterns (`Host *`, `web-?`, `!pattern`) — they are rules, not hosts;
+- aliases that already exist in settings;
+- entries whose `host:port` already exists in settings (or duplicates an earlier entry in the same file);
+- options sshx does not support (`ProxyJump`, `ForwardAgent`, …) — shown as `ignored:` so nothing disappears silently;
+- options from other blocks: `Host *` defaults are never merged into imported entries;
+- `IdentityFile` values containing `%` tokens (reported in a note).
+
+`Match` blocks are ignored and `Include` directives are not followed; import from included files directly via `--ssh-config=<path>`.
+
 ## Settings File
 
 Host definitions live in `~/.sshx/settings.json`.

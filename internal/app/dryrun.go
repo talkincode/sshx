@@ -365,7 +365,7 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		plan.WouldPromptForSecret = canProceed && config.PasswordAction == "set" && config.PasswordValue == ""
 	case "host":
 		plan.WouldConnect = canProceed && (config.HostAction == "test" || config.HostAction == "test-all")
-		plan.WouldWriteLocalState = canProceed && (config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove")
+		plan.WouldWriteLocalState = canProceed && (config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove" || config.HostAction == "import")
 		switch config.HostAction {
 		case "test":
 			plan.WouldReadSecret = canProceed && plan.hostTestReadsSecret

@@ -100,6 +100,13 @@ type Config struct {
 	HostName        string
 	HostDescription string
 	HostType        string
+	// HostImportNames is a comma-separated list of ssh_config aliases to
+	// import non-interactively (HostAction == "import"). Empty means
+	// interactive selection.
+	HostImportNames string
+	// SSHConfigPath overrides the OpenSSH client config file read by
+	// --host-import (default ~/.ssh/config).
+	SSHConfigPath string
 }
 
 // SSHClient wraps an ssh.Client with optional pooled and sftp helpers.

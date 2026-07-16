@@ -30,6 +30,49 @@ sshx --host-add \
 sshx -h=prod-web "hostname && uptime"
 ```
 
+## 从 ~/.ssh/config 导入
+
+如果你已经在 OpenSSH 客户端配置里维护主机，可以选择性导入，而不是重新输入。导入默认不会"一键全导"——写入 `~/.sshx/settings.json` 的内容由你决定。
+
+交互式选择：
+
+```bash
+sshx --host-import
+```
+
+sshx 会列出可导入条目（含解析后的 `user@host:port` 与 key）以及所有被跳过的条目和原因，然后由你按编号、名称或 `all` 选择。
+
+按名称非交互导入（适合脚本 / agent，全部成功或全部失败）：
+
+```bash
+sshx --host-import=web1,db1
+```
+
+从其他配置文件导入：
+
+```bash
+sshx --host-import --ssh-config=~/work/ssh_config
+```
+
+预览而不写入：
+
+```bash
+sshx --host-import=web1 --dry-run --json
+```
+
+每个条目导入的字段：`HostName`（缺省时使用别名本身）、`Port`、`User`、`IdentityFile`（作为该主机的 `key`）。
+
+防污染规则——导入器始终跳过：
+
+- 通配或否定模式（`Host *`、`web-?`、`!pattern`）——它们是规则，不是主机；
+- 与 settings 中已有主机同名的条目；
+- `host:port` 已存在于 settings（或与同文件中更早条目重复）的条目；
+- sshx 不支持的选项（`ProxyJump`、`ForwardAgent` 等）——以 `ignored:` 显示，不会静默丢失；
+- 其他块的选项：`Host *` 的默认值绝不会合并进导入条目；
+- 含 `%` 令牌的 `IdentityFile`（在提示中说明）。
+
+`Match` 块会被忽略，`Include` 指令不会被跟随；被包含的文件请用 `--ssh-config=<path>` 直接导入。
+
 ## 配置文件
 
 主机定义保存在 `~/.sshx/settings.json`。

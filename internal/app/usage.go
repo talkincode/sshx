@@ -139,6 +139,9 @@ Password Management (Cross-Platform):
 
 Host Management:
   --host-add                          Add new host (interactive or with options)
+  --host-import                       Selectively import hosts from ~/.ssh/config (interactive)
+  --host-import=<name1,name2>         Import only the named ssh_config hosts (non-interactive)
+  --ssh-config=<path>                 ssh_config file to import from (default: ~/.ssh/config)
   --host-update                       Update existing host configuration
   --host-list                         List all configured hosts (alias: --host-ls)
   --host-test=<name>                  Test connection to configured host

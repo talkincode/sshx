@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Selective host import from the OpenSSH client config:
+  `sshx --host-import` lists importable `~/.ssh/config` entries (with
+  everything skipped and why) and lets you pick by number, name, or `all`;
+  `--host-import=<name1,name2>` imports exactly the named entries
+  non-interactively (all-or-nothing); `--ssh-config=<path>` selects a
+  different source file. Imports map `HostName`/`Port`/`User`/`IdentityFile`
+  onto a settings host and always skip wildcard/negated patterns, existing
+  names, duplicate addresses, `Host *` defaults, unsupported options
+  (reported as ignored), and `%`-token identity files — nothing is imported
+  blindly. Covered by `--dry-run` plan preview and the local audit trail.
+
 ## [0.0.13] - 2026-07-02
 
 ### Added

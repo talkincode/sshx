@@ -378,6 +378,7 @@ Location: `~/.sshx/settings.json`
 ### Host Management Commands
 
 - `--host-add` - Add new host (interactive or with options)
+- `--host-import` - Selectively import hosts from `~/.ssh/config` (interactive picker; `--host-import=<name1,name2>` for non-interactive, `--ssh-config=<path>` to choose the source file). Wildcard patterns, existing names, duplicate addresses, and unsupported options are always skipped and reported — nothing is imported blindly.
 - `--host-list` - List all configured hosts
 - `--host-test=<name>` - Test connection to a host
 - `--host-test-all` - Test connections to all hosts (per-host 10s dial timeout) and show auth method used

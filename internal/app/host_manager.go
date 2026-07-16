@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ func HandleHostManagement(config *sshclient.Config) error {
 	switch config.HostAction {
 	case "add":
 		return handleHostAdd(config)
+	case "import":
+		return handleHostImport(config)
 	case "update":
 		return handleHostUpdate(config)
 	case "list":
@@ -129,6 +132,150 @@ func handleHostAdd(config *sshclient.Config) error {
 
 	logger.GetLogger().Success("Host '%s' added successfully", host.Name)
 	return nil
+}
+
+// handleHostImport selectively imports hosts from an OpenSSH client config
+// file (default ~/.ssh/config). It never imports everything blindly: wildcard
+// patterns, existing names, and duplicate addresses are skipped, and the user
+// chooses entries interactively or via --host-import=<name1,name2>.
+func handleHostImport(config *sshclient.Config) error {
+	settings, err := LoadSettings()
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	configPath := config.SSHConfigPath
+	if configPath == "" {
+		configPath, err = defaultSSHConfigPath()
+		if err != nil {
+			return err
+		}
+	}
+
+	file, err := os.Open(configPath) // #nosec G304 -- Path is the user's own ssh config
+	if err != nil {
+		return fmt.Errorf("failed to open ssh config %s: %w", configPath, err)
+	}
+	defer func() { _ = file.Close() }() //nolint:errcheck // read-only file
+
+	entries, parseNotes, err := parseSSHConfig(file)
+	if err != nil {
+		return err
+	}
+
+	plan := buildImportPlan(entries, settings)
+	plan.Notes = append(plan.Notes, parseNotes...)
+
+	var selected []importCandidate
+	if config.HostImportNames != "" {
+		selected, err = selectCandidatesByName(plan, config.HostImportNames)
+		if err != nil {
+			return err
+		}
+	} else {
+		selected, err = selectCandidatesInteractively(plan, configPath)
+		if err != nil {
+			return err
+		}
+		if len(selected) == 0 {
+			fmt.Println("Nothing imported.")
+			return nil
+		}
+	}
+
+	for _, candidate := range selected {
+		if addErr := AddHost(settings, candidate.Host); addErr != nil {
+			return fmt.Errorf("failed to add host '%s': %w", candidate.Host.Name, addErr)
+		}
+	}
+	if err := SaveSettings(settings); err != nil {
+		return fmt.Errorf("failed to save settings: %w", err)
+	}
+
+	for _, candidate := range selected {
+		logger.GetLogger().Success("Imported host '%s' (%s)", candidate.Host.Name, candidate.Host.Host)
+	}
+	fmt.Printf("\nImported %d host(s) from %s\n", len(selected), configPath)
+	printImportNotes(plan.Notes)
+	return nil
+}
+
+// selectCandidatesInteractively prints the import plan and asks the user to
+// pick entries by number, name, or "all". An empty answer cancels.
+func selectCandidatesInteractively(plan importPlan, configPath string) ([]importCandidate, error) {
+	fmt.Printf("=== Import hosts from %s ===\n\n", configPath)
+
+	if len(plan.Skipped) > 0 {
+		fmt.Println("Skipped (not importable):")
+		for _, s := range plan.Skipped {
+			fmt.Printf("  - %-20s %s\n", s.Alias, s.Reason)
+		}
+		fmt.Println()
+	}
+
+	if len(plan.Candidates) == 0 {
+		fmt.Println("No importable hosts found.")
+		printImportNotes(plan.Notes)
+		return nil, nil
+	}
+
+	fmt.Println("Importable hosts:")
+	for i, c := range plan.Candidates {
+		fmt.Printf("  [%d] %s\n", i+1, candidateSummary(c))
+	}
+	printImportNotes(plan.Notes)
+
+	fmt.Print("\nSelect hosts to import (numbers or names, comma-separated; 'all'; empty to cancel): ")
+	reader := bufio.NewReader(os.Stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil && answer == "" {
+		return nil, fmt.Errorf("failed to read selection: %w", err)
+	}
+	return resolveImportSelection(plan, answer)
+}
+
+// resolveImportSelection maps a user answer ("all", "1,3", "web1 db1", …) to
+// candidates. Unknown tokens fail the whole selection so nothing half-applies.
+func resolveImportSelection(plan importPlan, answer string) ([]importCandidate, error) {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return nil, nil
+	}
+	if strings.EqualFold(answer, "all") {
+		return plan.Candidates, nil
+	}
+
+	byName := make(map[string]int, len(plan.Candidates))
+	for i, c := range plan.Candidates {
+		byName[c.Host.Name] = i
+	}
+
+	var selected []importCandidate
+	seen := make(map[int]bool)
+	for _, token := range strings.FieldsFunc(answer, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		var idx int
+		if n, err := strconv.Atoi(token); err == nil {
+			if n < 1 || n > len(plan.Candidates) {
+				return nil, fmt.Errorf("selection %d is out of range (1-%d)", n, len(plan.Candidates))
+			}
+			idx = n - 1
+		} else if i, ok := byName[token]; ok {
+			idx = i
+		} else {
+			return nil, fmt.Errorf("unknown selection %q (use listed numbers or names)", token)
+		}
+		if !seen[idx] {
+			seen[idx] = true
+			selected = append(selected, plan.Candidates[idx])
+		}
+	}
+	return selected, nil
+}
+
+func printImportNotes(notes []string) {
+	for _, note := range notes {
+		fmt.Printf("Note: %s\n", note)
+	}
 }
 
 // handleHostUpdate updates an existing host in settings
