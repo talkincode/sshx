@@ -356,7 +356,7 @@ func auditWouldWriteLocalState(config *sshclient.Config) bool {
 	case "password":
 		return config.PasswordAction == "set" || config.PasswordAction == "delete"
 	case "host":
-		return config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove"
+		return config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove" || config.HostAction == "import"
 	default:
 		return false
 	}

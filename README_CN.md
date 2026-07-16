@@ -212,6 +212,9 @@ sshx -h=192.168.1.100 -u=root "sudo df -h"
 # 一次性测试所有已配置的主机（每台主机 10 秒拨号超时），并在报告中标注认证方式
 sshx --host-test-all
 
+# 从 ~/.ssh/config 选择性导入主机（交互式勾选；--host-import=<名称> 可非交互按名导入）
+sshx --host-import
+
 # 服务器到服务器直接传输文件（流式中转，不落本地磁盘）
 sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.log
 ```

@@ -215,6 +215,15 @@ func ParseArgs(args []string) *sshclient.Config {
 		case arg == "--host-add":
 			config.Mode = "host"
 			config.HostAction = "add"
+		case arg == "--host-import":
+			config.Mode = "host"
+			config.HostAction = "import"
+		case strings.HasPrefix(arg, "--host-import="):
+			config.Mode = "host"
+			config.HostAction = "import"
+			config.HostImportNames = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--ssh-config="):
+			config.SSHConfigPath = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--host-update":
 			config.Mode = "host"
 			config.HostAction = "update"

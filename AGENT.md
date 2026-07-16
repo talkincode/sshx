@@ -76,7 +76,8 @@ cmd/sshx/main.go          → app.Run(os.Args); maps errors to exit codes
 internal/app/             → CLI surface (argument parsing, routing, sub-commands)
   config.go               → ParseArgs: flags + env → sshclient.Config
   app.go                  → Run(): dispatch by Config.Mode + host resolution
-  host_manager.go         → --host-* handlers (add/update/list/test/test-all/remove)
+  host_manager.go         → --host-* handlers (add/import/update/list/test/test-all/remove)
+  sshconfig.go            → ~/.ssh/config parsing + selective import planning
   settings.go             → ~/.sshx/settings.json load/save (atomic, 0600)
   password.go             → keyring-backed password get/set/list + secure input
   usage.go                → PrintUsage() help text (keep in sync with flags)
