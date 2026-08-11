@@ -1,6 +1,10 @@
 # SSHX Documentation
 
-`sshx` is a cross-platform SSH and SFTP command-line client for people and automation agents who operate many remote servers. It keeps the tool shape simple: one command opens one SSH session, does the requested work, writes an optional local audit event, and exits.
+> **SSH is the channel. X is execution.**
+
+`sshx` is an agent-native remote host execution tool. It uses SSH/SFTP to reach existing hosts and brings target resolution, execution preview, safety checks, command and file actions, structured results, and audit evidence into one CLI invocation.
+
+It keeps the operating model simple: one command opens one connection, performs one explicit action, returns a decidable result, writes a local audit event, and exits. Nothing needs to be installed on the remote host and no long-running control plane is introduced.
 
 The documentation starts in English by default. Use the language switch in the top navigation bar to open the matching Chinese page.
 
@@ -16,22 +20,22 @@ The documentation starts in English by default. Use the language switch in the t
 
 ## Mental Model
 
-Think of `sshx` as a safer one-shot remote operation helper, not a shell replacement and not a remote orchestration platform.
+Think of `sshx` as a remote execution primitive in an agent's toolbox, not an interactive shell replacement and not a desired-state or workflow orchestration platform.
 
 ```text
-human, script, or agent
+agent, automation, or human operator
         |
         v
-sshx CLI flags and optional .env
+agent contract: CLI / JSON / exit code / dry-run
         |
         v
-named host resolution and safety checks
+X execution: target / safety / action / audit
         |
         v
-SSH command or SFTP action
+SSH channel: auth / host key / SSH exec / SFTP
         |
         v
-structured result, exit code, optional audit event
+remote host
 ```
 
 ## Common First Commands
@@ -67,6 +71,7 @@ Read [Security Guidelines](security-guidelines.md) before using `sshx` in produc
 
 ## Where To Go Next
 
+- [Project Profile and Direction](roadmap.md) defines the product position, hard non-goals, and acceptance matrix (currently maintained in Chinese).
 - [Getting Started](getting-started.md) gets one host working.
 - [Host Management](host-management.md) explains named hosts and key selection.
 - [Usage Scenarios](usage-scenarios.md) gives practical examples for daily operations.

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add compiled-binary SSH/SFTP E2E coverage for command execution, structured
+  results, host trust, permissions, partial completion, dry-run, host import,
+  SFTP, server-to-server transfer, keyring-backed sudo, and audit recovery.
+- Run the E2E suite on Linux and macOS CI, including production-binary checks
+  against an ephemeral macOS Keychain.
+
+### Changed
+
+- Upgrade the CI cache and Codecov actions to their supported major versions.
+
+### Fixed
+
+- Make public-key rejection correctly trigger an explicitly configured SSH
+  password fallback; the previous check matched a server-side error type that
+  the SSH client does not return.
+- Keep local audit write failures visible at error log level without changing
+  a successfully completed remote command into a false execution failure.
+
+### Documentation
+
+- Reposition sshx as an agent-native remote host execution tool: SSH is the
+  trusted channel and X is execution. Add the efficiency and security model,
+  hard product boundaries, future directions, and an evidence-based capability
+  coverage matrix with mandatory E2E floors.
+
 ## [0.0.14] - 2026-07-17
 
 ### Added

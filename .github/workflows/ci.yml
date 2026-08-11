@@ -25,7 +25,7 @@ jobs:
           go-version: ${{ matrix.go }}
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
@@ -38,12 +38,12 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -v -short -race -coverprofile=coverage.out -covermode=atomic ./...
         shell: bash
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage.out
           flags: unittests
@@ -51,6 +51,75 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/sshx
+
+  e2e:
+    name: E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Prepare isolated macOS keychain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          keychain_path="$RUNNER_TEMP/sshx-e2e.keychain-db"
+          keychain_password="sshx-e2e-ci"
+          original_keychain="$(security default-keychain -d user | sed 's/^[[:space:]]*\"//; s/\"[[:space:]]*$//')"
+          keychain_list_file="$RUNNER_TEMP/sshx-e2e-original-keychains.txt"
+          security list-keychains -d user | sed 's/^[[:space:]]*\"//; s/\"[[:space:]]*$//' > "$keychain_list_file"
+          original_keychains=()
+          while IFS= read -r item; do
+            if [ -n "$item" ]; then original_keychains+=("$item"); fi
+          done < "$keychain_list_file"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 3600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
+          security default-keychain -d user -s "$keychain_path"
+          {
+            echo "SSHX_E2E_KEYCHAIN=$keychain_path"
+            echo "SSHX_E2E_ORIGINAL_KEYCHAIN=$original_keychain"
+            echo "SSHX_E2E_ORIGINAL_KEYCHAIN_LIST=$keychain_list_file"
+          } >> "$GITHUB_ENV"
+
+      - name: Run compiled-binary E2E tests
+        env:
+          SSHX_E2E_REAL_KEYRING: ${{ runner.os == 'macOS' && '1' || '0' }}
+        run: go test -v ./tests/e2e
+
+      - name: Remove isolated macOS keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -n "${SSHX_E2E_ORIGINAL_KEYCHAIN:-}" ]; then
+            security default-keychain -d user -s "$SSHX_E2E_ORIGINAL_KEYCHAIN"
+          fi
+          if [ -f "${SSHX_E2E_ORIGINAL_KEYCHAIN_LIST:-}" ]; then
+            original_keychains=()
+            while IFS= read -r item; do
+              if [ -n "$item" ]; then original_keychains+=("$item"); fi
+            done < "$SSHX_E2E_ORIGINAL_KEYCHAIN_LIST"
+            if [ ${#original_keychains[@]} -gt 0 ]; then
+              security list-keychains -d user -s "${original_keychains[@]}"
+            fi
+            rm -f "$SSHX_E2E_ORIGINAL_KEYCHAIN_LIST"
+          fi
+          if [ -n "${SSHX_E2E_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SSHX_E2E_KEYCHAIN" || true
+          fi
 
   lint:
     name: Lint

@@ -11,7 +11,7 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
  \______/  \______/ \__|  \__|\__|  \__|
 
 
-Secure SSH & SFTP Client with Built-in Password Manager
+Agent-Native Remote Execution over SSH
 ```
 
 <div align="center">
@@ -44,13 +44,15 @@ English | [简体中文](./README_CN.md)
 
 # SSHX
 
-`sshx` is a barrier-free, cross-platform SSH/SFTP command-line client with a built-in system keyring password manager, making it easy to manage and operate multiple remote servers.
+> **SSH is the channel. X is execution.**
+
+`sshx` is an **agent-native remote host execution tool**. It uses SSH/SFTP to reach existing hosts and brings target resolution, execution preview, safety checks, command and file actions, structured results, and audit evidence into one CLI invocation.
 
 ## Why You Need It?
 
-Managing multiple servers means juggling different passwords and repeatedly entering sudo passwords. `sshx` securely stores passwords in your system keyring and auto-fills sudo passwords, so you can run commands across many servers without the password hassle. One command, multiple servers, zero password hassle.
+Agents do not need another interactive SSH shell. They need a stable, composable remote execution contract with explicit side effects. `sshx` reduces argument assembly through named hosts, removes text guessing through JSON, exit codes, and error kinds, and lowers operational risk through dry-run plans, safety guardrails, the OS keyring, host-key verification, and local auditing.
 
-**New!** Host Configuration Management - Store your frequently used host configurations in `~/.sshx/settings.json` and connect with just a name instead of typing full connection details every time. Each host can have its own SSH private key. Add hosts interactively!
+It remains a single binary with one-shot invocations and no resident component on remote hosts: **efficient, secure, and auditable remote execution for agents over SSH.** Human operators use the same command, preview, and audit semantics for supervision and troubleshooting.
 
 ## Project Structure
 
@@ -60,13 +62,13 @@ Managing multiple servers means juggling different passwords and repeatedly ente
 
 ## Key Features
 
-1. Cross-platform SSH/SFTP operations (supports sudo auto-fill).
-2. Direct server-to-server file transfer (`--transfer=<host>:<path> --to=<host>:<path>`), streamed through the local machine without touching local disk.
-3. Password management (Keychain / Secret Service / Credential Manager).
-4. Host configuration management with per-host SSH keys.
-5. Dry-run execution plan preview for humans and agents.
-6. Local structured audit trail with safe default redaction.
-7. Script execution and command security validation.
+1. Agent-friendly JSON, stable exit codes, separated stdout/stderr, and classified failures.
+2. Dry-run execution plans and default-on local structured auditing with safe redaction.
+3. Named host management and selective OpenSSH config import with per-host SSH keys.
+4. Strict host-key verification, destructive-command guardrails, and explicit bypass semantics.
+5. OS-keyring password management and sudo auto-fill over stdin.
+6. Cross-platform SSH/SFTP command and file actions.
+7. Direct server-to-server transfer, streamed through the local machine without touching local disk.
 
 ## Installation
 
@@ -687,9 +689,14 @@ sudo chmod +x /usr/local/bin/sshx
 
 ## Development
 
+The project's target state, hard non-goals, and capability coverage matrix live in the [Project Profile and Direction](docs/roadmap.md). Every new top-level capability must add a Happy Path E2E and update the matrix; high-risk, permission-sensitive, and state-changing capabilities must also meet the corresponding failure, permission-state, and recovery coverage floors.
+
 ```bash
-# Run tests
-go test ./...
+# Run fast unit/component tests
+make test-short
+
+# Run compiled-binary SSH/SFTP E2E tests
+make test-e2e
 
 # Format code
 gofmt -w .
@@ -702,6 +709,9 @@ make lint
 ```
 
 > The lint target requires `golangci-lint` v2.6.1 or newer. Install it with `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.1`.
+
+The normal E2E run uses an isolated, test-only keyring provider. CI additionally
+checks the production binary against an ephemeral macOS Keychain.
 
 ## License
 

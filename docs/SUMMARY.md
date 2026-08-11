@@ -16,3 +16,4 @@
   - [使用场景](zh/usage-scenarios.md)
   - [安全准则](zh/security-guidelines.md)
   - [故障排查](zh/troubleshooting.md)
+- [Project Profile / 项目画像与方向](roadmap.md)
