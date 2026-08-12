@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -59,8 +60,14 @@ type auditEvent struct {
 	LocalPath  string `json:"local_path,omitempty"`
 	RemotePath string `json:"remote_path,omitempty"`
 
-	TransferSource string `json:"transfer_source,omitempty"`
-	TransferDest   string `json:"transfer_destination,omitempty"`
+	TransferSource    string `json:"transfer_source,omitempty"`
+	TransferDest      string `json:"transfer_destination,omitempty"`
+	PluginID          string `json:"plugin_id,omitempty"`
+	PluginDigest      string `json:"plugin_digest,omitempty"`
+	PluginTrusted     bool   `json:"plugin_trusted,omitempty"`
+	CacheMode         string `json:"cache_mode,omitempty"`
+	CacheHit          bool   `json:"cache_hit,omitempty"`
+	ObservationStatus string `json:"observation_status,omitempty"`
 
 	UseKeyAuth            bool   `json:"use_key_auth"`
 	KeyPath               string `json:"key_path,omitempty"`
@@ -79,10 +86,11 @@ type auditEvent struct {
 	AllowInsecureHostKey bool   `json:"allow_insecure_host_key"`
 	KnownHostsPath       string `json:"known_hosts_path,omitempty"`
 
-	WouldReadSecret      bool `json:"would_read_secret"`
-	WouldWriteLocalState bool `json:"would_write_local_state"`
-	WouldMutateRemote    bool `json:"would_mutate_remote"`
-	MayMutateKnownHosts  bool `json:"may_mutate_known_hosts"`
+	WouldReadSecret       bool `json:"would_read_secret"`
+	WouldWriteLocalState  bool `json:"would_write_local_state"`
+	WouldMutateRemote     bool `json:"would_mutate_remote"`
+	WouldWriteRemoteState bool `json:"would_write_remote_state"`
+	MayMutateKnownHosts   bool `json:"may_mutate_known_hosts"`
 
 	AuthMethod string         `json:"auth_method,omitempty"`
 	ExitCode   *int           `json:"exit_code,omitempty"`
@@ -202,6 +210,13 @@ func (r *auditRecorder) finish(config *sshclient.Config, err error) error {
 				ErrorKind: "remote_exit",
 				Message:   exitErr.Error(),
 			}
+		case config.ReportedErrorKind != "":
+			r.event.ExitCode = intPtr(-1)
+			r.event.Outcome = auditStatus{
+				Status:    "failure",
+				ErrorKind: config.ReportedErrorKind,
+				Message:   redactSensitiveText(config.ReportedError),
+			}
 		default:
 			r.event.Outcome = auditStatus{
 				Status:    "failure",
@@ -230,6 +245,17 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 		r.event.HostResolvedBy = "settings"
 	}
 	r.event.Command = redactSensitiveText(config.Command)
+	if config.Mode == "plugin" {
+		r.event.PluginID = config.PluginID
+	}
+	if config.Mode == "inspect" {
+		r.event.PluginID = config.InspectCapability
+		r.event.CacheMode = config.InspectCacheMode
+		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
+			r.event.PluginDigest = resolved.Digest
+			r.event.PluginTrusted = resolved.Trusted
+		}
+	}
 	r.event.SftpAction = config.SftpAction
 	r.event.LocalPath = config.LocalPath
 	r.event.RemotePath = config.RemotePath
@@ -243,6 +269,15 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.PasswordValueProvided = config.PasswordValue != ""
 	r.event.PasswordKey = config.PasswordKey
 	r.event.UsesSudo = sshclient.CommandUsesSudo(config.Command)
+	if config.Mode == "inspect" {
+		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
+			if useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest); privilegeErr == nil {
+				r.event.UsesSudo = useSudo
+			}
+		} else {
+			r.event.UsesSudo = config.InspectUseSudo
+		}
+	}
 	r.event.SudoKey = config.SudoKey
 	if config.Timeout > 0 {
 		r.event.Timeout = config.Timeout.String()
@@ -257,6 +292,7 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.WouldReadSecret = auditWouldReadSecret(config)
 	r.event.WouldWriteLocalState = auditWouldWriteLocalState(config)
 	r.event.WouldMutateRemote = auditWouldMutateRemote(config)
+	r.event.WouldWriteRemoteState = config.Mode == "inspect" && config.InspectCacheMode == "remote-prefer"
 	r.event.MayMutateKnownHosts = modeUsesSSHConnection(config) && config.AcceptUnknownHost
 	if r.event.DurationMs == 0 {
 		r.event.DurationMs = time.Since(r.started).Milliseconds()
@@ -326,6 +362,10 @@ func auditAction(config *sshclient.Config) string {
 		return config.HostAction
 	case "transfer":
 		return "transfer"
+	case "plugin":
+		return config.PluginAction
+	case "inspect":
+		return "inspect"
 	default:
 		return ""
 	}
@@ -346,6 +386,12 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 		return config.PasswordAction == "get" || config.PasswordAction == "check" || config.PasswordAction == "delete" || config.PasswordAction == "list"
 	case "host":
 		return config.HostAction == "test" || config.HostAction == "test-all"
+	case "inspect":
+		if resolved, err := pluginpkg.Resolve(config.InspectCapability); err == nil {
+			useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest)
+			return privilegeErr == nil && useSudo && config.SudoKey != ""
+		}
+		return config.InspectUseSudo && config.SudoKey != ""
 	default:
 		return false
 	}
@@ -357,6 +403,8 @@ func auditWouldWriteLocalState(config *sshclient.Config) bool {
 		return config.PasswordAction == "set" || config.PasswordAction == "delete"
 	case "host":
 		return config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove" || config.HostAction == "import"
+	case "plugin":
+		return config.PluginAction == "create" || config.PluginAction == "trust" || config.PluginAction == "remove"
 	default:
 		return false
 	}
@@ -372,6 +420,8 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 		return true
 	case "host":
 		return config.HostAction == "test" || config.HostAction == "test-all"
+	case "inspect":
+		return config.InspectCacheMode == "remote-prefer"
 	default:
 		return false
 	}

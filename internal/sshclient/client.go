@@ -42,16 +42,17 @@ const (
 
 // Config represents SSH configuration properties for connecting to remote hosts.
 type Config struct {
-	Host        string
-	Port        string
-	User        string
-	Password    string
-	KeyPath     string
-	UseKeyAuth  bool
-	SudoKey     string
-	Command     string
-	Mode        string
-	DialTimeout time.Duration
+	Host         string
+	Port         string
+	User         string
+	Password     string
+	SudoPassword string
+	KeyPath      string
+	UseKeyAuth   bool
+	SudoKey      string
+	Command      string
+	Mode         string
+	DialTimeout  time.Duration
 	// Timeout bounds the execution of a single remote command. Zero means no
 	// command timeout (the dial timeout still applies).
 	Timeout time.Duration
@@ -107,9 +108,31 @@ type Config struct {
 	// SSHConfigPath overrides the OpenSSH client config file read by
 	// --host-import (default ~/.ssh/config).
 	SSHConfigPath string
+
+	// Plugin lifecycle fields (Mode == "plugin").
+	PluginAction    string
+	PluginID        string
+	PluginRunner    string
+	PluginPlatform  string
+	PluginPrivilege string
+	PluginTemplate  string
+	PluginFixture   string
+	PluginReplace   bool
+
+	// Inspection fields (Mode == "inspect").
+	InspectCapability  string
+	InspectCacheMode   string
+	InspectRefresh     bool
+	InspectMaxAge      time.Duration
+	InspectAllowStale  bool
+	InspectUseSudo     bool
+	HostKeyFingerprint string
+	ArgumentError      string
+	ReportedErrorKind  string
+	ReportedError      string
 }
 
-// SSHClient wraps an ssh.Client with optional pooled and sftp helpers.
+// SSHClient wraps one ssh.Client with execution and SFTP helpers.
 type SSHClient struct {
 	config         *Config
 	client         *ssh.Client
@@ -144,8 +167,7 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 			lg.Warning("Unable to determine home directory for known_hosts: %v", err)
 			if cfg.AllowInsecureHostKey {
 				lg.Warning("Falling back to insecure host key verification (explicitly allowed)")
-				// #nosec G106 -- Only allowed when the user opts in
-				return ssh.InsecureIgnoreHostKey(), nil
+				return insecureHostKeyCallback(cfg), nil
 			}
 			return nil, fmt.Errorf("unable to determine known_hosts path (set HOME or use --known-hosts): %w", err)
 		}
@@ -156,8 +178,7 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 		if cfg.AllowInsecureHostKey {
 			lg.Warning("Unable to prepare known_hosts at %s: %v", knownHostsPath, err)
 			lg.Warning("Falling back to insecure host key verification (explicitly allowed)")
-			// #nosec G106 -- User explicitly allowed insecure host key verification
-			return ssh.InsecureIgnoreHostKey(), nil
+			return insecureHostKeyCallback(cfg), nil
 		}
 		return nil, err
 	}
@@ -167,8 +188,7 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 		if cfg.AllowInsecureHostKey {
 			lg.Warning("Failed to load known_hosts from %s: %v", knownHostsPath, err)
 			lg.Warning("Falling back to insecure host key verification (explicitly allowed)")
-			// #nosec G106 -- User explicitly allowed insecure host key verification
-			return ssh.InsecureIgnoreHostKey(), nil
+			return insecureHostKeyCallback(cfg), nil
 		}
 		return nil, fmt.Errorf("failed to load known_hosts from %s: %w", knownHostsPath, err)
 	}
@@ -182,6 +202,7 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 
 		err := hostKeyCallback(hostname, remote, key)
 		if err == nil {
+			cfg.HostKeyFingerprint = ssh.FingerprintSHA256(key)
 			return nil
 		}
 
@@ -213,6 +234,7 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 				return fmt.Errorf("failed to reload known_hosts after adding %s: %w", hostname, reloadErr)
 			}
 			hostKeyCallback = freshCallback
+			cfg.HostKeyFingerprint = ssh.FingerprintSHA256(key)
 			return nil
 		}
 
@@ -223,6 +245,20 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 			"Original error: %w",
 			hostname, knownHostsPath, hostname, knownHostsPath, err)
 	}, nil
+}
+
+func insecureHostKeyCallback(cfg *Config) ssh.HostKeyCallback {
+	// #nosec G106 -- this callback is reached only after the operator explicitly
+	// opts into insecure host-key handling. Fingerprinting still binds snapshots
+	// to the key observed during this connection.
+	ignore := ssh.InsecureIgnoreHostKey()
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		if err := ignore(hostname, remote, key); err != nil {
+			return err
+		}
+		cfg.HostKeyFingerprint = ssh.FingerprintSHA256(key)
+		return nil
+	}
 }
 
 func ensureKnownHostsFile(path string) error {
@@ -480,10 +516,10 @@ func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
 	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
 
 	command := c.config.Command
-	if c.config.Password != "" && CommandUsesSudo(command) {
+	if c.config.SudoPassword != "" && CommandUsesSudo(command) {
 		lg.Info("Auto-filling sudo password...")
 		command = sudoStdinCommand(command)
-		session.Stdin = strings.NewReader(c.config.Password + "\n")
+		session.Stdin = strings.NewReader(c.config.SudoPassword + "\n")
 	}
 
 	if c.config.UsePTY && !capture {
@@ -543,6 +579,72 @@ func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
 	return result, fmt.Errorf("command failed: %w", runErr)
 }
 
+// RunScript streams a trusted local collector to a fresh SSH session. The
+// payload is never installed on the target. When useSudo is true, the password
+// and script share stdin in that order: sudo consumes one line and sh consumes
+// the remaining bytes.
+func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) {
+	var result ExecResult
+	if len(payload) == 0 {
+		result.ExitCode = -1
+		return result, fmt.Errorf("collector payload is empty")
+	}
+	if len(payload) > MaxCaptureBytes {
+		result.ExitCode = -1
+		return result, fmt.Errorf("collector payload exceeds %d-byte limit", MaxCaptureBytes)
+	}
+	if useSudo && c.config.SudoPassword == "" {
+		result.ExitCode = -1
+		return result, fmt.Errorf("sudo inspection requires a resolved sudo password")
+	}
+
+	session, err := c.client.NewSession()
+	if err != nil {
+		result.ExitCode = -1
+		return result, fmt.Errorf("failed to create collector session: %w", err)
+	}
+	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
+
+	command := "sh -s --"
+	stdin := bytes.NewReader(payload)
+	if useSudo {
+		command = "sudo -S -p '' sh -s --"
+		stdin = bytes.NewReader(append(append([]byte(c.config.SudoPassword+"\n"), payload...), '\n'))
+	}
+	session.Stdin = stdin
+	stdoutBuf := newCappedBuffer(MaxCaptureBytes)
+	stderrBuf := newCappedBuffer(MaxCaptureBytes)
+	session.Stdout = stdoutBuf
+	session.Stderr = stderrBuf
+
+	runErr := runSession(session, command, c.config.Timeout)
+	result.Stdout = stdoutBuf.String()
+	result.Stderr = stderrBuf.String()
+	result.StdoutTruncated = stdoutBuf.Truncated()
+	result.StderrTruncated = stderrBuf.Truncated()
+
+	switch {
+	case runErr == nil:
+		result.ExitCode = 0
+		return result, nil
+	case errors.Is(runErr, ErrCommandTimeout):
+		result.ExitCode = -1
+		return result, runErr
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(runErr, &exitErr) {
+		result.ExitCode = exitErr.ExitStatus()
+		return result, nil
+	}
+	var missingErr *ssh.ExitMissingError
+	if errors.As(runErr, &missingErr) {
+		result.ExitCode = -1
+		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
+	}
+	result.ExitCode = -1
+	return result, fmt.Errorf("collector failed: %w", runErr)
+}
+
 // runSession runs command on session, optionally bounded by timeout. When the
 // timeout fires the session is closed (which unblocks Run) and we wait for the
 // run goroutine to finish before returning, so capture buffers are no longer
@@ -583,13 +685,13 @@ func (c *SSHClient) ExecuteCommandWithOutput() (output string, err error) {
 	// Use new error handling mechanism
 	defer errutil.HandleCloseError(&err, session)
 
-	useSudo := c.config.Password != "" && CommandUsesSudo(c.config.Command)
+	useSudo := c.config.SudoPassword != "" && CommandUsesSudo(c.config.Command)
 	command := c.config.Command
 	if useSudo {
 		// Feed the sudo password via stdin instead of embedding it in the
 		// command string (avoids quote breakage and shell injection).
 		command = sudoStdinCommand(command)
-		session.Stdin = strings.NewReader(c.config.Password + "\n")
+		session.Stdin = strings.NewReader(c.config.SudoPassword + "\n")
 	} else {
 		// Request PTY for better compatibility on the non-sudo path.
 		modes := ssh.TerminalModes{

@@ -1,6 +1,6 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — run commands over SSH, transfer files over SFTP, manage named hosts, and store SSH/sudo passwords in the OS keyring. Use when the user wants to execute a command on a remote host, upload/download files, check or restart services on servers, manage `~/.sshx/settings.json` host entries, or store/retrieve secrets in the system keyring. Prefer `--json` for any programmatic/agent use so results are machine-parseable.
+description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, and store SSH/sudo passwords in the OS keyring. Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, or keyring-backed secrets. Prefer `--json` for programmatic/agent use.
 ---
 
 # sshx
@@ -17,6 +17,50 @@ its work, and exits — there is no daemon, shell, tunneling, or port forwarding
 - Upload/download a file or list/make/remove remote paths over SFTP.
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
+- Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
+
+## Inspect before repeating discovery commands
+
+When the goal is to understand an unfamiliar host, list reusable capabilities
+before issuing many independent commands:
+
+```bash
+sshx plugin list --json
+sshx inspect -h=prod-web system.baseline --json
+```
+
+Application-specific scripts are sshx runtime assets under
+`~/.sshx/plugins/<id>` (or `$SSHX_HOME/plugins/<id>`). **Do not embed or maintain
+collector scripts in this skill.** If no suitable plugin exists, ask sshx to
+create the complete scaffold, then edit the generated collector in that path:
+
+```bash
+sshx plugin create private.environment \
+  --template=generic \
+  --platform=linux \
+  --privilege=optional \
+  --json
+sshx plugin validate private.environment --json
+sshx plugin test private.environment --fixture=complete --json
+sshx plugin test private.environment --json
+sshx plugin trust private.environment --json
+```
+
+Remote execution is refused until the current plugin digest is trusted. Editing
+the collector invalidates trust. Review it, validate/test it, then trust the new
+digest explicitly.
+
+```bash
+sshx inspect -h=prod-web private.environment --dry-run --json
+sshx inspect -h=prod-web private.environment --json
+sshx inspect -h=prod-web private.environment --cache=remote-prefer --max-age=10m --json
+```
+
+Remote caching is opt-in and stores only a redacted JSON observation below the
+remote user's `~/.sshx/observations/v1`; plugin code stays local and executes
+only through the SSH session's stdin. Branch on observation `status`
+(`complete|partial|unsupported|failed`) and cache `hit/stale` fields. Never
+interpret `partial` or permission errors as application absence.
 
 ## Golden rule for agents: use `--json`
 
@@ -218,7 +262,8 @@ sshx --password-delete=server-A       # delete (alias: --password-del)
 
 `SSH_PASSWORD`, `SSH_KEY_PATH`, `SSH_DISABLE_KEY`, `SSH_KNOWN_HOSTS`,
 `SSH_ACCEPT_UNKNOWN_HOST`, `SSH_INSECURE_HOST_KEY`, `SSH_SUDO_KEY`,
-`SSH_NO_SAFETY_CHECK`, `SSH_FORCE`, `SSH_TIMEOUT`, `SSHX_LOG_LEVEL`.
+`SSH_NO_SAFETY_CHECK`, `SSH_FORCE`, `SSH_TIMEOUT`, `SSHX_LOG_LEVEL`,
+`SSHX_HOME` (isolated settings/audit/plugins/trust runtime root).
 
 ## Meta
 

@@ -69,6 +69,8 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 5. 系统密钥链密码管理和通过 stdin 完成的 sudo 自动填充。
 6. 跨平台 SSH/SFTP 命令与文件动作。
 7. 服务器到服务器直接文件传输，数据经本机流式中转而不落地。
+8. 单次主机环境探测：内置系统/网络能力，应用级插件归 sshx 本地运行目录管理，
+   支持摘要信任和有有效期的观察快照。
 
 ## 安装
 
@@ -311,6 +313,51 @@ sshx -h=prod-web --pty "top -b -n1"
 
 超时也可以通过环境变量 `SSH_TIMEOUT` 设置。
 
+## 主机探测与本地插件
+
+面对陌生服务器时，用一次结构化探测替代多轮零散命令：
+
+```bash
+sshx inspect -h=prod-web system.baseline --json
+```
+
+稳定的系统与网络能力直接内置。Docker、Nginx 和自有应用采集器属于本地
+sshx 插件，保存在 `~/.sshx/plugins/`；脚本不放进 Agent skill，也不会长期
+安装到远端服务器。
+
+```bash
+sshx plugin create docker.environment \
+  --template=docker \
+  --privilege=optional \
+  --json
+sshx plugin validate docker.environment --json
+sshx plugin test docker.environment --fixture=complete --json
+sshx plugin trust docker.environment --json
+sshx inspect -h=prod-web docker.environment --json
+```
+
+新建或修改后的插件默认不可信。`plugin trust` 显式记录 manifest、collector
+和 schema 的当前摘要；`inspect` 在联网前检查摘要信任，然后只在本次 SSH
+会话中通过 stdin 临时执行采集器，校验唯一 JSON 输出并脱敏。插件信任不是
+沙箱，信任自定义采集器前仍应审查内容。
+
+远端观察缓存必须显式启用：
+
+```bash
+sshx inspect -h=prod-web docker.environment \
+  --cache=remote-prefer \
+  --max-age=10m \
+  --json
+```
+
+远端用户的 `~/.sshx/observations/v1/` 只保存规范化、已脱敏 JSON。缓存复用
+同时绑定插件摘要、host-key 指纹、平台、boot ID、权限、参数和 TTL。
+`--refresh` 强制重新采集；`--allow-stale` 显式允许匹配但过期的观察结果。
+
+本地运行根目录默认为 `~/.sshx`；使用 `SSHX_HOME` 可以为某个 Agent 或 CI
+隔离 settings、audit、plugins 和信任状态。完整 manifest、生命周期、缓存和
+安全契约见[主机探测能力与本地插件](docs/zh/inspection-plugins.md)。
+
 ## 主机密钥校验 🔐
 
 `sshx` 现在默认与 OpenSSH 一样严格验证主机密钥。程序会读取 `~/.ssh/known_hosts`（或你指定的路径），当主机不存在或密钥发生变化时会立即中断连接并给出修复方案，从源头降低中间人攻击风险。
@@ -499,6 +546,8 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 export SSH_KEY_PATH=~/.ssh/prod.pem
 export SSH_SUDO_KEY=prod-web
 export SSH_TIMEOUT=30s
+# 可选：为 Agent/CI 隔离全部 sshx 运行状态
+export SSHX_HOME="$PWD/.sshx-runtime"
 
 # 然后减少重复输入的选项
 sshx -h=prod-web "sudo uptime"

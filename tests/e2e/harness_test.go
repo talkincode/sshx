@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -61,17 +62,20 @@ type serverOptions struct {
 	root          string
 	sftpReadOnly  bool
 	authorizedKey ssh.PublicKey
+	reportedUID   string
 }
 
 type testSSHServer struct {
-	host         string
-	port         string
-	listener     net.Listener
-	root         string
-	sftpReadOnly bool
-	connections  atomic.Int64
-	stateMu      sync.Mutex
-	state        string
+	host          string
+	port          string
+	listener      net.Listener
+	root          string
+	sftpReadOnly  bool
+	connections   atomic.Int64
+	collectorRuns atomic.Int64
+	reportedUID   string
+	stateMu       sync.Mutex
+	state         string
 }
 
 func TestMain(m *testing.M) {
@@ -162,10 +166,15 @@ func startSSHServer(t *testing.T, options serverOptions) *testSSHServer {
 	if options.root == "" {
 		options.root = t.TempDir()
 	}
+	if options.reportedUID == "" {
+		current, currentErr := user.Current()
+		require.NoError(t, currentErr)
+		options.reportedUID = current.Uid
+	}
 
 	server := &testSSHServer{
 		host: host, port: port, listener: listener,
-		root: options.root, sftpReadOnly: options.sftpReadOnly,
+		root: options.root, sftpReadOnly: options.sftpReadOnly, reportedUID: options.reportedUID,
 	}
 	t.Cleanup(func() { _ = listener.Close() }) //nolint:errcheck // best-effort E2E teardown
 
@@ -270,6 +279,12 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 
 		exitCode := uint32(0)
 		switch {
+		case payload.Command == "sh -s --":
+			handleCollectorSession(channel, server, role, false)
+			return
+		case payload.Command == "sudo -S -p '' sh -s --":
+			handleCollectorSession(channel, server, role, true)
+			return
 		case payload.Command == "probe" || strings.HasPrefix(payload.Command, "probe "):
 			_, _ = io.WriteString(channel, "probe-ok\n") //nolint:errcheck // fixture response
 		case payload.Command == "bothstreams":
@@ -321,6 +336,50 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 		sendExitStatus(channel, exitCode)
 		return
 	}
+}
+
+func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role string, useSudo bool) {
+	reader := bufio.NewReader(channel)
+	if useSudo {
+		password, err := reader.ReadString('\n')
+		if err != nil || role != "operator" || strings.TrimSpace(password) != operatorPassword {
+			_, _ = io.WriteString(channel.Stderr(), "sudo password mismatch\n") //nolint:errcheck // fixture response
+			sendExitStatus(channel, 25)
+			return
+		}
+	}
+	payload, err := io.ReadAll(io.LimitReader(reader, 12<<20))
+	if err != nil {
+		_, _ = io.WriteString(channel.Stderr(), "collector stdin read failed\n") //nolint:errcheck // fixture response
+		sendExitStatus(channel, 24)
+		return
+	}
+	if bytes.Contains(payload, []byte("/proc/sys/kernel/random/boot_id")) && bytes.Contains(payload, []byte("uname -s")) && !bytes.Contains(payload, []byte("capability=")) {
+		_, _ = io.WriteString(channel, "Linux\nboot-e2e\n"+server.reportedUID+"\n") //nolint:errcheck // fixture response
+		sendExitStatus(channel, 0)
+		return
+	}
+	server.collectorRuns.Add(1)
+	command := exec.Command("sh") // #nosec G204 -- fixed shell executes only isolated test-created collector fixtures.
+	command.Dir = server.root
+	command.Env = append(os.Environ(), "HOME="+server.root, "SSHX_E2E_ROLE="+role)
+	command.Stdin = bytes.NewReader(payload)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	runErr := command.Run()
+	_, _ = channel.Write(stdout.Bytes())          //nolint:errcheck // fixture response
+	_, _ = channel.Stderr().Write(stderr.Bytes()) //nolint:errcheck // fixture response
+	if runErr == nil {
+		sendExitStatus(channel, 0)
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		sendExitStatus(channel, uint32(exitErr.ExitCode())) // #nosec G115 -- process exit codes are bounded.
+		return
+	}
+	sendExitStatus(channel, 126)
 }
 
 func (s *testSSHServer) readState() string {
@@ -395,6 +454,7 @@ func isolatedEnvironment(home string, extra map[string]string) []string {
 		"SSH_DISABLE_KEY": {}, "SSH_KNOWN_HOSTS": {}, "SSHX_AUDIT_OUTPUT": {},
 		"SSHX_NO_AUDIT": {}, "SSH_ACCEPT_UNKNOWN_HOST": {}, "SSH_INSECURE_HOST_KEY": {},
 		"SSH_NO_SAFETY_CHECK": {}, "SSH_FORCE": {}, "SSH_TIMEOUT": {}, "SSHX_LOG_LEVEL": {},
+		"SSHX_HOME": {},
 	}
 	env := make([]string, 0, len(os.Environ())+len(extra)+3)
 	for _, item := range os.Environ() {

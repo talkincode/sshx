@@ -44,6 +44,8 @@ func TestPrintUsage(t *testing.T) {
 		"Safety Options:",
 		"SFTP Options:",
 		"Password Management",
+		"Inspection Capabilities:",
+		"Plugin Management:",
 		"Environment Variables",
 		"SSH Examples:",
 		"SFTP Examples:",
@@ -67,6 +69,9 @@ func TestPrintUsage(t *testing.T) {
 		"--audit-output",
 		"--force",
 		"--no-safety-check",
+		"sshx inspect",
+		"sshx plugin create",
+		"SSHX_HOME",
 	}
 
 	for _, cmd := range importantCommands {
@@ -169,6 +174,8 @@ func TestPrintUsage_Examples(t *testing.T) {
 		`--upload=local.txt --to=/tmp/remote.txt`,
 		`--download=/var/log/app.log`,
 		`--audit-output=./.sshx-audit`,
+		`sshx inspect -h=prod-web system.baseline --json`,
+		`sshx plugin create docker.environment --template=docker`,
 	}
 
 	for _, example := range examples {

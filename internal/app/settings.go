@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/talkincode/sshx/internal/runtimepath"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -38,20 +39,20 @@ type Settings struct {
 
 // GetSettingsPath returns the path to the settings file
 func GetSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	settingsDir, err := GetSettingsDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, SettingsDir, SettingsFile), nil
+	return filepath.Join(settingsDir, SettingsFile), nil
 }
 
 // GetSettingsDir returns the path to the settings directory
 func GetSettingsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	settingsDir, err := runtimepath.Root()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
+		return "", fmt.Errorf("failed to get sshx runtime directory: %w", err)
 	}
-	return filepath.Join(home, SettingsDir), nil
+	return settingsDir, nil
 }
 
 // LoadSettings loads settings from the settings file

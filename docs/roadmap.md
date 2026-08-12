@@ -121,6 +121,18 @@ Agent / 自动化 / 人类运维者
 
   非 dry-run 调用默认写入本地 JSONL 审计事件，记录目标、动作、安全上下文、结果和耗时，排除 stdout/stderr，并对命令中的 secret-like 参数做尽力脱敏。证据：`internal/app/audit.go`、`internal/app/audit_test.go`。
 
+- **内置主机环境探测**
+
+  `sshx inspect` 用一次 SSH 连接返回带来源、权限、目标身份和新鲜度的观察结果；内置系统身份、资源、网卡、路由、DNS、监听端口、防火墙和组合基线能力。证据：`internal/app/inspect.go`、`internal/plugin/builtin.go`、`tests/e2e/inspect_plugin_e2e_test.go`。
+
+- **sshx 本地插件生命周期**
+
+  Agent 可通过 `sshx plugin create` 在 `~/.sshx/plugins/`（或 `$SSHX_HOME/plugins/`）创建 Docker、Nginx 或自定义应用探测插件，并完成 list/show/validate/test/trust/remove。插件脚本不由 Agent skill 维护；摘要变化会使信任失效。证据：`internal/app/plugin.go`、`internal/plugin/`、`tests/e2e/inspect_plugin_e2e_test.go`。
+
+- **有界远端观察快照**
+
+  显式启用 `--cache=remote-prefer` 后，仅把规范化、已脱敏 JSON 保存到远端用户 `~/.sshx/observations/v1/`。复用绑定插件版本/摘要、host key、平台、UID、boot ID、权限、参数与 TTL；缓存作为不可信输入校验，使用私有权限和原子替换。证据：`internal/app/inspect.go`、`internal/plugin/observation.go`、`internal/sshclient/remote_state.go`、`tests/e2e/inspect_plugin_e2e_test.go`。
+
 - **跨平台交付**
 
   项目以单二进制形式面向 Linux、macOS 和 Windows，支持 Go 安装、安装脚本、Release 产物和 Homebrew tap。证据：`Makefile`、`.github/workflows/ci.yml`、`.github/workflows/release.yml`、`install.sh`、`install.ps1`。
@@ -129,7 +141,7 @@ Agent / 自动化 / 人类运维者
 
 - **不把 SSH 本身重新实现一遍。** 不追求交互式 shell 复用、通用端口转发、SOCKS、X11 或 agent forwarding；SSH 是底层通道，不是功能竞赛对象。
 
-- **不在远端安装驻留 Agent。** 不引入守护进程、后台服务、连接池或常驻控制面；一次调用建立连接、执行、返回并退出。
+- **不在远端安装驻留 Agent 或插件运行时。** 不引入守护进程、后台服务、连接池或常驻控制面；采集器只在单次 SSH 会话中流式执行。远端可显式保存有版本、有时效的被动 JSON 观察结果，但不保存插件代码或可执行运行时。
 
 - **不成为 Ansible、Salt 或工作流引擎。** 可以提供有界的多主机执行，但不引入期望状态语言、playbook 生态、调度系统或长期任务编排。
 
@@ -167,6 +179,10 @@ Agent / 自动化 / 人类运维者
 
   主机导入、列表、分组、标签、连接健康和凭据引用应让 Agent 快速找到正确目标，同时避免把基础设施秘密复制到更多位置。规模化体验仍以简单、可审阅、可迁移的本地配置为底线。
 
+- **把重复探索收敛为可复用探测能力**
+
+  固定的操作系统与网络事实由二进制内置，Docker、Nginx 和私有应用由 sshx 运行目录中的本地插件表达。每个能力都应有严格 manifest、结果 schema、摘要信任、权限策略、脱敏与有效期，让 Agent 先读可信的新鲜观察，再决定是否重新探测，而不是跨任务重复拼装命令。
+
 - **提升失败恢复效率**
 
   连接、认证、host-key、权限、超时、远程退出、部分传输和本地持久化失败应拥有稳定分类与足够上下文。对于会修改状态的动作，结果需要帮助调用者判断“未开始、部分完成、已完成但回执异常”，减少危险重试。
@@ -190,6 +206,8 @@ Agent / 自动化 / 人类运维者
 - 多主机执行即使部分失败，也能逐主机说明状态，并避免不受控并发和盲目重试。
 - 会修改远端状态的操作能够说明是否执行、是否部分完成以及下一步如何安全判断，而不是只返回一个模糊 EOF 或通用错误。
 - 项目继续保持单二进制、无远端驻留组件、无核心 MCP server、无长期控制面的轻量边界。
+- Agent 能在 sshx 运行目录快速创建、测试和信任应用探测插件；skill 只维护调用方法，不维护插件脚本。
+- 常见系统/网络或应用部署探索可在一次调用中形成可复用观察，且陈旧、身份漂移或不可信缓存不会被静默采用。
 - 每项一级能力都有覆盖真实 CLI 与真实 SSH/SFTP 边界的验收证据；安全与状态修改路径同时覆盖失败和恢复语义。
 
 ## 验收矩阵（业务能力覆盖矩阵）
@@ -216,6 +234,9 @@ Agent / 自动化 / 人类运维者
 | host-key 校验 | 高 | 是，信任状态 | 可能修改 `known_hosts` | ✅ 显式信任后严格复用 | ✅ 未知/变更 key | ✅ strict/accept-unknown | ✅ 首次写入后重新严格连接 | `tests/e2e/cli_e2e_test.go` |
 | 危险动作阻断与显式绕过 | 高 | 是 | 否，仅控制执行准入 | ✅ 显式 `--force` | ✅ 默认阻断且零连接 | ✅ 默认阻断/显式绕过 | 不适用：策略门本身不修改状态 | `tests/e2e/cli_e2e_test.go` |
 | 本地结构化审计 | 高 | 否 | 是，本地 | ✅ | ✅ 不可写目标可观测 | 不适用：本地调用者同权 | ✅ 修复目标后单事件写入 | `tests/e2e/host_audit_e2e_test.go` |
+| 本地探测插件生命周期 | 高 | 本地调用者权限 | 是，本地 | ✅ create/list/show/validate/test/trust/remove | ✅ 路径逃逸、重复创建、manifest/entrypoint/schema/fixture 分类失败 | ✅ 私有目录/文件权限 | ✅ replace/remove 保留可恢复备份 | `tests/e2e/inspect_plugin_e2e_test.go` |
+| 单主机探测与内置基线 | 高 | 是 | 否，cache off | ✅ 自定义插件与 `system.baseline` | ✅ 未信任、污染/超限输出、超时、非零退出、不支持平台 | ✅ operator/reader/sudo-required | 不适用：不修改远端状态 | `tests/e2e/inspect_plugin_e2e_test.go`、`tests/e2e/keyring_e2e_test.go` |
+| 远端观察缓存 | 高 | 是 | 是，远端 JSON | ✅ 冷写入/热复用/并发原子替换 | ✅ TTL/boot ID、格式、大小、属主、权限、symlink、只读端 | ✅ 可写/只读 SFTP | ✅ 失败写入保留原有效快照 | `tests/e2e/inspect_plugin_e2e_test.go` |
 | 有界多主机执行（方向） | 高 | 是 | 可能，多主机 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | `--host-test-all` 仅覆盖连接测试，不等同批量执行 |
 | 可解释执行治理（方向） | 高 | 是 | 可能 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | 现有 `--dry-run`、安全检查与审计是基础，不构成完整能力 |
 

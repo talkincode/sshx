@@ -25,6 +25,9 @@ Usage:
   sshx --host-test=<name>                         # Test host connection
   sshx --host-test-all                            # Test all host connections
   sshx --host-remove=<name>                       # Remove host configuration
+  sshx plugin create <id> [options]               # Scaffold a local inspection plugin
+  sshx plugin list [--json]                       # List built-in and local capabilities
+  sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
 
 SSH Options:
   -h, --host=HOST          Remote host address (required)
@@ -160,6 +163,40 @@ Host Management:
 
   Configuration file: ~/.sshx/settings.json
 
+Inspection Capabilities:
+  sshx inspect -h=<host> <capability> [options]
+
+  Built in:
+    system.identity, system.resources, system.baseline
+    network.interfaces, network.routes, network.dns
+    network.listeners, network.firewall
+
+  --cache=off|remote-prefer  Reuse/write a remote observation (default: off)
+  --refresh                  Ignore a reusable observation and run the collector
+  --max-age=DURATION         Require observations no older than this duration
+  --allow-stale              Explicitly allow an expired observation
+  --sudo                     Use sudo for an optional-privilege plugin
+
+  Collectors execute once through SSH stdin and are never installed on the
+  target. With remote-prefer caching, only redacted JSON is stored below the
+  remote user's ~/.sshx/observations/v1 directory.
+
+Plugin Management:
+  sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]
+                          [--privilege=never|optional|required]
+                          [--template=generic|docker|nginx] [--replace] [--json]
+  sshx plugin list [--json]
+  sshx plugin show <id> [--json]
+  sshx plugin validate <id> [--json]
+  sshx plugin test <id> [--fixture=<name>] [--json]
+  sshx plugin trust <id> [--json]
+  sshx plugin remove <id> [--json]
+
+  Local plugins belong to sshx, not to an Agent skill. They are stored under
+  ~/.sshx/plugins/<id> and remain untrusted until their current digest is
+  explicitly trusted. Editing a trusted manifest, schema, or collector changes
+  the digest and blocks remote execution until it is trusted again.
+
 Environment Variables (.env):
   SSH_PASSWORD          SSH password (not recommended, use SSH keys or keyring)
   SSH_KEY_PATH          SSH private key path
@@ -169,6 +206,7 @@ Environment Variables (.env):
   SSH_TIMEOUT           Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
   SSHX_AUDIT_OUTPUT     Audit output directory (default: ~/.sshx/audit)
   SSHX_NO_AUDIT         Disable audit writing (true/false)
+  SSHX_HOME             Override the local sshx runtime root (default: ~/.sshx)
 
 SSH Examples:
   # Execute simple command (default user: master)
@@ -203,6 +241,19 @@ SSH Examples:
   # Force execute (bypass safety check - use with caution!)
   sshx -h=192.168.1.100 --force "sudo reboot"
   sshx -h=192.168.1.100 -f "sudo systemctl reboot"
+
+Inspection Examples:
+  # Inspect stable system/network state in one invocation
+  sshx inspect -h=prod-web system.baseline --json
+
+  # Create a locally editable Docker capability, validate it, then trust it
+  sshx plugin create docker.environment --template=docker --privilege=optional --json
+  sshx plugin validate docker.environment --json
+  sshx plugin test docker.environment --fixture=complete --json
+  sshx plugin trust docker.environment --json
+
+  # Inspect once and persist only the redacted observation on the target
+  sshx inspect -h=prod-web docker.environment --cache=remote-prefer --json
 
 SFTP Examples:
   # Upload file

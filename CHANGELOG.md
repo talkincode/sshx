@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `sshx inspect` with built-in system/resource/network capabilities and a
+  schema-valid observation envelope that distinguishes complete, partial,
+  unsupported, and failed outcomes.
+- Add the Agent-native `sshx plugin create/list/show/validate/test/trust/remove`
+  lifecycle. Editable Docker, Nginx, and custom collectors live under the sshx
+  runtime root instead of Agent skills.
+- Add opt-in, freshness-bounded remote observation snapshots with atomic writes,
+  cache-hit metadata, identity invalidation, redaction, and restrictive access.
+- Add `SSHX_HOME` so Agent and CI runs can isolate settings, audit, plugins, and
+  plugin trust state under one runtime root.
 - Add compiled-binary SSH/SFTP E2E coverage for command execution, structured
   results, host trust, permissions, partial completion, dry-run, host import,
   SFTP, server-to-server transfer, keyring-backed sudo, and audit recovery.
@@ -17,7 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Separate SSH login and sudo password fields while preserving the documented
+  keyring boundary: stored password keys are used for sudo, not SSH login.
 - Upgrade the CI cache and Codecov actions to their supported major versions.
+
+### Security
+
+- Reject new or modified local plugins before network access until their current
+  manifest, collector, and schema digest is explicitly trusted.
+- Treat remote observation snapshots as untrusted input by enforcing schema and
+  size limits, owner-only permissions, authenticated UID binding, clean paths,
+  parent-directory checks, symlink rejection, and host-key/boot-ID identity.
 
 ### Fixed
 
@@ -29,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Document the built-in/application capability split, local plugin contract,
+  observation cache, and the rule that Agent skills do not own collector scripts.
 - Reposition sshx as an agent-native remote host execution tool: SSH is the
   trusted channel and X is execution. Add the efficiency and security model,
   hard product boundaries, future directions, and an evidence-based capability

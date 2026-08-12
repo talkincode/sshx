@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 )
 
 func TestIsolatedKeyringProcessContractAndSudoExecution(t *testing.T) {
@@ -17,7 +18,7 @@ func TestIsolatedKeyringProcessContractAndSudoExecution(t *testing.T) {
 	home := t.TempDir()
 	keyringFile := filepath.Join(home, "keyring.json")
 	key := "isolated-key"
-	env := map[string]string{"SSHX_E2E_KEYRING_FILE": keyringFile}
+	env := map[string]string{"SSHX_E2E_KEYRING_FILE": keyringFile, "SSH_PASSWORD": operatorPassword}
 
 	set := runSSHXWithTestKeyring(t, home, []string{"--password-set=" + key + ":" + operatorPassword, "--no-audit"}, env)
 	require.Equal(t, 0, set.exitCode, set.stderr)
@@ -39,7 +40,7 @@ func TestIsolatedKeyringProcessContractAndSudoExecution(t *testing.T) {
 		"-pk=" + key,
 		"sudo whoami",
 	}, env)
-	require.Equal(t, 0, sudo.exitCode, sudo.stderr)
+	require.Equal(t, 0, sudo.exitCode, "stderr=%s stdout=%s", sudo.stderr, sudo.stdout)
 	var payload commandResult
 	require.NoError(t, json.Unmarshal([]byte(sudo.stdout), &payload))
 	assert.Equal(t, "sudo-ok\n", payload.Stdout)
@@ -50,6 +51,36 @@ func TestIsolatedKeyringProcessContractAndSudoExecution(t *testing.T) {
 	require.Equal(t, 0, deleted.exitCode, deleted.stderr)
 	missing := runSSHXWithTestKeyring(t, home, []string{"--password-get=" + key, "--no-audit"}, env)
 	assert.Equal(t, 255, missing.exitCode)
+}
+
+func TestIsolatedKeyringRequiredPrivilegeInspection(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	keyringFile := filepath.Join(home, "keyring.json")
+	key := "inspect-sudo"
+	env := map[string]string{
+		"SSHX_E2E_KEYRING_FILE": keyringFile,
+		"SSH_PASSWORD":          operatorPassword,
+	}
+
+	set := runSSHXWithTestKeyring(t, home, []string{"--password-set=" + key + ":" + operatorPassword, "--no-audit"}, env)
+	require.Equal(t, 0, set.exitCode, set.stderr)
+	create := runSSHXWithTestKeyring(t, home, []string{"plugin", "create", "root.inspect", "--privilege=required", "--json"}, env)
+	require.Equal(t, 0, create.exitCode, create.stderr)
+	trust := runSSHXWithTestKeyring(t, home, []string{"plugin", "trust", "root.inspect", "--json"}, env)
+	require.Equal(t, 0, trust.exitCode, trust.stderr)
+
+	result := runSSHXWithTestKeyring(t, home, []string{
+		"inspect", "-h=" + server.host, "-p=" + server.port, "-u=operator",
+		"--no-key", "--accept-unknown-host", "-pk=" + key, "--json", "root.inspect",
+	}, env)
+	require.Equal(t, 0, result.exitCode, "stderr=%s stdout=%s", result.stderr, result.stdout)
+	var observation pluginpkg.Observation
+	require.NoError(t, json.Unmarshal([]byte(result.stdout), &observation))
+	assert.Equal(t, "sudo", observation.Privilege)
+	assert.Equal(t, "complete", observation.Status)
+	assert.NotContains(t, result.stdout, operatorPassword)
+	assert.NotContains(t, result.stderr, operatorPassword)
 }
 
 func TestRealOSKeyringLifecycleAndSudoExecution(t *testing.T) {
@@ -81,7 +112,7 @@ func TestRealOSKeyringLifecycleAndSudoExecution(t *testing.T) {
 		"--json",
 		"-pk=" + key,
 		"sudo whoami",
-	}, nil)
+	}, map[string]string{"SSH_PASSWORD": operatorPassword})
 	require.Equal(t, 0, sudo.exitCode, sudo.stderr)
 	var payload commandResult
 	require.NoError(t, json.Unmarshal([]byte(sudo.stdout), &payload))
