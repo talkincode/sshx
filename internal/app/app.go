@@ -98,6 +98,11 @@ func Run(args []string) (err error) {
 		return nil
 	}
 
+	// Handle the local Agent skill lifecycle without crossing the network.
+	if config.Mode == "skill" {
+		return HandleSkillManagement(config)
+	}
+
 	// Handle local plugin lifecycle mode.
 	if config.Mode == "plugin" {
 		if pluginErr := HandlePluginManagement(config); pluginErr != nil {

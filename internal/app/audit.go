@@ -364,6 +364,8 @@ func auditAction(config *sshclient.Config) string {
 		return "transfer"
 	case "plugin":
 		return config.PluginAction
+	case "skill":
+		return config.SkillAction
 	case "inspect":
 		return "inspect"
 	default:
@@ -405,6 +407,8 @@ func auditWouldWriteLocalState(config *sshclient.Config) bool {
 		return config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove" || config.HostAction == "import"
 	case "plugin":
 		return config.PluginAction == "create" || config.PluginAction == "trust" || config.PluginAction == "remove"
+	case "skill":
+		return config.SkillAction == "install"
 	default:
 		return false
 	}

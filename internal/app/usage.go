@@ -25,6 +25,7 @@ Usage:
   sshx --host-test=<name>                         # Test host connection
   sshx --host-test-all                            # Test all host connections
   sshx --host-remove=<name>                       # Remove host configuration
+  sshx skill install [options]                    # Install/update the bundled Agent skill
   sshx plugin create <id> [options]               # Scaffold a local inspection plugin
   sshx plugin list [--json]                       # List built-in and local capabilities
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
@@ -197,6 +198,20 @@ Plugin Management:
   explicitly trusted. Editing a trusted manifest, schema, or collector changes
   the digest and blocks remote execution until it is trusted again.
 
+Agent Skill Installation:
+  sshx skill install [--dir=<path>] [--force] [--json]
+
+  The canonical sshx Agent skill is embedded in the binary, so installation
+  does not need a network download or a release archive next to the executable.
+  The default target is ~/.agents/skills/sshx/SKILL.md. Pass --dir to select
+  another sshx skill directory.
+
+  A matching installed skill is left unchanged (or repaired to mode 0644).
+  A prior sshx-managed version is updated using its digest sidecar. Differing
+  unmanaged content is preserved unless --force is explicit. Symlinked targets
+  are rejected. JSON status is installed, current, repaired, or updated;
+  failures use conflict, unsafe_target, or install_error.
+
 Environment Variables (.env):
   SSH_PASSWORD          SSH password (not recommended, use SSH keys or keyring)
   SSH_KEY_PATH          SSH private key path
@@ -254,6 +269,13 @@ Inspection Examples:
 
   # Inspect once and persist only the redacted observation on the target
   sshx inspect -h=prod-web docker.environment --cache=remote-prefer --json
+
+Agent Skill Example:
+  # Install after Homebrew/go install, or refresh after upgrading sshx
+  sshx skill install
+
+  # Replace a locally modified copy after reviewing the difference
+  sshx skill install --force --json
 
 SFTP Examples:
   # Upload file

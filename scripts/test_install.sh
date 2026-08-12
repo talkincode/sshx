@@ -53,6 +53,7 @@ required_functions=(
     "detect_platform"
     "get_latest_version"
     "install_sshx"
+    "install_agent_skill"
     "verify_installation"
 )
 

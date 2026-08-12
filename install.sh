@@ -142,6 +142,36 @@ verify_checksum() {
     print_success "Checksum verified"
 }
 
+install_agent_skill() {
+    local installed_binary="$1"
+
+    # New releases carry the canonical skill inside the binary. Keep the
+    # archive fallback only for older binaries that do not expose the command;
+    # a supported command's safety failure must stop the installation.
+    if "$installed_binary" --help 2>/dev/null | grep -q "sshx skill install"; then
+        "$installed_binary" skill install \
+            --dir="$SKILL_INSTALL_DIR" \
+            --force \
+            --no-audit >/dev/null
+        print_success "Installed embedded agent skill to ${SKILL_INSTALL_DIR}/SKILL.md"
+        return
+    fi
+
+    if [ -f "SKILL.md" ]; then
+        if [ -L "$SKILL_INSTALL_DIR" ] || [ -L "${SKILL_INSTALL_DIR}/SKILL.md" ]; then
+            print_error "Refusing to install the agent skill through a symlinked target"
+            exit 1
+        fi
+        mkdir -p "$SKILL_INSTALL_DIR"
+        cp "SKILL.md" "${SKILL_INSTALL_DIR}/SKILL.md"
+        chmod 0644 "${SKILL_INSTALL_DIR}/SKILL.md"
+        print_success "Installed archive agent skill to ${SKILL_INSTALL_DIR}/SKILL.md"
+        return
+    fi
+
+    print_warning "This sshx version does not provide an installable agent skill"
+}
+
 # Download and install
 install_sshx() {
     local platform
@@ -223,14 +253,7 @@ install_sshx() {
         sudo cp "$binary_file" "${INSTALL_DIR}/${BINARY_NAME}" && sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
     fi
 
-    if [ -f "SKILL.md" ]; then
-        mkdir -p "$SKILL_INSTALL_DIR"
-        cp "SKILL.md" "${SKILL_INSTALL_DIR}/SKILL.md"
-        chmod 0644 "${SKILL_INSTALL_DIR}/SKILL.md"
-        print_success "Installed agent skill to ${SKILL_INSTALL_DIR}/SKILL.md"
-    else
-        print_warning "This release archive does not include the optional agent skill"
-    fi
+    install_agent_skill "${INSTALL_DIR}/${BINARY_NAME}"
     
     # Cleanup
     cd - > /dev/null
@@ -299,5 +322,7 @@ main() {
     print_info "Documentation: https://github.com/${REPO}"
 }
 
-# Run
-main
+# Run only when executed, so tests and shell tooling can safely source helpers.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi

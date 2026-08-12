@@ -9,7 +9,13 @@
 ```bash
 go install github.com/talkincode/sshx/cmd/sshx@latest
 sshx --version
+sshx skill install
 ```
+
+`sshx skill install` 会把二进制内嵌的官方 Skill 写入
+`~/.agents/skills/sshx/SKILL.md`。使用 Homebrew 安装或升级后也运行同一条命令；
+由 sshx 管理的旧版本会自动升级，只有在审阅过本地修改副本后，才使用
+`--force` 覆盖。
 
 也可以不安装，直接运行指定版本：
 

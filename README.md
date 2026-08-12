@@ -97,6 +97,9 @@ go install github.com/talkincode/sshx/cmd/sshx@latest
 # Then use it anywhere
 sshx --help
 sshx -h=192.168.1.100 "uptime"
+
+# Install the matching Agent skill from the binary
+sshx skill install
 ```
 
 **Note:** Make sure `$GOPATH/bin` (typically `~/go/bin`) is in your PATH.
@@ -105,9 +108,12 @@ sshx -h=192.168.1.100 "uptime"
 
 ```bash
 brew install talkincode/tap/sshx
+sshx skill install
 ```
 
 This pulls prebuilt binaries from the [talkincode/homebrew-tap](https://github.com/talkincode/homebrew-tap) repository, updated automatically on every tagged release.
+The binary embeds the matching Agent skill; the second command installs it to
+`~/.agents/skills/sshx/SKILL.md` without another download.
 
 ### One-Line Installation Script
 
@@ -117,8 +123,9 @@ This pulls prebuilt binaries from the [talkincode/homebrew-tap](https://github.c
 curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
-The installer verifies the release checksum and installs both the binary and
-the matching Agent skill at `~/.agents/skills/sshx/SKILL.md`.
+The installer verifies the release checksum, installs the binary, and invokes
+`sshx skill install --force` to install the matching embedded Agent skill at
+`~/.agents/skills/sshx/SKILL.md`.
 
 Or download and run:
 

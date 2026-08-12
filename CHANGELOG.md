@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `sshx skill install` with a canonical Skill embedded in the binary, an
+  idempotent JSON result, configurable destination, atomic writes, conflict
+  protection, managed-version digest tracking, and symlink rejection. This
+  makes Skill installation and later upgrades available after Homebrew and
+  `go install` without another download.
+
 ## [0.1.0] - 2026-08-12
 
 ### Added

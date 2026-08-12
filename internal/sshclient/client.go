@@ -119,6 +119,10 @@ type Config struct {
 	PluginFixture   string
 	PluginReplace   bool
 
+	// Agent skill lifecycle fields (Mode == "skill").
+	SkillAction string
+	SkillDir    string
+
 	// Inspection fields (Mode == "inspect").
 	InspectCapability  string
 	InspectCacheMode   string

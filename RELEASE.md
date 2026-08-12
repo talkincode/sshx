@@ -169,11 +169,14 @@ users can run:
 
 ```bash
 brew install talkincode/tap/sshx
+sshx skill install
 ```
 
 The formula is built from the `checksums.txt` produced by the `build` job, and
 covers `darwin`/`linux` on both `amd64` and `arm64`. Windows has no Homebrew
-equivalent, so it is intentionally excluded from the formula.
+equivalent, so it is intentionally excluded from the formula. The Formula
+caveat tells users to run `sshx skill install`; the embedded asset makes this
+work even though Homebrew installs only the binary.
 
 ### One-time setup
 

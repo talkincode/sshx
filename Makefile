@@ -15,7 +15,6 @@ RELEASE_LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION)"
 # Install locations
 LOCAL_BIN_DIR=$(HOME)/.local/bin
 SKILL_NAME=sshx
-SKILLS_SRC_DIR=skills/$(SKILL_NAME)
 SKILLS_INSTALL_DIR=$(HOME)/.agents/skills
 
 # Go parameters
@@ -110,8 +109,7 @@ install: build ## Install binary to ~/.local/bin and skill to ~/.agents/skills
 	@mkdir -p $(LOCAL_BIN_DIR)
 	@cp $(GOBIN)/$(BINARY_NAME) $(LOCAL_BIN_DIR)/$(BINARY_NAME) && chmod +x $(LOCAL_BIN_DIR)/$(BINARY_NAME)
 	@echo "✓ Installed binary to $(LOCAL_BIN_DIR)/$(BINARY_NAME)"
-	@mkdir -p $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)
-	@cp -R $(SKILLS_SRC_DIR)/. $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)/
+	@"$(LOCAL_BIN_DIR)/$(BINARY_NAME)" skill install --dir="$(SKILLS_INSTALL_DIR)/$(SKILL_NAME)" --force --no-audit
 	@echo "✓ Installed skill to $(SKILLS_INSTALL_DIR)/$(SKILL_NAME)"
 	@case ":$$PATH:" in \
 		*":$(LOCAL_BIN_DIR):"*) ;; \

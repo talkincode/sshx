@@ -235,6 +235,7 @@ Agent / 自动化 / 人类运维者
 | 危险动作阻断与显式绕过 | 高 | 是 | 否，仅控制执行准入 | ✅ 显式 `--force` | ✅ 默认阻断且零连接 | ✅ 默认阻断/显式绕过 | 不适用：策略门本身不修改状态 | `tests/e2e/cli_e2e_test.go` |
 | 本地结构化审计 | 高 | 否 | 是，本地 | ✅ | ✅ 不可写目标可观测 | 不适用：本地调用者同权 | ✅ 修复目标后单事件写入 | `tests/e2e/host_audit_e2e_test.go` |
 | 本地探测插件生命周期 | 高 | 本地调用者权限 | 是，本地 | ✅ create/list/show/validate/test/trust/remove | ✅ 路径逃逸、重复创建、manifest/entrypoint/schema/fixture 分类失败 | ✅ 私有目录/文件权限 | ✅ replace/remove 保留可恢复备份 | `tests/e2e/inspect_plugin_e2e_test.go` |
+| Agent Skill 安装 | 高 | 本地调用者权限 | 是，本地 Agent 信任目录 | ✅ 编译后二进制离线安装/幂等复用 | ✅ 内容冲突与 symlink 目标拒绝 | ✅ 默认目录/显式目录 | ✅ 冲突不覆盖，显式 force 后恢复官方版本 | `tests/e2e/skill_e2e_test.go` |
 | 单主机探测与内置基线 | 高 | 是 | 否，cache off | ✅ 自定义插件与 `system.baseline` | ✅ 未信任、污染/超限输出、超时、非零退出、不支持平台 | ✅ operator/reader/sudo-required | 不适用：不修改远端状态 | `tests/e2e/inspect_plugin_e2e_test.go`、`tests/e2e/keyring_e2e_test.go` |
 | 远端观察缓存 | 高 | 是 | 是，远端 JSON | ✅ 冷写入/热复用/并发原子替换 | ✅ TTL/boot ID、格式、大小、属主、权限、symlink、只读端 | ✅ 可写/只读 SFTP | ✅ 失败写入保留原有效快照 | `tests/e2e/inspect_plugin_e2e_test.go` |
 | 有界多主机执行（方向） | 高 | 是 | 可能，多主机 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | ❌ 未实现 | `--host-test-all` 仅覆盖连接测试，不等同批量执行 |
