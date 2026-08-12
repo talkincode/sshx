@@ -40,6 +40,26 @@ func TestParseArgs_PluginSubcommands(t *testing.T) {
 	}
 }
 
+func TestParseArgs_SkillInstall(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "skill", "install", "--dir=/tmp/agent-skills/sshx", "--force", "--json", "--no-audit",
+	})
+	if config.Mode != "skill" || config.SkillAction != "install" {
+		t.Fatalf("unexpected skill routing: mode=%s action=%s", config.Mode, config.SkillAction)
+	}
+	if config.SkillDir != "/tmp/agent-skills/sshx" || !config.Force || !config.JSONOutput || config.AuditEnabled {
+		t.Fatalf("unexpected skill options: %#v", config)
+	}
+}
+
+func TestParseArgs_SkillInstallRequiresExplicitForce(t *testing.T) {
+	t.Setenv("SSH_FORCE", "true")
+	config := ParseArgs([]string{"sshx", "skill", "install"})
+	if config.Force {
+		t.Fatal("SSH_FORCE must not authorize overwriting an Agent skill")
+	}
+}
+
 func TestParseArgs_InspectSubcommand(t *testing.T) {
 	config := ParseArgs([]string{
 		"sshx", "inspect", "-h=prod", "-p=2222", "-u=operator", "system.baseline",
@@ -64,6 +84,10 @@ func TestParseArgs_SubcommandsRejectUnknownOptions(t *testing.T) {
 	inspectConfig := ParseArgs([]string{"sshx", "inspect", "system.identity", "--typo"})
 	if inspectConfig.ArgumentError == "" {
 		t.Fatal("unknown inspect option was ignored")
+	}
+	skillConfig := ParseArgs([]string{"sshx", "skill", "install", "--typo"})
+	if skillConfig.ArgumentError == "" {
+		t.Fatal("unknown skill option was ignored")
 	}
 }
 

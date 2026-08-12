@@ -268,6 +268,11 @@ func TestAuditEffectFlagsByModeAndAction(t *testing.T) {
 			wantWriteLocalState: true,
 		},
 		{
+			name:                "skill install writes only local state",
+			config:              sshclient.Config{Mode: "skill", SkillAction: "install"},
+			wantWriteLocalState: true,
+		},
+		{
 			name:                    "host test reads secret mutates remote and may trust host",
 			config:                  sshclient.Config{Mode: "host", HostAction: "test", AcceptUnknownHost: true},
 			wantReadSecret:          true,

@@ -9,7 +9,13 @@ If Go is already installed:
 ```bash
 go install github.com/talkincode/sshx/cmd/sshx@latest
 sshx --version
+sshx skill install
 ```
+
+`sshx skill install` writes the canonical skill embedded in the binary to
+`~/.agents/skills/sshx/SKILL.md`. The same command should be run after a
+Homebrew install or upgrade; prior sshx-managed versions update automatically.
+Use `--force` only after reviewing a locally modified existing copy.
 
 You can also run a specific version without installing:
 

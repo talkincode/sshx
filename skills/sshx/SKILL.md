@@ -265,6 +265,25 @@ sshx --password-delete=server-A       # delete (alias: --password-del)
 `SSH_NO_SAFETY_CHECK`, `SSH_FORCE`, `SSH_TIMEOUT`, `SSHX_LOG_LEVEL`,
 `SSHX_HOME` (isolated settings/audit/plugins/trust runtime root).
 
+## Install or refresh this skill
+
+The canonical skill is embedded in every sshx binary. After Homebrew or
+`go install`, install it without another network request:
+
+```bash
+sshx skill install
+```
+
+The default destination is `~/.agents/skills/sshx/SKILL.md`. A matching file is
+left unchanged, while a prior sshx-managed version is updated automatically
+using `.sshx-managed.json`. If unmanaged content differs, review it before
+explicitly replacing it with `sshx skill install --force`. Use `--dir=<path>`
+for another Agent skill directory.
+
+With `--json`, successful status is `installed`, `current`, `repaired`, or
+`updated`. Installation failures use `conflict`, `unsafe_target`, or
+`install_error`; `conflict` leaves the existing file untouched.
+
 ## Meta
 
 ```bash

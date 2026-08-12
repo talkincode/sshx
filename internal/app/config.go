@@ -103,6 +103,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "plugin":
 			parsePluginArgs(config, args[2:])
 			return config
+		case "skill":
+			parseSkillArgs(config, args[2:])
+			return config
 		case "inspect":
 			parseInspectArgs(config, args[2:])
 			return config
@@ -279,6 +282,38 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 
 	return config
+}
+
+func parseSkillArgs(config *sshclient.Config, args []string) {
+	config.Mode = "skill"
+	// SSH_FORCE controls remote command safety and must never authorize
+	// overwriting a local Agent trust asset. Only an explicit --force below may.
+	config.Force = false
+	if len(args) == 0 {
+		return
+	}
+	config.SkillAction = args[0]
+	for _, arg := range args[1:] {
+		switch {
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--force", arg == "-f":
+			config.Force = true
+		case strings.HasPrefix(arg, "--dir="):
+			config.SkillDir = strings.SplitN(arg, "=", 2)[1]
+			if config.SkillDir == "" {
+				config.ArgumentError = "--dir must not be empty"
+			}
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case !strings.HasPrefix(arg, "-"):
+			config.ArgumentError = fmt.Sprintf("unexpected skill argument %q", arg)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown skill option %q", arg)
+		}
+	}
 }
 
 func parsePluginArgs(config *sshclient.Config, args []string) {

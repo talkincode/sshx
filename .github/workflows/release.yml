@@ -245,8 +245,18 @@ jobs:
               bin.install Dir["sshx-*"].first => "sshx"
             end
 
+            def caveats
+              <<~EOS
+                Install or update the matching Agent skill after installation:
+                  sshx skill install
+              EOS
+            end
+
             test do
               assert_match version.to_s, shell_output("#{bin}/sshx --version")
+              output = shell_output("#{bin}/sshx skill install --dir=#{testpath}/skills/sshx --json --no-audit")
+              assert_match '"status":"installed"', output
+              assert_predicate testpath/"skills/sshx/SKILL.md", :exist?
             end
           end
           EOF

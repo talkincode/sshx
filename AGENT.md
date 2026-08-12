@@ -104,16 +104,19 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   usage.go                → PrintUsage() help text (keep in sync with flags)
   dryrun.go               → --dry-run local execution plan preview
   audit.go                → local structured JSONL audit events + redaction
+  skill.go                → install the canonical Agent skill embedded in sshx
   plugin.go               → local plugin create/list/show/validate/test/trust/remove
   inspect.go              → one-shot capability execution + observation caching
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
+internal/skillinstall/    → conflict-safe, atomic Agent skill installation
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   remote_state.go         → restrictive atomic remote observation I/O
   validate.go             → command safety checks + CommandUsesSudo
 pkg/errutil/              → error helpers (e.g. ignore benign close/EOF errors)
 pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
+skills/                  → canonical Agent skill plus its embedded asset package
 ```
 
 ### Execution modes
@@ -126,6 +129,7 @@ pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
 | `sftp`     | `--upload/--download/--list/--mkdir/--rm` | file transfer & remote FS ops           |
 | `password` | `--password-*`                            | manage keyring secrets                  |
 | `host`     | `--host-*`                                | manage `settings.json` host entries     |
+| `skill`    | `sshx skill install`                      | install/update the embedded Agent skill |
 | `plugin`   | `sshx plugin <action>`                    | manage local inspection plugins         |
 | `inspect`  | `sshx inspect ... <capability-id>`        | collect/reuse one host observation      |
 
@@ -145,6 +149,11 @@ pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
 - **Local plugins and trust:** editable assets live under
   `$SSHX_HOME/plugins/<id>`; trusted digests live in
   `$SSHX_HOME/plugin-lock.json`. Plugin code never belongs in an Agent skill.
+- **Agent skill:** the canonical `skills/sshx/SKILL.md` is embedded in the
+  binary. `sshx skill install` writes it atomically to
+  `~/.agents/skills/sshx/SKILL.md` (or the explicit `--dir`); differing content
+  needs explicit `--force` unless its `.sshx-managed.json` digest proves it was
+  installed by sshx, and symlink targets are rejected.
 - **Remote observations:** opt-in cache mode stores only normalized, redacted
   JSON under the authenticated user's `~/.sshx/observations/v1/`. Collector
   code remains local and is streamed only for the SSH session.

@@ -97,6 +97,9 @@ go install github.com/talkincode/sshx/cmd/sshx@latest
 # 然后可以在任何地方使用
 sshx --help
 sshx -h=192.168.1.100 "uptime"
+
+# 从二进制安装匹配版本的 Agent skill
+sshx skill install
 ```
 
 **注意：** 确保 `$GOPATH/bin`（通常是 `~/go/bin`）在您的 PATH 中。
@@ -105,9 +108,12 @@ sshx -h=192.168.1.100 "uptime"
 
 ```bash
 brew install talkincode/tap/sshx
+sshx skill install
 ```
 
 该命令会从 [talkincode/homebrew-tap](https://github.com/talkincode/homebrew-tap) 仓库拉取预编译二进制文件，每次打 tag 发布时自动更新。
+二进制内嵌了匹配版本的 Agent skill；第二条命令无需再次联网，即可将它安装到
+`~/.agents/skills/sshx/SKILL.md`。
 
 ### 一键安装脚本
 
@@ -117,8 +123,9 @@ brew install talkincode/tap/sshx
 curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
-安装脚本会校验 Release 校验和，并同时安装二进制和对应版本的 Agent skill
-到 `~/.agents/skills/sshx/SKILL.md`。
+安装脚本会校验 Release 校验和、安装二进制，并调用
+`sshx skill install --force` 将内嵌的匹配版本 Agent skill 安装到
+`~/.agents/skills/sshx/SKILL.md`。
 
 或下载后运行：
 

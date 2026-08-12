@@ -46,6 +46,7 @@ func TestPrintUsage(t *testing.T) {
 		"Password Management",
 		"Inspection Capabilities:",
 		"Plugin Management:",
+		"Agent Skill Installation:",
 		"Environment Variables",
 		"SSH Examples:",
 		"SFTP Examples:",
@@ -71,6 +72,7 @@ func TestPrintUsage(t *testing.T) {
 		"--no-safety-check",
 		"sshx inspect",
 		"sshx plugin create",
+		"sshx skill install",
 		"SSHX_HOME",
 	}
 
@@ -176,6 +178,7 @@ func TestPrintUsage_Examples(t *testing.T) {
 		`--audit-output=./.sshx-audit`,
 		`sshx inspect -h=prod-web system.baseline --json`,
 		`sshx plugin create docker.environment --template=docker`,
+		`sshx skill install`,
 	}
 
 	for _, example := range examples {
