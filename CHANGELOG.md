@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-12
+
 ### Added
 
 - Add `sshx inspect` with built-in system/resource/network capabilities and a
@@ -24,12 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SFTP, server-to-server transfer, keyring-backed sudo, and audit recovery.
 - Run the E2E suite on Linux and macOS CI, including production-binary checks
   against an ephemeral macOS Keychain.
+- Bundle the matching Agent skill in release archives and install it alongside
+  the binary through the Linux/macOS installer.
 
 ### Changed
 
 - Separate SSH login and sudo password fields while preserving the documented
   keyring boundary: stored password keys are used for sudo, not SSH login.
 - Upgrade the CI cache and Codecov actions to their supported major versions.
+- Raise the minimum Go toolchain to 1.25.10 so sshx consumes patched standard
+  library code and the patched SSH
+  implementation in `golang.org/x/crypto v0.52.0`.
+- Fail the release workflow when a tag has no exact versioned changelog entry.
+- Allow the tag script to accept an explicit semantic version and reject tags
+  without a matching changelog section.
 
 ### Security
 
@@ -38,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treat remote observation snapshots as untrusted input by enforcing schema and
   size limits, owner-only permissions, authenticated UID binding, clean paths,
   parent-directory checks, symlink rejection, and host-key/boot-ID identity.
+- Reject a symlinked remote observation root before creating any managed cache
+  directories, preventing writes outside the intended cache tree.
 
 ### Fixed
 
@@ -273,7 +285,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.0.12...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/talkincode/sshx/compare/v0.0.14...v0.1.0
+[0.0.14]: https://github.com/talkincode/sshx/compare/v0.0.13...v0.0.14
+[0.0.13]: https://github.com/talkincode/sshx/compare/v0.0.12...v0.0.13
 [0.0.12]: https://github.com/talkincode/sshx/compare/v0.0.11...v0.0.12
 [0.0.7]: https://github.com/talkincode/sshx/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/talkincode/sshx/compare/v0.0.5...v0.0.6

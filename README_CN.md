@@ -117,6 +117,9 @@ brew install talkincode/tap/sshx
 curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
+安装脚本会校验 Release 校验和，并同时安装二进制和对应版本的 Agent skill
+到 `~/.agents/skills/sshx/SKILL.md`。
+
 或下载后运行：
 
 ```bash

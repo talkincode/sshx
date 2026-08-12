@@ -22,11 +22,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.25.10"
 
       - name: Get version
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Extract changelog
         id: changelog
@@ -42,10 +42,10 @@ jobs:
             flag { print }
           ' CHANGELOG.md > /tmp/release_notes.md
 
-          # 如果没有提取到内容，使用默认消息
+          # A release without versioned notes is incomplete; fail before publishing.
           if [ ! -s /tmp/release_notes.md ]; then
-            echo "No changelog entry found for version $VERSION_NUMBER" > /tmp/release_notes.md
-            echo "Please check CHANGELOG.md for details." >> /tmp/release_notes.md
+            echo "No changelog entry found for version $VERSION_NUMBER" >&2
+            exit 1
           fi
 
           # 输出到环境变量
@@ -53,7 +53,7 @@ jobs:
             echo 'CHANGELOG<<EOF'
             cat /tmp/release_notes.md
             echo EOF
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build binaries
         run: |
@@ -76,12 +76,14 @@ jobs:
               -o "$output" \
               ./cmd/sshx
 
+            cp skills/sshx/SKILL.md dist/SKILL.md
+
             # 压缩二进制文件
             if [ "$os" = "windows" ]; then
-              zip "dist/sshx-${os}-${arch}.zip" "$output"
+              (cd dist && zip "sshx-${os}-${arch}.zip" "$(basename "$output")" SKILL.md)
               rm "$output"
             else
-              tar czf "dist/sshx-${os}-${arch}.tar.gz" -C dist "$(basename $output)"
+              tar czf "dist/sshx-${os}-${arch}.tar.gz" -C dist "$(basename "$output")" SKILL.md
               rm "$output"
             fi
           }
@@ -93,19 +95,20 @@ jobs:
           build darwin arm64
           build windows amd64
           build windows arm64
+          rm dist/SKILL.md
 
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum * > checksums.txt
+          sha256sum -- * > checksums.txt
           cat checksums.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
-            ## SSHX - Secure SSH & SFTP Client with Built-in Password Manager
+            ## SSHX - Agent-native remote host execution over SSH
 
             ### 📋 What's Changed
 
@@ -211,7 +214,7 @@ jobs:
 
           cat > tap/Formula/sshx.rb <<EOF
           class Sshx < Formula
-            desc "Barrier-free SSH/SFTP CLI with a built-in OS-keyring password manager"
+            desc "Agent-native remote host execution over SSH"
             homepage "https://github.com/talkincode/sshx"
             version "${VERSION}"
             license "MIT"

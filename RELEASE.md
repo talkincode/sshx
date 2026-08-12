@@ -37,11 +37,8 @@ git push origin main
 ### 3. Create and Push Tag
 
 ```bash
-# Create tag
-git tag -a v1.0.1 -m "Release v1.0.1"
-
-# Push tag to remote repository
-git push origin v1.0.1
+# Validate CHANGELOG, create the annotated tag, and push it
+make tag TAG=v1.0.1
 ```
 
 ### 4. Automated Build
@@ -55,8 +52,10 @@ After pushing the tag, GitHub Actions will automatically:
    - macOS x86_64 (Intel)
    - macOS ARM64 (Apple Silicon)
    - Windows x86_64
+   - Windows ARM64
 
-2. ✅ Create compressed archives for each binary:
+2. ✅ Create compressed archives containing each binary and the matching
+   `skills/sshx/SKILL.md`:
 
    - Linux/macOS: `.tar.gz` format
    - Windows: `.zip` format
@@ -80,7 +79,8 @@ https://github.com/talkincode/sshx/releases
 Check:
 
 - ✅ Release has been created
-- ✅ All 5 platform binaries have been uploaded
+- ✅ All 6 platform archives have been uploaded
+- ✅ Every archive contains `SKILL.md`
 - ✅ checksums.txt file exists
 - ✅ Release notes are complete
 
@@ -221,7 +221,7 @@ Tasks:
 1. Run tests on multiple operating systems
 2. Generate code coverage reports
 3. Run code checks (golangci-lint)
-4. Run security scans (gosec)
+4. Run security scans (`gosec` and `govulncheck`)
 
 ## Reference Resources
 

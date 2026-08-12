@@ -1,6 +1,6 @@
 module github.com/talkincode/sshx
 
-go 1.24.0
+go 1.25.10
 
 require (
 	github.com/joho/godotenv v1.5.1
@@ -8,8 +8,8 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.11.1
 	github.com/zalando/go-keyring v0.2.6
-	golang.org/x/crypto v0.44.0
-	golang.org/x/term v0.37.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/term v0.43.0
 )
 
 require (
@@ -19,7 +19,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

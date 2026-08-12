@@ -35,7 +35,7 @@ func TestPrintUsage(t *testing.T) {
 
 	// Verify output contains key sections
 	expectedSections := []string{
-		"SSH & SFTP Remote Tool",
+		"SSHX — Agent-native remote host execution over SSH",
 		"Usage:",
 		"SSH Options:",
 		"Sudo Auto-fill:",

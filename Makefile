@@ -174,7 +174,7 @@ ci: deps check test-coverage ## CI/CD workflow (deps, check, coverage)
 
 tag:
 	@echo "🏷️  Starting tag creation process..."
-	@./scripts/tag.sh
+	@./scripts/tag.sh "$(TAG)"
 
 renote:
 	@echo "🏷️  开始更新release note..."

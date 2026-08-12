@@ -117,6 +117,9 @@ This pulls prebuilt binaries from the [talkincode/homebrew-tap](https://github.c
 curl -fsSL https://raw.githubusercontent.com/talkincode/sshx/main/install.sh | bash
 ```
 
+The installer verifies the release checksum and installs both the binary and
+the matching Agent skill at `~/.agents/skills/sshx/SKILL.md`.
+
 Or download and run:
 
 ```bash
