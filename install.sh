@@ -16,6 +16,7 @@ REPO="talkincode/sshx"
 VERSION="${1:-latest}" # Use argument or default to latest
 BINARY_NAME="sshx"
 INSTALL_DIR="/usr/local/bin"
+SKILL_INSTALL_DIR="${SSHX_SKILLS_DIR:-${HOME}/.agents/skills/sshx}"
 
 # Functions
 print_info() {
@@ -52,13 +53,15 @@ detect_platform() {
     # Detect Architecture
     # On macOS, use sysctl to get the real hardware architecture (not affected by Rosetta 2)
     if [ "$os" = "darwin" ]; then
-        local hw_arch=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "")
+        local hw_arch
+        hw_arch=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "")
         if echo "$hw_arch" | grep -q "Apple"; then
             # Apple Silicon
             arch="arm64"
         else
             # Intel Mac or fallback to uname
-            local machine=$(uname -m)
+            local machine
+            machine=$(uname -m)
             case "$machine" in
                 x86_64|amd64)   arch="amd64" ;;
                 arm64|aarch64)  arch="arm64" ;;
@@ -82,7 +85,8 @@ detect_platform() {
 
 # Get latest version from GitHub
 get_latest_version() {
-    local latest_version=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    local latest_version
+    latest_version=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [ -z "$latest_version" ]; then
         print_error "Failed to fetch latest version" >&2
@@ -140,7 +144,8 @@ verify_checksum() {
 
 # Download and install
 install_sshx() {
-    local platform=$(detect_platform)
+    local platform
+    platform=$(detect_platform)
     local version="$VERSION"
     
     if [ "$version" = "latest" ]; then
@@ -158,7 +163,8 @@ install_sshx() {
     print_info "Downloading from: $download_url"
     
     # Create temporary directory
-    local tmp_dir=$(mktemp -d)
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
     cd "$tmp_dir"
     
     # Download
@@ -216,6 +222,15 @@ install_sshx() {
     else
         sudo cp "$binary_file" "${INSTALL_DIR}/${BINARY_NAME}" && sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
     fi
+
+    if [ -f "SKILL.md" ]; then
+        mkdir -p "$SKILL_INSTALL_DIR"
+        cp "SKILL.md" "${SKILL_INSTALL_DIR}/SKILL.md"
+        chmod 0644 "${SKILL_INSTALL_DIR}/SKILL.md"
+        print_success "Installed agent skill to ${SKILL_INSTALL_DIR}/SKILL.md"
+    else
+        print_warning "This release archive does not include the optional agent skill"
+    fi
     
     # Cleanup
     cd - > /dev/null
@@ -226,10 +241,12 @@ install_sshx() {
 
 # Verify installation
 verify_installation() {
-    if command -v $BINARY_NAME &> /dev/null; then
-        local installed_version=$($BINARY_NAME --version 2>&1 || echo "unknown")
+    if command -v "$BINARY_NAME" &> /dev/null; then
+        local installed_version
+        installed_version=$($BINARY_NAME --version 2>&1 || echo "unknown")
         print_success "${BINARY_NAME} installed successfully"
-        print_info "Location: $(which $BINARY_NAME)"
+        print_info "Location: $(command -v "$BINARY_NAME")"
+        print_info "Version: ${installed_version}"
         echo ""
         echo "Run '$BINARY_NAME --help' to get started"
     else
@@ -241,8 +258,8 @@ verify_installation() {
 
 # Check for existing installation
 check_existing() {
-    if command -v $BINARY_NAME &> /dev/null; then
-        print_warning "${BINARY_NAME} is already installed at: $(which $BINARY_NAME)"
+    if command -v "$BINARY_NAME" &> /dev/null; then
+        print_warning "${BINARY_NAME} is already installed at: $(command -v "$BINARY_NAME")"
         read -p "Do you want to overwrite it? [y/N] " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -257,7 +274,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════╗"
     echo "║   sshx Automatic Installer            ║"
-    echo "║   SSH & SFTP Tool with Password Mgr    ║"
+    echo "║   Agent-native execution over SSH      ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
     

@@ -76,11 +76,10 @@ func (c *SSHClient) ReadRemoteFile(remotePath string, limit int64, expectedUID s
 }
 
 func validateRemoteStateParents(client *sftp.Client, dir, expectedUID string) error {
-	managedIndex := strings.Index(dir, "/.sshx/observations")
-	if managedIndex < 0 {
-		return fmt.Errorf("remote state path is outside .sshx/observations")
+	managedRoot, err := remoteManagedRoot(dir)
+	if err != nil {
+		return err
 	}
-	managedRoot := dir[:managedIndex] + "/.sshx"
 	current := dir
 	for {
 		info, err := client.Lstat(current)
@@ -173,19 +172,33 @@ func secureRemoteDirectory(client *sftp.Client, dir string) error {
 	if err := validateAbsoluteRemotePath(dir); err != nil {
 		return err
 	}
-	managedIndex := strings.Index(dir, "/.sshx/observations")
-	if managedIndex < 0 {
-		return fmt.Errorf("remote state path is outside .sshx/observations")
+	managedRoot, err := remoteManagedRoot(dir)
+	if err != nil {
+		return err
 	}
-	managedRoot := dir[:managedIndex] + "/.sshx"
-	if err := client.MkdirAll(dir); err != nil {
-		return fmt.Errorf("create remote state directory: %w", err)
+	relative := strings.TrimPrefix(dir, managedRoot)
+	current := managedRoot
+	directories := []string{managedRoot}
+	for _, component := range strings.Split(strings.TrimPrefix(relative, "/"), "/") {
+		if component == "" {
+			continue
+		}
+		current = path.Join(current, component)
+		directories = append(directories, current)
 	}
-	current := dir
-	for {
-		info, err := client.Lstat(current)
-		if err != nil {
-			return fmt.Errorf("inspect remote directory %s: %w", current, err)
+	for _, current := range directories {
+		info, statErr := client.Lstat(current)
+		if statErr != nil {
+			if !os.IsNotExist(statErr) {
+				return fmt.Errorf("inspect remote directory %s: %w", current, statErr)
+			}
+			if mkdirErr := client.Mkdir(current); mkdirErr != nil {
+				return fmt.Errorf("create remote state directory %s: %w", current, mkdirErr)
+			}
+			info, statErr = client.Lstat(current)
+			if statErr != nil {
+				return fmt.Errorf("inspect created remote directory %s: %w", current, statErr)
+			}
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("remote state path contains a non-directory or symlink: %s", current)
@@ -193,12 +206,28 @@ func secureRemoteDirectory(client *sftp.Client, dir string) error {
 		if err := client.Chmod(current, 0o700); err != nil {
 			return fmt.Errorf("secure remote directory %s: %w", current, err)
 		}
-		if current == managedRoot {
-			break
+		verified, verifyErr := client.Lstat(current)
+		if verifyErr != nil {
+			return fmt.Errorf("reinspect remote directory %s: %w", current, verifyErr)
 		}
-		current = path.Dir(current)
+		if !verified.IsDir() || verified.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("remote state path changed during validation: %s", current)
+		}
 	}
 	return nil
+}
+
+func remoteManagedRoot(dir string) (string, error) {
+	const marker = "/.sshx/observations"
+	managedIndex := strings.LastIndex(dir, marker)
+	if managedIndex < 0 {
+		return "", fmt.Errorf("remote state path is outside .sshx/observations")
+	}
+	afterMarker := dir[managedIndex+len(marker):]
+	if afterMarker != "" && !strings.HasPrefix(afterMarker, "/") {
+		return "", fmt.Errorf("remote state path is outside .sshx/observations")
+	}
+	return dir[:managedIndex] + "/.sshx", nil
 }
 
 func validateAbsoluteRemotePath(remotePath string) error {

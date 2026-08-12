@@ -467,3 +467,23 @@ func TestCLIConcurrentAndFailedCacheWritesPreserveValidObservation(t *testing.T)
 	_, err = pluginpkg.DecodeObservation(afterFailure)
 	require.NoError(t, err)
 }
+
+func TestCLICacheWriteRejectsSymlinkedManagedRootBeforeCreatingChildren(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	require.Equal(t, 0, runSSHX(t, home, []string{"plugin", "create", "symlink.write", "--json"}, nil).exitCode)
+	require.Equal(t, 0, runSSHX(t, home, []string{"plugin", "trust", "symlink.write", "--json"}, nil).exitCode)
+
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(server.root, ".sshx")))
+	result := runSSHX(t, home, []string{
+		"inspect", "-h=" + server.host, "-p=" + server.port, "-u=operator", "--no-key",
+		"--accept-unknown-host", "--json", "--cache=remote-prefer", "symlink.write",
+	}, map[string]string{"SSH_PASSWORD": operatorPassword})
+
+	assert.Equal(t, 255, result.exitCode)
+	assert.Contains(t, result.stdout, `"error_kind":"cache"`)
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a rejected managed-root symlink must not create directories outside the cache root")
+}

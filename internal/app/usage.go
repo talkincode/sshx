@@ -8,7 +8,7 @@ var Version = "dev"
 
 // PrintUsage prints the usage information for the sshx command.
 func PrintUsage() {
-	fmt.Printf("\nSSH & SFTP Remote Tool with Password Manager (Cross-Platform)\nVersion: %s\n", Version)
+	fmt.Printf("\nSSHX — Agent-native remote host execution over SSH\nVersion: %s\n", Version)
 	fmt.Println(`
 Usage:
   sshx -h=<host> [options] <command>              # SSH mode
