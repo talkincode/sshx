@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,8 +11,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/zalando/go-keyring"
-
+	"github.com/talkincode/sshx/internal/keyringstore"
 	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/pkg/logger"
 )
@@ -47,7 +47,7 @@ func setPassword(serviceName, key, value string) error {
 		value = password
 	}
 
-	if err := keyring.Set(serviceName, key, value); err != nil {
+	if err := keyringstore.Set(serviceName, key, value); err != nil {
 		return fmt.Errorf("failed to set password: %w", err)
 	}
 
@@ -72,9 +72,9 @@ func getPassword(serviceName, key string) error {
 		return fmt.Errorf("password key is required")
 	}
 
-	password, err := keyring.Get(serviceName, key)
+	password, err := keyringstore.Get(serviceName, key)
 	if err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyringstore.ErrNotFound) {
 			return fmt.Errorf("password not found for key: %s", key)
 		}
 		return fmt.Errorf("failed to get password: %w", err)
@@ -104,16 +104,16 @@ func deletePassword(serviceName, key string) error {
 		return fmt.Errorf("password key is required")
 	}
 
-	_, err := keyring.Get(serviceName, key)
+	_, err := keyringstore.Get(serviceName, key)
 	if err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyringstore.ErrNotFound) {
 			logger.GetLogger().Warning("Password not found for key: %s (already deleted or never existed)", key)
 			return nil
 		}
 		return fmt.Errorf("failed to check password: %w", err)
 	}
 
-	if err := keyring.Delete(serviceName, key); err != nil {
+	if err := keyringstore.Delete(serviceName, key); err != nil {
 		return fmt.Errorf("failed to delete password: %w", err)
 	}
 
@@ -129,7 +129,7 @@ func checkPassword(serviceName, key string) error {
 		return fmt.Errorf("password key is required")
 	}
 
-	_, err := keyring.Get(serviceName, key)
+	_, err := keyringstore.Get(serviceName, key)
 	if err == nil {
 		logger.GetLogger().Success("Password exists for key: %s", key)
 		fmt.Printf("\nKey '%s' is stored in system keyring\n", key)
@@ -137,7 +137,7 @@ func checkPassword(serviceName, key string) error {
 		return nil
 	}
 
-	if err == keyring.ErrNotFound {
+	if errors.Is(err, keyringstore.ErrNotFound) {
 		logger.GetLogger().Warning("Password not found for key: %s", key)
 		fmt.Printf("\nKey '%s' is NOT stored in system keyring\n", key)
 		fmt.Printf("Use 'sshx --password-set=%s' to add it\n", key)
@@ -163,12 +163,12 @@ func listPasswords() error {
 	fmt.Println("Common keys:")
 	found := false
 	for _, key := range commonKeys {
-		_, err := keyring.Get(sshclient.KeyringServiceName, key)
-		switch err {
-		case nil:
+		_, err := keyringstore.Get(sshclient.KeyringServiceName, key)
+		switch {
+		case err == nil:
 			fmt.Printf("  ✓ %s (exists)\n", key)
 			found = true
-		case keyring.ErrNotFound:
+		case errors.Is(err, keyringstore.ErrNotFound):
 			fmt.Printf("    %s (not set)\n", key)
 		default:
 			fmt.Printf("  ? %s (error: %v)\n", key, err)

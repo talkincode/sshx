@@ -10,36 +10,45 @@ Module: `github.com/talkincode/sshx` · Language: Go 1.24 · License: MIT
 
 ## 1. Mission
 
-`sshx` is a barrier-free, cross-platform **SSH/SFTP command-line client** with a
-built-in **OS-keyring password manager** and **named host configuration**. It
-exists to make ad-hoc operations across many remote servers fast and safe:
+`sshx` is an **agent-native remote host execution tool over SSH**. SSH/SFTP is
+the trusted transport; execution is the product. It turns an agent's intent
+into a one-shot remote operation whose target and side effects are explicit,
+whose result is machine-decidable, and whose security context is auditable:
 
-> One command, multiple servers, zero password hassle.
+> SSH is the channel. X is execution.
 
 The core value proposition:
 
-- Run a command (or transfer a file) on a remote host in a single invocation.
-- Never type or store passwords in plaintext — they live in the OS keyring and
-  sudo passwords are auto-filled.
-- Address hosts by a short name instead of full connection details.
-- Be secure by default (strict host-key verification, command safety guardrails).
+- Give agents one stable process contract for target resolution, preview,
+  execution, structured results, failure classification, and audit evidence.
+- Run a command or file action on an existing SSH host in one invocation, with
+  no resident remote agent and no long-running control plane.
+- Reduce decision and retry cost through named hosts, JSON, exit codes,
+  `error_kind`, timeout, and dry-run plans.
+- Protect credentials and trust boundaries through the OS keyring, strict
+  host-key verification, sudo over stdin, explicit bypasses, and audit redaction.
+
+Human operators use the same CLI, preview, safety, and audit semantics to
+supervise agents and troubleshoot operations.
 
 ## 2. Goals
 
-1. **Single self-contained binary** — no runtime dependencies, installable via
+1. **Stable agent execution contract** — predictable stdout/stderr, exit codes,
+   JSON results, failure kinds, previews, and audit semantics.
+2. **Single self-contained binary** — no runtime dependencies, installable via
    `go install`, an install script, or a downloaded release artifact.
-2. **Cross-platform parity** — Linux, macOS, and Windows are all first-class.
-3. **Secure by default** — strict `known_hosts` verification, keyring-backed
+3. **Cross-platform parity** — Linux, macOS, and Windows are all first-class.
+4. **Secure by default** — strict `known_hosts` verification, keyring-backed
    secrets, sudo password delivered over stdin (never interpolated), and command
    safety checks that block obviously destructive operations.
-4. **Low cognitive load** — sensible defaults, named hosts, key-first auth with
+5. **Low agent decision cost** — sensible defaults, named hosts, key-first auth with
    password fallback only when an SSH login password is already provided, and
-   helpful error messages.
-5. **Multi-server ergonomics** — per-host SSH keys and per-host/per-server
+   classified failures rather than prose-only errors.
+6. **Multi-server ergonomics** — per-host SSH keys and per-host/per-server
    password keys so one tool covers a whole fleet.
-6. **Execution preview** — `--dry-run` explains the local execution plan without
+7. **Execution preview** — `--dry-run` explains the local execution plan without
    connecting, executing, reading keyring secrets, or mutating state.
-7. **Auditability** — non-dry-run invocations write structured JSONL audit
+8. **Auditability** — non-dry-run invocations write structured JSONL audit
    events under `~/.sshx/audit` by default, with secrets and stdout/stderr
    excluded.
 
@@ -55,6 +64,11 @@ the project's mission:
   CLI-only. Do not reintroduce an `mcp-stdio` mode or MCP tools.
 - ❌ **Daemons / long-running services / connection pools** — every command opens
   a connection, does its work, and exits. There is no background process.
+- ❌ **Resident remote agent / control plane** — do not require a service to be
+  installed on managed hosts and do not turn sshx into a fleet control plane.
+- ❌ **Desired-state configuration / workflow orchestration** — bounded fan-out
+  execution is in scope; playbooks, schedulers, reconciliation, and long-lived
+  workflow state are not.
 - ❌ **GUI / TUI** — interaction is through flags and stdout/stderr only.
 - ❌ **Full OpenSSH replacement** — no interactive login shell multiplexing,
   port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
@@ -63,9 +77,10 @@ the project's mission:
 - ❌ **Bespoke config formats** — configuration is `~/.sshx/settings.json`,
   environment variables, and CLI flags. Nothing else.
 
-**In scope (welcome):** command execution, SFTP file ops, password/secret
-management, named host management, authentication UX, safety checks, and
-cross-platform correctness.
+**In scope (welcome):** agent execution contracts, command execution, SFTP file
+actions, bounded multi-host execution, password/secret references, named host
+management, authentication UX, safety checks, auditing, and cross-platform
+correctness.
 
 ## 4. Architecture
 
@@ -245,9 +260,41 @@ verification for it:
 - Coverage is tracked (Codecov). Coverage is currently modest; **raising it is an
   ongoing goal** — prefer adding tests alongside any change you make.
 
+### Capability coverage matrix (mandatory)
+
+The source of truth is the acceptance matrix in
+[`docs/roadmap.md`](docs/roadmap.md). These requirements are **MUST-level**:
+
+1. Every top-level product capability MUST have at least one Happy Path E2E.
+2. Every high-risk capability MUST cover at least one failure path.
+3. Every permission-sensitive capability MUST verify at least two roles or
+   permission states.
+4. Every state-changing operation MUST verify recovery or rollback after a
+   failure.
+5. Adding a top-level capability MUST include its E2E and an updated matrix row;
+   otherwise the change is incomplete.
+
+Existing unit, component, or local-server tests do not count as CLI E2E unless
+they exercise the compiled `sshx` process across the documented external
+boundary. Record real evidence paths in the matrix and mark missing coverage as
+a gap rather than inferring it.
+
+Canonical commands:
+
+```bash
+make test-short  # unit/component suite without compiled-binary E2E
+make test-e2e    # compiled sshx process across real SSH/SFTP protocol boundaries
+```
+
+The E2E source of evidence is `tests/e2e`. Native OS-keyring lifecycle tests are
+opt-in locally and run against an ephemeral macOS Keychain in CI; never enable
+them against a keyring that cannot be safely isolated and cleaned up.
+
 ## 10. Roadmap
 
-A living, maintainer-adjustable plan. Items must respect the boundaries in §3.
+A living, maintainer-adjustable plan. The authoritative product profile,
+directions, and acceptance matrix are in [`docs/roadmap.md`](docs/roadmap.md).
+Items must respect the boundaries in §3.
 
 **Now / recently shipped**
 

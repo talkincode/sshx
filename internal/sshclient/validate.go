@@ -1,11 +1,12 @@
 package sshclient
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/talkincode/sshx/internal/keyringstore"
 	"github.com/talkincode/sshx/pkg/logger"
-	"github.com/zalando/go-keyring"
 )
 
 const KeyringServiceName = "sshx"
@@ -163,9 +164,9 @@ func isCommandWhitespace(ch byte) bool {
 func GetSudoPassword(key string) (string, error) {
 	serviceName := KeyringServiceName
 
-	password, err := keyring.Get(serviceName, key)
+	password, err := keyringstore.Get(serviceName, key)
 	if err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyringstore.ErrNotFound) {
 			return "", fmt.Errorf("sudo password not found in keyring for key: %s\n"+
 				"Add it using one of:\n"+
 				"  macOS:   security add-generic-password -s %s -a %s -w <password>\n"+

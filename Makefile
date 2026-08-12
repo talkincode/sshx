@@ -30,7 +30,7 @@ GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
 
-.PHONY: help build build-all test test-verbose test-coverage clean install uninstall run fmt vet lint deps version
+.PHONY: help build build-all test test-short test-e2e test-verbose test-coverage clean install uninstall run fmt vet lint deps version
 
 version: ## Show the version string used for builds
 	@echo "$(VERSION)"
@@ -71,6 +71,10 @@ test: ## Run all tests
 test-short: ## Run unit tests (skip integration tests)
 	@echo "Running unit tests..."
 	$(GOTEST) -v -short ./...
+
+test-e2e: ## Run compiled-binary SSH/SFTP E2E tests (native keyring is opt-in)
+	@echo "Running compiled-binary E2E tests..."
+	$(GOTEST) -v ./tests/e2e
 
 test-verbose: ## Run verbose tests
 	@echo "Running verbose tests..."

@@ -270,6 +270,7 @@ func TestConfig_MultipleHosts(t *testing.T) {
 
 func TestShouldFallbackToPassword(t *testing.T) {
 	authErr := &ssh.ServerAuthError{Errors: []error{fmt.Errorf("publickey denied")}}
+	clientAuthErr := fmt.Errorf("ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain")
 
 	t.Run("requires key auth present", func(t *testing.T) {
 		assert.False(t, shouldFallbackToPassword(authErr, false, true))
@@ -281,6 +282,14 @@ func TestShouldFallbackToPassword(t *testing.T) {
 
 	t.Run("auth error triggers fallback", func(t *testing.T) {
 		assert.True(t, shouldFallbackToPassword(authErr, true, true))
+	})
+
+	t.Run("client auth exhaustion triggers fallback", func(t *testing.T) {
+		assert.True(t, shouldFallbackToPassword(clientAuthErr, true, true))
+	})
+
+	t.Run("non-auth errors do not trigger fallback", func(t *testing.T) {
+		assert.False(t, shouldFallbackToPassword(fmt.Errorf("host key verification failed"), true, true))
 	})
 
 	t.Run("nil error", func(t *testing.T) {

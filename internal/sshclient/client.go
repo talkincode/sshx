@@ -438,7 +438,13 @@ func shouldFallbackToPassword(err error, hadKeyAuth bool, hasPassword bool) bool
 		return false
 	}
 	var serverErr *ssh.ServerAuthError
-	return errors.As(err, &serverErr)
+	if errors.As(err, &serverErr) {
+		return true
+	}
+	// x/crypto/ssh does not expose a client-side authentication error type.
+	// It reports this stable RFC 4252 terminal condition after all offered key
+	// methods are rejected. Do not fall back on transport or host-key failures.
+	return strings.Contains(err.Error(), "ssh: unable to authenticate, attempted methods")
 }
 
 // RunCommand executes the configured command and returns a structured result.

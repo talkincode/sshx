@@ -74,7 +74,7 @@ func Run(args []string) (err error) {
 	audit := newAuditRecorder(config)
 	defer func() {
 		if auditErr := audit.finish(config, err); auditErr != nil {
-			logger.GetLogger().Warning("failed to write audit event: %v", auditErr)
+			logger.GetLogger().Error("failed to write audit event: %v", auditErr)
 		}
 	}()
 
