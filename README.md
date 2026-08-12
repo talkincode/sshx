@@ -69,6 +69,8 @@ It remains a single binary with one-shot invocations and no resident component o
 5. OS-keyring password management and sudo auto-fill over stdin.
 6. Cross-platform SSH/SFTP command and file actions.
 7. Direct server-to-server transfer, streamed through the local machine without touching local disk.
+8. One-shot host inspection with built-in system/network capabilities, local
+   sshx-owned plugins, explicit digest trust, and freshness-bounded observations.
 
 ## Installation
 
@@ -315,6 +317,55 @@ sshx -h=prod-web --pty "top -b -n1"
 ```
 
 The timeout can also be set via the `SSH_TIMEOUT` environment variable.
+
+## Host Inspection and Local Plugins
+
+Use one structured inspection instead of repeatedly probing an unfamiliar host:
+
+```bash
+sshx inspect -h=prod-web system.baseline --json
+```
+
+Stable system/network capabilities are built in. Docker, Nginx, and private
+application collectors are plugins stored under `~/.sshx/plugins/`—never in an
+Agent skill and never installed persistently on the target.
+
+```bash
+sshx plugin create docker.environment \
+  --template=docker \
+  --privilege=optional \
+  --json
+sshx plugin validate docker.environment --json
+sshx plugin test docker.environment --fixture=complete --json
+sshx plugin trust docker.environment --json
+sshx inspect -h=prod-web docker.environment --json
+```
+
+New and edited plugins are untrusted until their current manifest/collector/schema
+digest is explicitly trusted. `inspect` checks that trust before opening SSH,
+streams the collector through stdin for that session only, validates one JSON
+result, and applies field redaction. Plugin trust is not a sandbox; review custom
+collectors before trusting them.
+
+Remote observation reuse is opt-in:
+
+```bash
+sshx inspect -h=prod-web docker.environment \
+  --cache=remote-prefer \
+  --max-age=10m \
+  --json
+```
+
+Only normalized, redacted JSON is saved below the remote user's
+`~/.sshx/observations/v1/`. Cache reuse is bound to plugin digest, host-key
+fingerprint, platform, boot ID, privilege, parameters, and TTL. Use `--refresh`
+to collect again or `--allow-stale` to explicitly accept a matching expired
+observation.
+
+The local runtime root defaults to `~/.sshx`; set `SSHX_HOME` to isolate settings,
+audit, plugins, and trust state for an Agent or CI run. See
+[Inspection Capabilities and Local Plugins](docs/inspection-plugins.md) for the
+manifest, lifecycle, cache, and security contracts.
 
 ## Host Configuration Management
 
@@ -581,6 +632,8 @@ You can use environment variables to avoid typing credentials repeatedly:
 export SSH_KEY_PATH=~/.ssh/prod.pem
 export SSH_SUDO_KEY=prod-web
 export SSH_TIMEOUT=30s
+# Optional: isolate all sshx runtime state for an Agent/CI run
+export SSHX_HOME="$PWD/.sshx-runtime"
 
 # Then run with fewer repeated options
 sshx -h=prod-web "sudo uptime"

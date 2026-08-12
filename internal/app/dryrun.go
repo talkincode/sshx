@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -33,8 +34,17 @@ type dryRunPlan struct {
 	LocalPath  string `json:"local_path,omitempty"`
 	RemotePath string `json:"remote_path,omitempty"`
 
-	TransferSource string `json:"transfer_source,omitempty"`
-	TransferDest   string `json:"transfer_destination,omitempty"`
+	TransferSource  string   `json:"transfer_source,omitempty"`
+	TransferDest    string   `json:"transfer_destination,omitempty"`
+	PluginID        string   `json:"plugin_id,omitempty"`
+	PluginPath      string   `json:"plugin_path,omitempty"`
+	PluginDigest    string   `json:"plugin_digest,omitempty"`
+	PluginTrusted   bool     `json:"plugin_trusted,omitempty"`
+	PluginRunner    string   `json:"plugin_runner,omitempty"`
+	PluginPrivilege string   `json:"plugin_privilege,omitempty"`
+	CacheMode       string   `json:"cache_mode,omitempty"`
+	PluginEffects   []string `json:"plugin_effects,omitempty"`
+	PluginPlatforms []string `json:"plugin_platforms,omitempty"`
 
 	UseKeyAuth       bool   `json:"use_key_auth"`
 	KeyPath          string `json:"key_path,omitempty"`
@@ -59,6 +69,7 @@ type dryRunPlan struct {
 	WouldReadSecret       bool `json:"would_read_secret"`
 	WouldWriteLocalState  bool `json:"would_write_local_state"`
 	WouldMutateRemote     bool `json:"would_mutate_remote"`
+	WouldWriteRemoteState bool `json:"would_write_remote_state"`
 	MayMutateKnownHosts   bool `json:"may_mutate_known_hosts"`
 	WouldPromptForSecret  bool `json:"would_prompt_for_secret"`
 	WouldLookupHostConfig bool `json:"would_lookup_host_config"`
@@ -144,6 +155,13 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Action = "transfer"
 		plan.TransferSource = formatTransferEndpoint(config.TransferSrcHost, config.TransferSrcPath)
 		plan.TransferDest = formatTransferEndpoint(config.TransferDstHost, config.TransferDstPath)
+	case "plugin":
+		plan.Action = config.PluginAction
+		plan.PluginID = config.PluginID
+	case "inspect":
+		plan.Action = "inspect"
+		plan.PluginID = config.InspectCapability
+		plan.CacheMode = config.InspectCacheMode
 	}
 }
 
@@ -157,7 +175,7 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.HostInput = config.Host
 	}
 
-	if config.Mode == "ssh" || config.Mode == "sftp" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" {
 		resolveDryRunSSHHost(config, plan)
 		return
 	}
@@ -277,6 +295,10 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 		plan.SudoKey = config.SudoKey
 		return
 	}
+	if config.Mode == "inspect" {
+		plan.UsesSudo = config.InspectUseSudo
+		plan.SudoKey = config.SudoKey
+	}
 	if config.Mode == "host" && config.HostAction == "test" {
 		return
 	}
@@ -284,6 +306,11 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 }
 
 func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
+	if config.ArgumentError != "" {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: config.ArgumentError}
+		plan.Valid = false
+		return
+	}
 	if config.Mode == "transfer" {
 		if config.TransferSrcHost == "" || config.TransferSrcPath == "" {
 			plan.ConfigCheck = dryRunStatus{
@@ -342,6 +369,64 @@ func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
 		}
 		plan.SafetyCheck = dryRunStatus{Status: "disabled"}
 	}
+	if config.Mode == "plugin" {
+		if config.PluginAction == "" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "plugin action is required"}
+			plan.Valid = false
+			return
+		}
+		if config.PluginAction != "list" && config.PluginID == "" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "plugin id is required"}
+			plan.Valid = false
+		}
+		return
+	}
+	if config.Mode == "inspect" {
+		if config.Timeout < 0 || config.InspectMaxAge < 0 {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "timeout and max-age values must be valid non-negative durations"}
+			plan.Valid = false
+			return
+		}
+		if config.InspectCapability == "" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "inspection capability is required"}
+			plan.Valid = false
+			return
+		}
+		resolved, err := pluginpkg.Resolve(config.InspectCapability)
+		if err != nil {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: classifyPluginError(err), Message: err.Error()}
+			plan.Valid = false
+			return
+		}
+		plan.PluginPath = resolved.Path
+		plan.PluginDigest = resolved.Digest
+		plan.PluginTrusted = resolved.Trusted
+		plan.PluginRunner = resolved.Manifest.Runner.Type
+		plan.PluginPrivilege = resolved.Manifest.Privilege
+		plan.PluginEffects = append([]string(nil), resolved.Manifest.Effects...)
+		plan.PluginPlatforms = append([]string(nil), resolved.Manifest.Platforms...)
+		if !resolved.Trusted {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "untrusted_plugin", Message: "plugin digest is not trusted"}
+			plan.Valid = false
+			return
+		}
+		if config.InspectCacheMode != "off" && config.InspectCacheMode != "remote-prefer" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "cache mode must be off or remote-prefer"}
+			plan.Valid = false
+			return
+		}
+		useSudo, _, err := inspectionPrivilege(config, resolved.Manifest)
+		if err != nil {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+			plan.Valid = false
+			return
+		}
+		plan.UsesSudo = useSudo
+		if _, _, err := inspectionFreshness(config, resolved.Manifest); err != nil {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+			plan.Valid = false
+		}
+	}
 }
 
 func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
@@ -372,12 +457,20 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		case "test-all":
 			plan.WouldReadSecret = canProceed
 		}
+	case "plugin":
+		plan.WouldWriteLocalState = canProceed && (config.PluginAction == "create" || config.PluginAction == "trust" || config.PluginAction == "remove")
+	case "inspect":
+		plan.WouldConnect = canProceed
+		plan.WouldExecute = canProceed
+		plan.WouldReadSecret = canProceed && plan.UsesSudo && config.SudoKey != ""
+		plan.WouldWriteRemoteState = canProceed && config.InspectCacheMode == "remote-prefer"
+		plan.WouldMutateRemote = plan.WouldWriteRemoteState
 	}
 	plan.MayMutateKnownHosts = plan.WouldConnect && config.AcceptUnknownHost
 }
 
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")
@@ -417,6 +510,16 @@ func printDryRunPlan(plan dryRunPlan) {
 	if plan.TransferSource != "" || plan.TransferDest != "" {
 		fmt.Printf("Transfer: %s → %s\n", plan.TransferSource, plan.TransferDest)
 	}
+	if plan.PluginID != "" {
+		fmt.Printf("Plugin: %s", plan.PluginID)
+		if plan.PluginDigest != "" {
+			fmt.Printf(" digest=%s trusted=%t", plan.PluginDigest, plan.PluginTrusted)
+		}
+		fmt.Println()
+		if plan.PluginRunner != "" {
+			fmt.Printf("Plugin contract: runner=%s privilege=%s platforms=%v effects=%v\n", plan.PluginRunner, plan.PluginPrivilege, plan.PluginPlatforms, plan.PluginEffects)
+		}
+	}
 	fmt.Printf("Config check: %s\n", statusText(plan.ConfigCheck))
 	fmt.Printf("Safety check: %s\n", statusText(plan.SafetyCheck))
 	fmt.Printf("Uses sudo: %t", plan.UsesSudo)
@@ -429,6 +532,7 @@ func printDryRunPlan(plan dryRunPlan) {
 	fmt.Printf("Would read secret: %t\n", plan.WouldReadSecret)
 	fmt.Printf("Would write local state: %t\n", plan.WouldWriteLocalState)
 	fmt.Printf("Would mutate remote: %t\n", plan.WouldMutateRemote)
+	fmt.Printf("Would write remote state: %t\n", plan.WouldWriteRemoteState)
 }
 
 func statusText(status dryRunStatus) string {

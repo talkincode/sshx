@@ -129,6 +129,27 @@ func runFakeCommand(ch ssh.Channel, command string) uint32 {
 		}
 		writeAll(ch, "sudo-ok\n")
 		return 0
+	case "sh -s --":
+		payload, err := io.ReadAll(ch)
+		if err != nil {
+			writeAll(ch.Stderr(), "payload read failed\n")
+			return 26
+		}
+		writeAll(ch, "payload:"+string(payload))
+		return 0
+	case "sudo -S -p '' sh -s --":
+		reader := bufio.NewReader(ch)
+		password, err := reader.ReadString('\n')
+		if err != nil || password != "sudo-fixture\n" { // #nosec G101 -- isolated test credential.
+			writeAll(ch.Stderr(), "sudo payload password mismatch\n")
+			return 27
+		}
+		payload, err := io.ReadAll(reader)
+		if err != nil {
+			return 28
+		}
+		writeAll(ch, "sudo-payload:"+string(payload))
+		return 0
 	case "sleep":
 		time.Sleep(5 * time.Second)
 		return 0
@@ -222,7 +243,7 @@ func TestRunCommandSudoFeedsPasswordOnStdin(t *testing.T) {
 	client := dialTestClient(t, host, port)
 	sudoPassword := "sudo-fixture" // #nosec G101 -- fake test password used only for stdin contract coverage.
 	client.config.Command = "sudo whoami"
-	client.config.Password = sudoPassword
+	client.config.SudoPassword = sudoPassword
 	client.config.Timeout = 2 * time.Second
 
 	res, err := client.RunCommand(true)
@@ -233,6 +254,33 @@ func TestRunCommandSudoFeedsPasswordOnStdin(t *testing.T) {
 	assert.Empty(t, res.Stderr)
 	assert.NotContains(t, res.Stdout, sudoPassword)
 	assert.NotContains(t, res.Stderr, sudoPassword)
+}
+
+func TestRunScriptStreamsPayloadWithoutInstallingIt(t *testing.T) {
+	host, port := startTestSSHServer(t)
+	client := dialTestClient(t, host, port)
+	payload := []byte("printf fixture\n")
+
+	res, err := client.RunScript(payload, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.ExitCode)
+	assert.Equal(t, "payload:"+string(payload), res.Stdout)
+	assert.NotEmpty(t, client.config.HostKeyFingerprint)
+}
+
+func TestRunScriptKeepsSudoPasswordSeparateFromCollector(t *testing.T) {
+	host, port := startTestSSHServer(t)
+	client := dialTestClient(t, host, port)
+	client.config.SudoPassword = "sudo-fixture" // #nosec G101 -- fake test credential.
+	payload := []byte("printf fixture\n")
+
+	res, err := client.RunScript(payload, true)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.ExitCode)
+	assert.Equal(t, "sudo-payload:"+string(payload)+"\n", res.Stdout)
+	assert.NotContains(t, res.Stdout, client.config.SudoPassword)
 }
 
 func TestCappedBufferTruncates(t *testing.T) {

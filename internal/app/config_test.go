@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/talkincode/sshx/internal/sshclient"
 )
@@ -19,6 +21,71 @@ func TestParseArgs_BasicSSH(t *testing.T) {
 	}
 	if config.Mode != "ssh" {
 		t.Errorf("Expected mode 'ssh', got %s", config.Mode)
+	}
+}
+
+func TestParseArgs_PluginSubcommands(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "plugin", "create", "docker.custom", "--runner=sh", "--platform=linux",
+		"--privilege=optional", "--template=docker", "--replace", "--json",
+	})
+	if config.Mode != "plugin" || config.PluginAction != "create" || config.PluginID != "docker.custom" {
+		t.Fatalf("unexpected plugin routing: mode=%s action=%s id=%s", config.Mode, config.PluginAction, config.PluginID)
+	}
+	if config.PluginRunner != "sh" || config.PluginPlatform != "linux" || config.PluginPrivilege != "optional" || config.PluginTemplate != "docker" {
+		t.Fatalf("unexpected plugin options: %#v", config)
+	}
+	if !config.PluginReplace || !config.JSONOutput {
+		t.Fatal("replace/json flags were not parsed")
+	}
+}
+
+func TestParseArgs_InspectSubcommand(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "inspect", "-h=prod", "-p=2222", "-u=operator", "system.baseline",
+		"--cache=remote-prefer", "--max-age=5m", "--allow-stale", "--refresh", "--sudo", "--json",
+	})
+	if config.Mode != "inspect" || config.InspectCapability != "system.baseline" {
+		t.Fatalf("unexpected inspect routing: mode=%s capability=%s", config.Mode, config.InspectCapability)
+	}
+	if config.Host != "prod" || config.Port != "2222" || config.User != "operator" {
+		t.Fatalf("unexpected target: %s %s %s", config.Host, config.Port, config.User)
+	}
+	if config.InspectCacheMode != "remote-prefer" || config.InspectMaxAge != 5*time.Minute || !config.InspectAllowStale || !config.InspectRefresh || !config.InspectUseSudo {
+		t.Fatalf("unexpected inspect options: %#v", config)
+	}
+}
+
+func TestParseArgs_SubcommandsRejectUnknownOptions(t *testing.T) {
+	pluginConfig := ParseArgs([]string{"sshx", "plugin", "list", "--typo"})
+	if pluginConfig.ArgumentError == "" {
+		t.Fatal("unknown plugin option was ignored")
+	}
+	inspectConfig := ParseArgs([]string{"sshx", "inspect", "system.identity", "--typo"})
+	if inspectConfig.ArgumentError == "" {
+		t.Fatal("unknown inspect option was ignored")
+	}
+}
+
+func TestClassifyPluginErrorDistinguishesValidationBoundaries(t *testing.T) {
+	tests := []struct {
+		message string
+		want    string
+	}{
+		{"invalid plugin id", "invalid_plugin_id"},
+		{"read entrypoint: file does not exist", "invalid_entrypoint"},
+		{"compile result schema: invalid", "invalid_schema"},
+		{"read fixture complete: malformed", "invalid_fixture"},
+		{"parse manifest: unexpected EOF", "invalid_manifest"},
+		{"plugin already exists", "already_exists"},
+		{"plugin not found", "not_found"},
+	}
+	for _, test := range tests {
+		t.Run(test.want, func(t *testing.T) {
+			if got := classifyPluginError(fmt.Errorf("%s", test.message)); got != test.want {
+				t.Fatalf("classifyPluginError(%q) = %q, want %q", test.message, got, test.want)
+			}
+		})
 	}
 }
 

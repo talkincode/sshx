@@ -132,6 +132,23 @@ sshx -h=prod-web --force "sudo systemctl reboot"
 
 命令文本会作为溯源材料写入，并对常见 password/token 类参数做脱敏，但不要因此把 secret 放进命令。
 
+## 探测插件信任与缓存安全
+
+自定义探测插件是 sshx 本地运行目录（通常为 `~/.sshx/plugins/`）拥有的可执行
+代码。Agent skill 可以说明如何调用，但不能嵌入或维护采集脚本。
+
+- 新建或修改后的插件默认不可信。先审阅并执行 `plugin validate`、`plugin test`，
+  再用 `plugin trust` 准入当前准确摘要。
+- 摘要信任不是沙箱。可信采集器会以所选远端用户或 sudo 身份运行，应按已审阅
+  脚本对待。
+- 插件代码和 sshx 凭据不会持久化到远端；采集器只通过单次 SSH 会话流式执行。
+- `--cache=remote-prefer` 必须显式开启，远端只在当前认证用户的
+  `~/.sshx/observations/v1/` 保存规范化、已脱敏 JSON。
+- 缓存属于不可信输入。格式错误、超限、符号链接、权限过宽、属主不符、身份不符
+  或过期的记录都会被拒绝；只有在硬上限内显式请求时才允许复用陈旧记录。
+- 不要把环境变量转储、原始 Compose/Nginx 配置、镜像仓库认证、cookie、token、
+  私钥或 secret 值放入 facts/evidence。脱敏是纵深防御，不是采集 secret 的许可。
+
 ## SFTP 安全
 
 上传到特权路径时，先暂存文件：

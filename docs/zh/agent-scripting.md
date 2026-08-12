@@ -56,6 +56,39 @@ else
 fi
 ```
 
+## 可复用主机探测
+
+在重复执行一串环境发现命令前，先列出并调用有界探测能力：
+
+```bash
+sshx plugin list --json
+sshx inspect -h=prod-web system.baseline --json
+```
+
+应用级采集器属于 sshx 运行资产，不属于 skill。Agent 可以直接生成完整骨架：
+
+```bash
+sshx plugin create docker.environment --template=docker --privilege=optional --json
+sshx plugin test docker.environment --fixture=complete --json
+sshx plugin trust docker.environment --json
+sshx inspect -h=prod-web docker.environment --json
+```
+
+应根据观察结果的 `status`（`complete`、`partial`、`unsupported`、`failed`）
+和 typed `errors` 分支，不要把权限受限的 `partial` 解释成服务不存在。新建或
+修改后的插件必须先按当前摘要显式信任，sshx 才会建立远端连接。
+
+远端复用必须显式开启：
+
+```bash
+sshx inspect -h=prod-web docker.environment \
+  --cache=remote-prefer --max-age=10m --json
+```
+
+远端缓存只保存规范化、已脱敏的观察 JSON；它有主机边界和有效期，不是权威
+资产库。完整 manifest、信任、脱敏与失效规则见
+[主机探测能力与本地插件](inspection-plugins.md)。
+
 ## 用 dry-run 审核变更
 
 在脚本执行特权操作前，先看计划：

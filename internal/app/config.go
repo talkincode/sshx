@@ -98,6 +98,17 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 	config.SudoKey = sudoKey
 
+	if len(args) > 1 {
+		switch args[1] {
+		case "plugin":
+			parsePluginArgs(config, args[2:])
+			return config
+		case "inspect":
+			parseInspectArgs(config, args[2:])
+			return config
+		}
+	}
+
 	commandParts := []string{}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
@@ -268,4 +279,111 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 
 	return config
+}
+
+func parsePluginArgs(config *sshclient.Config, args []string) {
+	config.Mode = "plugin"
+	if len(args) == 0 {
+		return
+	}
+	config.PluginAction = args[0]
+	for _, arg := range args[1:] {
+		switch {
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--replace":
+			config.PluginReplace = true
+		case strings.HasPrefix(arg, "--runner="):
+			config.PluginRunner = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--platform="):
+			config.PluginPlatform = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--privilege="):
+			config.PluginPrivilege = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--template="):
+			config.PluginTemplate = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--fixture="):
+			config.PluginFixture = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case !strings.HasPrefix(arg, "-") && config.PluginID == "":
+			config.PluginID = arg
+		case !strings.HasPrefix(arg, "-"):
+			config.ArgumentError = fmt.Sprintf("unexpected plugin argument %q", arg)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown plugin option %q", arg)
+		}
+	}
+}
+
+func parseInspectArgs(config *sshclient.Config, args []string) {
+	config.Mode = "inspect"
+	config.InspectCacheMode = "off"
+	for _, arg := range args {
+		switch {
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
+			config.Host = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
+			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--refresh":
+			config.InspectRefresh = true
+		case arg == "--allow-stale":
+			config.InspectAllowStale = true
+		case arg == "--sudo":
+			config.InspectUseSudo = true
+		case strings.HasPrefix(arg, "--cache="):
+			config.InspectCacheMode = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--max-age="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if duration, err := parseTimeout(raw); err == nil {
+				config.InspectMaxAge = duration
+			} else {
+				config.InspectMaxAge = -1
+			}
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if duration, err := parseTimeout(raw); err == nil {
+				config.Timeout = duration
+			} else {
+				config.Timeout = -1
+			}
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case !strings.HasPrefix(arg, "-") && config.InspectCapability == "":
+			config.InspectCapability = arg
+		case !strings.HasPrefix(arg, "-"):
+			config.ArgumentError = fmt.Sprintf("unexpected inspection argument %q", arg)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown inspection option %q", arg)
+		}
+	}
 }

@@ -17,6 +17,7 @@ The documentation starts in English by default. Use the language switch in the t
 - Produce JSON output that scripts and AI agents can branch on.
 - Preview local execution plans with `--dry-run` before connecting, reading secrets, mutating `known_hosts`, or writing host config.
 - Keep a local JSONL audit trail without recording plaintext passwords, private keys, stdout, or stderr.
+- Inspect system/network state in one call and create reusable application plugins under the sshx runtime root.
 
 ## Mental Model
 
@@ -55,6 +56,9 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
 # Get machine-readable output for automation
 sshx -h=prod-web --json "systemctl is-active nginx"
+
+# Inspect a complete system/network baseline in one call
+sshx inspect -h=prod-web system.baseline --json
 ```
 
 ## Safety First
@@ -76,4 +80,5 @@ Read [Security Guidelines](security-guidelines.md) before using `sshx` in produc
 - [Host Management](host-management.md) explains named hosts and key selection.
 - [Usage Scenarios](usage-scenarios.md) gives practical examples for daily operations.
 - [Agent and Script Mode](agent-scripting.md) explains JSON output, exit codes, timeouts, and audit logs.
+- [Inspection Capabilities and Local Plugins](inspection-plugins.md) explains built-ins, `plugin create`, trust, and observations.
 - [SFTP Workflows](sftp.md) covers upload, download, list, mkdir, and remove.

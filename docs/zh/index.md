@@ -17,6 +17,7 @@
 - 输出适合脚本和 AI agent 判断分支的 JSON。
 - 用 `--dry-run` 在连接、读取 secret、修改 `known_hosts` 或写配置前预览本地执行计划。
 - 写入本地 JSONL 审计日志，同时不记录明文密码、私钥、stdout 或 stderr。
+- 一次调用探测系统/网络状态，并在 sshx 运行目录创建可复用的应用插件。
 
 ## 心智模型
 
@@ -55,6 +56,9 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
 # 给自动化输出机器可读结果
 sshx -h=prod-web --json "systemctl is-active nginx"
+
+# 一次采集完整系统/网络基线
+sshx inspect -h=prod-web system.baseline --json
 ```
 
 ## 安全优先
@@ -76,4 +80,5 @@ sshx -h=prod-web --json "systemctl is-active nginx"
 - [主机管理](host-management.md)说明命名主机和密钥选择。
 - [使用场景](usage-scenarios.md)提供大量日常运维例子。
 - [Agent 与脚本模式](agent-scripting.md)说明 JSON、退出码、timeout 和审计日志。
+- [主机探测能力与本地插件](inspection-plugins.md)说明内置能力、`plugin create`、信任和观察快照。
 - [SFTP 工作流](sftp.md)覆盖上传、下载、列目录、创建目录和删除。

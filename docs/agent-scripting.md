@@ -56,6 +56,43 @@ else
 fi
 ```
 
+## Reusable Host Inspection
+
+Before repeating a chain of discovery commands, list and run a bounded
+inspection capability:
+
+```bash
+sshx plugin list --json
+sshx inspect -h=prod-web system.baseline --json
+```
+
+Application-specific collectors are sshx runtime assets, not skill assets. An
+Agent can scaffold one without inventing its file layout:
+
+```bash
+sshx plugin create docker.environment --template=docker --privilege=optional --json
+sshx plugin test docker.environment --fixture=complete --json
+sshx plugin trust docker.environment --json
+sshx inspect -h=prod-web docker.environment --json
+```
+
+Branch on observation `status` (`complete`, `partial`, `unsupported`, or
+`failed`) and typed `errors`. Do not interpret permission-limited `partial` as
+service absence. New or edited plugins must be trusted by digest before sshx
+connects to the target.
+
+Remote reuse is explicit:
+
+```bash
+sshx inspect -h=prod-web docker.environment \
+  --cache=remote-prefer --max-age=10m --json
+```
+
+The remote cache stores only normalized, redacted observation JSON. It is
+host-scoped and freshness-bounded, not an authoritative inventory. See
+[Inspection Capabilities And Local Plugins](inspection-plugins.md) for the full
+manifest, trust, redaction, and invalidation contract.
+
 ## Dry-Run For Change Review
 
 Before a script performs a privileged operation, ask for the plan:

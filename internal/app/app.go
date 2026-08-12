@@ -98,6 +98,20 @@ func Run(args []string) (err error) {
 		return nil
 	}
 
+	// Handle local plugin lifecycle mode.
+	if config.Mode == "plugin" {
+		if pluginErr := HandlePluginManagement(config); pluginErr != nil {
+			return pluginErr
+		}
+		return nil
+	}
+
+	// Handle one-shot capability inspection. The handler owns one SSH
+	// connection and any cache sessions created over it.
+	if config.Mode == "inspect" {
+		return HandleInspection(config, audit)
+	}
+
 	// Handle server-to-server transfer mode
 	if config.Mode == "transfer" {
 		if transferErr := HandleTransfer(config); transferErr != nil {
@@ -141,7 +155,7 @@ func Run(args []string) (err error) {
 			logger.GetLogger().Warning("failed to get sudo password from keyring: %v", pwdErr)
 			logger.GetLogger().Info("Continuing without sudo password auto-fill...")
 		} else {
-			config.Password = password
+			config.SudoPassword = password
 			logger.GetLogger().Success("Sudo password will be auto-filled when prompted")
 		}
 	}

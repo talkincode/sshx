@@ -24,7 +24,7 @@ The core value proposition:
 - Run a command or file action on an existing SSH host in one invocation, with
   no resident remote agent and no long-running control plane.
 - Reduce decision and retry cost through named hosts, JSON, exit codes,
-  `error_kind`, timeout, and dry-run plans.
+  `error_kind`, timeout, dry-run plans, and reusable host inspection.
 - Protect credentials and trust boundaries through the OS keyring, strict
   host-key verification, sudo over stdin, explicit bypasses, and audit redaction.
 
@@ -51,6 +51,9 @@ supervise agents and troubleshoot operations.
 8. **Auditability** — non-dry-run invocations write structured JSONL audit
    events under `~/.sshx/audit` by default, with secrets and stdout/stderr
    excluded.
+9. **Reusable host knowledge** — stable system/network probes are built in;
+   editable application probes live as versioned local plugins under the sshx
+   runtime root and may reuse freshness-bounded, redacted observations.
 
 ## 3. Scope & Boundaries (Non-Goals)
 
@@ -74,13 +77,16 @@ the project's mission:
   port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
 - ❌ **Plaintext secret storage** — secrets only ever live in the OS keyring.
   Inline passwords are supported for convenience but warned against.
-- ❌ **Bespoke config formats** — configuration is `~/.sshx/settings.json`,
-  environment variables, and CLI flags. Nothing else.
+- ❌ **Bespoke operator config formats** — host configuration remains
+  `~/.sshx/settings.json`, environment variables, and CLI flags. Versioned
+  plugin manifests, result schemas, trust locks, and observation envelopes are
+  capability data contracts rather than alternate host configuration.
 
 **In scope (welcome):** agent execution contracts, command execution, SFTP file
 actions, bounded multi-host execution, password/secret references, named host
 management, authentication UX, safety checks, auditing, and cross-platform
-correctness.
+correctness. Read-only host inspection, local plugin lifecycle, explicit plugin
+trust, and bounded observation reuse are also in scope.
 
 ## 4. Architecture
 
@@ -98,8 +104,13 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   usage.go                → PrintUsage() help text (keep in sync with flags)
   dryrun.go               → --dry-run local execution plan preview
   audit.go                → local structured JSONL audit events + redaction
+  plugin.go               → local plugin create/list/show/validate/test/trust/remove
+  inspect.go              → one-shot capability execution + observation caching
+internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
+internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
+  remote_state.go         → restrictive atomic remote observation I/O
   validate.go             → command safety checks + CommandUsesSudo
 pkg/errutil/              → error helpers (e.g. ignore benign close/EOF errors)
 pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
@@ -115,6 +126,8 @@ pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
 | `sftp`     | `--upload/--download/--list/--mkdir/--rm` | file transfer & remote FS ops           |
 | `password` | `--password-*`                            | manage keyring secrets                  |
 | `host`     | `--host-*`                                | manage `settings.json` host entries     |
+| `plugin`   | `sshx plugin <action>`                    | manage local inspection plugins         |
+| `inspect`  | `sshx inspect ... <capability-id>`        | collect/reuse one host observation      |
 
 ### State & storage
 
@@ -127,6 +140,14 @@ pkg/logger/              → leveled logger (SSHX_LOG_LEVEL)
 - **Audit trail:** `~/.sshx/audit/sshx-YYYY-MM-DD.jsonl` by default; override
   with `--audit-output=<dir>` / `SSHX_AUDIT_OUTPUT`, or disable with
   `--no-audit` / `SSHX_NO_AUDIT=true`.
+- **Runtime root:** all sshx-owned local state follows `~/.sshx` by default or
+  the explicit `SSHX_HOME` override for isolated Agent/CI runs.
+- **Local plugins and trust:** editable assets live under
+  `$SSHX_HOME/plugins/<id>`; trusted digests live in
+  `$SSHX_HOME/plugin-lock.json`. Plugin code never belongs in an Agent skill.
+- **Remote observations:** opt-in cache mode stores only normalized, redacted
+  JSON under the authenticated user's `~/.sshx/observations/v1/`. Collector
+  code remains local and is streamed only for the SSH session.
 
 ## 5. Tech Stack
 
@@ -221,6 +242,12 @@ tests.
    Keyring passwords are for sudo auto-fill, not ordinary SSH login.
    `--no-key`/`SSH_DISABLE_KEY` forces password-only.
 7. **Config file is `0600`** and written atomically.
+8. **Local plugin trust is digest-bound.** New or changed plugins fail closed
+   before network access until explicitly trusted. Trust is admission metadata,
+   not a sandbox; only trust code that may run with the selected remote identity.
+9. **Observation cache is untrusted input.** Reads enforce schema/size, owner,
+   permissions, path and symlink checks. Reuse is bound to plugin identity,
+   host key, target identity, privilege, parameters, boot ID, and freshness.
 
 ## 8. Boundary Contracts
 
@@ -244,6 +271,12 @@ verification for it:
 - **Installer platform detection vs release artifacts.** Any platform an
   installer can select must have a matching release artifact, checksum entry,
   and build path.
+- **Agent skill guidance vs executable plugin assets.** A skill teaches an Agent
+  when and how to call sshx. Custom collectors, schemas, fixtures, and trust
+  state belong under `SSHX_HOME`, never inside the skill.
+- **Local plugin code vs remote observation data.** Collectors may be streamed
+  for one session but are never installed remotely. Remote cache entries contain
+  only normalized and redacted observation JSON.
 
 ## 9. Testing Strategy
 
@@ -256,7 +289,8 @@ verification for it:
   matches release artifacts.
 - **Security-relevant logic must be tested** — e.g. `CommandUsesSudo`,
   `sudoStdinCommand`, command validation, atomic settings save (perms + no temp
-  leftovers), and platform detection.
+  leftovers), plugin path/digest trust, observation invalidation, remote cache
+  owner/permission/symlink checks, and platform detection.
 - Coverage is tracked (Codecov). Coverage is currently modest; **raising it is an
   ongoing goal** — prefer adding tests alongside any change you make.
 
@@ -303,6 +337,8 @@ Items must respect the boundaries in §3.
 - ✅ Strict host-key verification with opt-in overrides.
 - ✅ Hardened sudo password handling (stdin), atomic config writes, secure
   password input.
+- ✅ Built-in host inspection, sshx-owned local plugin lifecycle, digest trust,
+  and freshness-bounded remote observations.
 
 **Near-term**
 

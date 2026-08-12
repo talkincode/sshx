@@ -132,6 +132,27 @@ They intentionally do not record:
 
 Command text is included for provenance and redacted for common password or token-style arguments, but do not treat redaction as a reason to place secrets in commands.
 
+## Inspection Plugin Trust And Cache Safety
+
+Custom inspection plugins are executable code owned by the local sshx runtime,
+normally `~/.sshx/plugins/`. Agent skills may explain how to use them but must
+not embed or maintain their collector scripts.
+
+- New and edited plugins are untrusted. Review them, run `plugin validate` and
+  `plugin test`, then use `plugin trust` to admit the exact current digest.
+- Digest trust is not a sandbox. A trusted collector runs with the selected
+  remote user or sudo identity and should be treated like any reviewed script.
+- Plugin code and sshx credentials are never persisted on the remote host. sshx
+  streams the collector through the one-shot SSH session.
+- `--cache=remote-prefer` is opt-in and stores only normalized, redacted JSON
+  under the authenticated user's `~/.sshx/observations/v1/`.
+- Cached observations are untrusted input. sshx rejects malformed, oversized,
+  symlinked, broadly accessible, wrong-owner, identity-mismatched, and stale
+  entries unless stale reuse was explicitly requested within the hard limit.
+- Do not place environment dumps, raw Compose/Nginx configuration, registry
+  authentication, cookies, tokens, private keys, or secret values in facts or
+  evidence. Redaction is defense in depth, not permission to collect secrets.
+
 ## SFTP Safety
 
 For uploads to privileged paths, stage the file first:
