@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-13
+
 ### Added
 
 - Add the canonical `sshx run` execution contract with versioned request/result
@@ -324,7 +326,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/talkincode/sshx/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/talkincode/sshx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/talkincode/sshx/compare/v0.0.14...v0.1.0
 [0.0.14]: https://github.com/talkincode/sshx/compare/v0.0.13...v0.0.14
