@@ -3,7 +3,6 @@ module github.com/talkincode/sshx
 go 1.25.10
 
 require (
-	github.com/joho/godotenv v1.5.1
 	github.com/pkg/sftp v1.13.10
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.11.1

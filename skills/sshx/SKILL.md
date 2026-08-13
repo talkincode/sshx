@@ -14,6 +14,8 @@ its work, and exits — there is no daemon, shell, tunneling, or port forwarding
 ## When to use
 
 - Run a one-shot command on a remote host (optionally with `sudo`).
+- Execute complex scripts byte-for-byte with `sshx run --script-file` / `--script-stdin`.
+- Fan out one action to a bounded host set with `--group` / `--tag` / `--targets`.
 - Upload/download a file or list/make/remove remote paths over SFTP.
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
@@ -62,29 +64,37 @@ only through the SSH session's stdin. Branch on observation `status`
 (`complete|partial|unsupported|failed`) and cache `hit/stale` fields. Never
 interpret `partial` or permission errors as application absence.
 
-## Golden rule for agents: use `--json`
+## Golden rule for agents: prefer `sshx run` + `--json`/`--jsonl`
 
-For any non-interactive/programmatic use, **always pass `--json`** in command mode.
-It emits exactly one JSON object on stdout; diagnostic logs go to stderr, so stdout
-stays a clean machine-readable stream. `--json` cannot be combined with `--pty`.
+For any non-interactive/programmatic use, prefer the canonical run contract:
 
 ```bash
-sshx -h=prod-web --json "systemctl is-active nginx"
+sshx run --target=prod-web --json -- "systemctl is-active nginx"
+sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+sshx run --target=prod-web --script-file=./check.sh --json
 ```
 
-JSON result fields:
+Compatibility mode `sshx -h=prod-web --json "cmd"` still works and emits the
+legacy single-object shape. `sshx run --json` adds versioned fields
+(`schema_version`, `run_id`, `status`, `phase`, `completion`, structured
+`error`). Multi-target runs stream JSONL events:
+`run_started` → `target_started`/`target_finished` → `run_finished`.
 
-```json
-{
-  "host": "...", "port": "22", "user": "...", "command": "...",
-  "exit_code": 0, "success": true, "stdout": "...", "stderr": "...",
-  "stdout_truncated": false, "stderr_truncated": false,
-  "duration_ms": 0, "auth_method": "key|password|...",
-  "error_kind": "", "error": ""
-}
-```
+Branch on `success` / `status` first; on failure read `error.kind` or
+`error_kind` (do not parse free-form text). For change actions, inspect
+`completion` before any retry (`not_started|partial|completed|completed_unconfirmed|unknown`).
 
-Branch on `success` first; on failure read `error_kind` (do not parse free-form text).
+Selectors resolve only configured host aliases. Literal addresses require
+`--address=` and cannot enter group/tag fan-out. Zero matches is exit `255`
+with no network access.
+
+Safety/force/host-key relaxations require explicit CLI flags plus
+`--bypass-reason=` on `sshx run`. Inherited `SSH_FORCE` /
+`SSH_NO_SAFETY_CHECK` / `SSH_INSECURE_HOST_KEY` / `SSH_ACCEPT_UNKNOWN_HOST`
+and working-directory `.env` files do not authorize bypasses.
+
+SSH login secrets use `--ssh-password-key` / `ssh_password_key`. Sudo secrets
+use `-pk` / `sudo_password_key` (legacy `password_key` is sudo-only).
 
 ## Preview before executing: use `--dry-run --json`
 

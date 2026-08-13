@@ -97,6 +97,20 @@ type auditEvent struct {
 	DurationMs int64          `json:"duration_ms"`
 	Outcome    auditStatus    `json:"outcome"`
 	Redaction  auditRedaction `json:"redaction"`
+
+	// Run-contract correlation fields (additive).
+	RunID          string `json:"run_id,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
+	SelectorDigest string `json:"selector_digest,omitempty"`
+	PayloadSHA256  string `json:"payload_sha256,omitempty"`
+	ActionIntent   string `json:"action_intent,omitempty"`
+	BypassReason   string `json:"bypass_reason,omitempty"`
+	Concurrency    int    `json:"concurrency,omitempty"`
+	FailureMode    string `json:"failure_mode,omitempty"`
+	TargetCount    int    `json:"target_count,omitempty"`
+	TargetIndex    *int   `json:"target_index,omitempty"`
+	Completion     string `json:"completion,omitempty"`
+	Phase          string `json:"phase,omitempty"`
 }
 
 type auditRecorder struct {

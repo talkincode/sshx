@@ -11,7 +11,9 @@ func PrintUsage() {
 	fmt.Printf("\nSSHX — Agent-native remote host execution over SSH\nVersion: %s\n", Version)
 	fmt.Println(`
 Usage:
-  sshx -h=<host> [options] <command>              # SSH mode
+  sshx -h=<host> [options] <command>              # SSH mode (compatibility)
+  sshx run [selectors] [options] -- <command>     # Canonical execution contract
+  sshx run --script-file=PATH ...                 # Byte-preserving script payload
   sshx -h=<host> [options] --upload=<file>        # SFTP upload
   sshx -h=<host> [options] --download=<file>      # SFTP download
   sshx --transfer=<host>:<path> --to=<host>:<path> # Server-to-server transfer
@@ -31,12 +33,13 @@ Usage:
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
 
 SSH Options:
-  -h, --host=HOST          Remote host address (required)
+  -h, --host=HOST          Remote host address (required in compatibility mode)
   -p, --port=PORT          SSH port (default: 22)
   -u, --user=USER          SSH username (default: master)
   -i, --key=PATH           SSH private key path (default: ~/.ssh/id_rsa)
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
                            Used only when the remote command starts with sudo
+  --ssh-password-key=KEY   SSH login password keyring key (never used for sudo)
   --dry-run                Print the local execution plan without side effects
   --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
   --no-audit               Disable local audit event writing for this invocation
@@ -46,23 +49,54 @@ SSH Options:
   --version                Show version information (alias: -v)
   --help                   Show this help message
 
+Run Contract (preferred for Agents):
+  sshx run --target=prod-web --json -- "systemctl is-active nginx"
+  sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+  sshx run --target=prod-web --script-file=./check.sh --json
+  cat ./check.sh | sshx run --target=prod-web --script-stdin --json
+
+  Selectors (configured hosts only; multi-host never treats names as DNS):
+    --target=NAME            strict alias (repeatable via --targets=a,b)
+    --group=NAME             union with other names/groups (repeatable)
+    --tag=key=value          AND filter (repeatable)
+    --all-hosts              all configured hosts before tag filters
+    --address=HOST           explicit single literal address (not for fan-out)
+
+  Limits / policy:
+    --concurrency=N          default 4, hard max 32
+    --failure-mode=continue|fail_fast   default continue
+    --intent=read|change|unknown
+    --force / --no-safety-check require --bypass-reason=TEXT
+    --jsonl                  stream run_started/target_*/run_finished events
+
+  Multi-target exit codes:
+    0    all selected targets succeeded
+    1    run accepted but at least one target failed/skipped/uncertain
+    255  request-level failure (bad selectors, zero matches, invalid input)
+
 Agent / Scripting Mode:
   By default command output streams live with stdout and stderr kept on
   separate channels (no PTY), and the remote command's exit status is
   propagated as sshx's own exit code.
 
-  --json emits one JSON object on stdout:
+  Compatibility --json emits one JSON object on stdout:
     {host, port, user, command, exit_code, success, stdout, stderr,
      stdout_truncated, stderr_truncated, duration_ms, auth_method,
      error_kind, error}
+  sshx run --json adds versioned fields (schema_version, run_id, status,
+  phase, completion, structured error).
 
-  Exit codes:
+  Exit codes (single-host compatibility mode):
     0          command succeeded
     1..254     remote command's exit status (propagated verbatim)
     255        sshx-level failure (connect/auth/host-key/timeout/blocked/...)
     In --json mode an sshx-level failure has exit_code -1 and a non-empty
     error_kind (timeout, auth, host_key, connect, blocked, exit_missing,
     config, error), so it is always distinguishable from a remote exit 255.
+
+  Trust note: high-risk bypasses (force, no-safety-check, accept-unknown-host,
+  insecure-hostkey) require explicit CLI flags. Inherited env values and
+  working-directory .env files are ignored for those decisions.
 
 Sudo Auto-fill:
   sshx auto-fills a sudo password only when the remote command starts with

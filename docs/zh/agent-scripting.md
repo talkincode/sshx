@@ -2,6 +2,24 @@
 
 `sshx` 设计上可以被脚本和 AI agent 调用。契约很简单：稳定的 stdout/stderr、稳定退出码、可选 JSON、可选本地审计事件。
 
+## 规范执行契约 `sshx run`
+
+复杂脚本、严格别名选择和有界多主机执行请优先使用：
+
+```bash
+sshx run --target=prod-web --json -- "systemctl is-active nginx"
+sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+sshx run --target=prod-web --script-file=./check.sh --dry-run --json
+```
+
+- 选择器只解析已配置主机；字面地址用 `--address=`，不能进入 group/tag 扩散。
+- 脚本经 SSH stdin 原样传输，不经本地 `strings.Join` 拼装。
+- dry-run/结果暴露 payload SHA-256 与字节数，默认不回传脚本全文。
+- 多主机 `--jsonl` 输出 `run_started` / `target_*` / `run_finished`。
+- 多主机退出码：`0` 全成功，`1` 部分失败/跳过/不确定，`255` 请求级失败。
+- 高风险绕过需显式 CLI；`sshx run` 还要求 `--bypass-reason=`。
+- 不再隐式加载工作目录 `.env`；`SSH_FORCE` 等环境变量不能授权信任降级。
+
 ## 默认输出流
 
 默认不请求 PTY，这样 stdout 和 stderr 会保持分离，也不会把终端控制字符混进脚本输出。

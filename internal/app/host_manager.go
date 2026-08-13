@@ -49,14 +49,17 @@ func handleHostAdd(config *sshclient.Config) error {
 	// If host configuration is provided via command line
 	if config.HostName != "" {
 		host = HostConfig{
-			Name:        config.HostName,
-			Description: config.HostDescription,
-			Host:        config.Host,
-			Port:        config.Port,
-			User:        config.User,
-			Key:         config.KeyPath,
-			PasswordKey: config.SudoKey,
-			Type:        config.HostType,
+			Name:            config.HostName,
+			Description:     config.HostDescription,
+			Host:            config.Host,
+			Port:            config.Port,
+			User:            config.User,
+			Key:             config.KeyPath,
+			SudoPasswordKey: config.SudoKey,
+			SSHPasswordKey:  config.SSHPasswordKey,
+			Groups:          append([]string(nil), config.RunGroups...),
+			Tags:            cloneTags(config.RunTags),
+			Type:            config.HostType,
 		}
 	} else {
 		// Interactive mode
@@ -104,10 +107,24 @@ func handleHostAdd(config *sshclient.Config) error {
 			host.Key = strings.TrimSpace(keyPath)
 		}
 
-		// Password key (optional)
-		fmt.Print("Password key (optional): ")
+		// Sudo password key (optional)
+		fmt.Print("Sudo password key (optional): ")
 		if pwdKey, err := reader.ReadString('\n'); err == nil {
-			host.PasswordKey = strings.TrimSpace(pwdKey)
+			host.SudoPasswordKey = strings.TrimSpace(pwdKey)
+		}
+		// SSH login password key (optional, distinct from sudo)
+		fmt.Print("SSH password key (optional): ")
+		if pwdKey, err := reader.ReadString('\n'); err == nil {
+			host.SSHPasswordKey = strings.TrimSpace(pwdKey)
+		}
+		fmt.Print("Groups (comma-separated, optional): ")
+		if groups, err := reader.ReadString('\n'); err == nil {
+			for _, g := range strings.Split(groups, ",") {
+				g = strings.TrimSpace(g)
+				if g != "" {
+					host.Groups = append(host.Groups, g)
+				}
+			}
 		}
 
 		// Type (optional, default: linux)
@@ -331,9 +348,24 @@ func handleHostUpdate(config *sshclient.Config) error {
 	}
 
 	if config.SudoKey != "" && config.SudoKey != sshclient.DefaultSudoKey {
-		host.PasswordKey = config.SudoKey
-	} else if existingHost.PasswordKey != "" {
-		host.PasswordKey = existingHost.PasswordKey
+		host.SudoPasswordKey = config.SudoKey
+	} else if existingHost.EffectiveSudoPasswordKey() != "" {
+		host.SudoPasswordKey = existingHost.EffectiveSudoPasswordKey()
+	}
+	if config.SSHPasswordKey != "" {
+		host.SSHPasswordKey = config.SSHPasswordKey
+	} else {
+		host.SSHPasswordKey = existingHost.SSHPasswordKey
+	}
+	if len(config.RunGroups) > 0 {
+		host.Groups = append([]string(nil), config.RunGroups...)
+	} else {
+		host.Groups = append([]string(nil), existingHost.Groups...)
+	}
+	if len(config.RunTags) > 0 {
+		host.Tags = cloneTags(config.RunTags)
+	} else {
+		host.Tags = cloneTags(existingHost.Tags)
 	}
 
 	if config.KeyPath != "" {
@@ -399,8 +431,17 @@ func handleHostList(config *sshclient.Config) error {
 		if host.Key != "" {
 			fmt.Printf("    Key:         %s\n", host.Key)
 		}
-		if host.PasswordKey != "" {
-			fmt.Printf("    Password Key: %s\n", host.PasswordKey)
+		if sudoKey := host.EffectiveSudoPasswordKey(); sudoKey != "" {
+			fmt.Printf("    Sudo Password Key: %s\n", sudoKey)
+		}
+		if sshKey := host.EffectiveSSHPasswordKey(); sshKey != "" {
+			fmt.Printf("    SSH Password Key: %s\n", sshKey)
+		}
+		if len(host.Groups) > 0 {
+			fmt.Printf("    Groups:      %s\n", strings.Join(host.Groups, ", "))
+		}
+		if len(host.Tags) > 0 {
+			fmt.Printf("    Tags:        %s\n", formatTags(host.Tags))
 		}
 		if host.Type != "" {
 			fmt.Printf("    Type:        %s\n", host.Type)
@@ -622,11 +663,13 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 		}
 	}
 
-	if hostConfig.PasswordKey != "" {
-		if password, err := sshclient.GetSudoPassword(hostConfig.PasswordKey); err == nil {
+	// Only the typed SSH login password key may authorize password auth.
+	// Legacy password_key / sudo_password_key are sudo-only and must not be used here.
+	if sshKey := hostConfig.EffectiveSSHPasswordKey(); sshKey != "" {
+		if password, err := sshclient.GetSudoPassword(sshKey); err == nil {
 			testConfig.Password = password
 		} else {
-			logger.GetLogger().Warning("failed to get password from keyring (%s): %v", hostConfig.PasswordKey, err)
+			logger.GetLogger().Warning("failed to get SSH password from keyring (%s): %v", sshKey, err)
 		}
 	}
 
@@ -658,4 +701,27 @@ type hostTestResult struct {
 
 func (r hostTestResult) Success() bool {
 	return r.ConnectionSuccess && r.CommandSuccess
+}
+
+func formatTags(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	// stable display order
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[j] < keys[i] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+tags[k])
+	}
+	return strings.Join(parts, ", ")
 }

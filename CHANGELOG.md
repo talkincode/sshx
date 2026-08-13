@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add the canonical `sshx run` execution contract with versioned request/result
+  models, strict target selectors (`--target`/`--targets`/`--group`/`--tag`/
+  `--all-hosts`/`--address`), byte-preserving `--script-file`/`--script-stdin`
+  payloads (SHA-256 digest + size limits), bounded multi-host fan-out
+  (`--concurrency` default 4 / hard max 32), `--failure-mode=continue|fail_fast`,
+  and JSONL run events (`run_started` / `target_*` / `run_finished`).
+- Extend host inventory with `groups`, `tags`, `ssh_password_key`, and
+  `sudo_password_key` while keeping legacy `password_key` as a sudo-only alias.
+- Correlate audit events with `run_id`, selector/payload digests, action intent,
+  bypass reason, and per-target completion certainty.
+
+### Changed
+
+- Stop implicitly loading a working-directory `.env` file.
+- High-risk trust relaxations (`force`, safety-check disablement, unknown-host
+  acceptance, insecure host-key mode) now require explicit CLI/request fields;
+  inherited environment values are ignored with a diagnostic.
+- Host diagnostics and execution paths no longer treat sudo password keys as SSH
+  login credentials.
+
+### Security
+
+- Separate SSH-login and sudo credential roles end-to-end so a host with only
+  `sudo_password_key` never attempts password authentication.
+- Safety bypass on `sshx run` requires a non-empty `--bypass-reason` recorded in
+  dry-run, result, and audit metadata.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

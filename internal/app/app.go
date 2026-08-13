@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
-
+	"github.com/talkincode/sshx/internal/execution"
 	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/pkg/errutil"
 	"github.com/talkincode/sshx/pkg/logger"
@@ -59,9 +57,9 @@ func Run(args []string) (err error) {
 		return ErrUsage
 	}
 
-	// Load environment variables
-	//nolint:errcheck // Loading .env is optional
-	_ = godotenv.Load()
+	// Do not implicitly load a working-directory .env file. Repository-local
+	// files must not alter trust, safety, or host-key policy. Process env and
+	// explicit CLI flags remain the supported configuration surfaces.
 
 	// Set log level from environment variable
 	if logLevelStr := os.Getenv("SSHX_LOG_LEVEL"); logLevelStr != "" {
@@ -71,12 +69,20 @@ func Run(args []string) (err error) {
 
 	// Parse command-line arguments
 	config := ParseArgs(args)
+	if config.ArgumentError != "" {
+		return fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError)
+	}
 	audit := newAuditRecorder(config)
 	defer func() {
 		if auditErr := audit.finish(config, err); auditErr != nil {
 			logger.GetLogger().Error("failed to write audit event: %v", auditErr)
 		}
 	}()
+
+	// Canonical multi-host / script execution contract.
+	if config.Mode == "run" {
+		return HandleRun(config, audit)
+	}
 
 	if config.DryRun {
 		return emitDryRunPlan(config)
@@ -269,39 +275,14 @@ func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, 
 
 // classifyError maps an sshx-level error to a stable machine-readable kind so an
 // agent can branch on the failure category without parsing free-form text.
+// Compatibility projection: unknown maps to the legacy "error" kind for the
+// existing single-command JSON surface.
 func classifyError(err error) string {
-	if err == nil {
-		return ""
-	}
-	switch {
-	case errors.Is(err, sshclient.ErrCommandTimeout):
-		return "timeout"
-	case errors.Is(err, sshclient.ErrNoExitStatus):
-		return "exit_missing"
-	}
-	var blocked *sshclient.CommandBlockedError
-	if errors.As(err, &blocked) {
-		return "blocked"
-	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "known_hosts"), strings.Contains(msg, "host key"):
-		return "host_key"
-	case strings.Contains(msg, "unable to authenticate"),
-		strings.Contains(msg, "no authentication"),
-		strings.Contains(msg, "no supported methods"),
-		strings.Contains(msg, "password fallback"),
-		strings.Contains(msg, "handshake"):
-		return "auth"
-	case strings.Contains(msg, "connection refused"),
-		strings.Contains(msg, "no route to host"),
-		strings.Contains(msg, "i/o timeout"),
-		strings.Contains(msg, "failed to connect"),
-		strings.Contains(msg, "dial"):
-		return "connect"
-	default:
+	kind := execution.Classify(err)
+	if kind == execution.ErrorKindUnknown {
 		return "error"
 	}
+	return kind
 }
 
 // isIPAddress checks if a string is a valid IP address
@@ -338,10 +319,18 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 		}
 	}
 
-	// Use configured password key if available
-	if hostConfig.PasswordKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
-		config.SudoKey = hostConfig.PasswordKey
-		logger.GetLogger().Success("Using password key: %s", hostConfig.PasswordKey)
+	// Use configured sudo password key if available (legacy password_key is sudo-only).
+	sudoKey := hostConfig.EffectiveSudoPasswordKey()
+	if sudoKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
+		config.SudoKey = sudoKey
+		logger.GetLogger().Success("Using sudo password key: %s", sudoKey)
+	}
+	// SSH login password key is a distinct role and never falls back to sudo keys.
+	if config.SSHPasswordKey == "" {
+		if sshKey := hostConfig.EffectiveSSHPasswordKey(); sshKey != "" {
+			config.SSHPasswordKey = sshKey
+			logger.GetLogger().Success("Using SSH password key: %s", sshKey)
+		}
 	}
 
 	// Use per-host SSH key if available, otherwise fall back to the default key
@@ -353,6 +342,15 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 		case settings.Key != "":
 			config.KeyPath = settings.Key
 			logger.GetLogger().Success("Using SSH key: %s", settings.Key)
+		}
+	}
+
+	// Resolve typed SSH login password only when that role is requested.
+	if config.Password == "" && config.SSHPasswordKey != "" {
+		if password, pwdErr := sshclient.GetSudoPassword(config.SSHPasswordKey); pwdErr != nil {
+			logger.GetLogger().Warning("failed to get SSH password from keyring (%s): %v", config.SSHPasswordKey, pwdErr)
+		} else {
+			config.Password = password
 		}
 	}
 

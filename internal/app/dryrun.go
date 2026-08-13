@@ -227,8 +227,11 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 			config.User = hostConfig.User
 		}
 	}
-	if hostConfig.PasswordKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
-		config.SudoKey = hostConfig.PasswordKey
+	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
+		config.SudoKey = sudoKey
+	}
+	if config.SSHPasswordKey == "" {
+		config.SSHPasswordKey = hostConfig.EffectiveSSHPasswordKey()
 	}
 	if config.UseKeyAuth && config.KeyPath == "" {
 		switch {
@@ -276,9 +279,13 @@ func resolveDryRunHostTest(config *sshclient.Config, plan *dryRunPlan) {
 	if config.UseKeyAuth && config.KeyPath == "" {
 		config.KeyPath = firstNonEmpty(hostConfig.Key, settings.Key)
 	}
-	if hostConfig.PasswordKey != "" {
-		config.SudoKey = hostConfig.PasswordKey
+	// Host diagnostics only read an SSH login password key — never sudo keys.
+	if sshKey := hostConfig.EffectiveSSHPasswordKey(); sshKey != "" {
+		config.SSHPasswordKey = sshKey
 		plan.hostTestReadsSecret = true
+	}
+	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" {
+		config.SudoKey = sudoKey
 	}
 
 	plan.HostResolved = config.Host
