@@ -21,14 +21,61 @@ const (
 
 // HostConfig represents a configured host
 type HostConfig struct {
-	Name        string `json:"name"`                   // Host name (unique identifier)
-	Description string `json:"description,omitempty"`  // Description
-	Host        string `json:"host"`                   // IP or hostname
-	Port        string `json:"port,omitempty"`         // Port (default: 22)
-	User        string `json:"user,omitempty"`         // Username (default: master)
-	Key         string `json:"key,omitempty"`          // SSH private key path (optional, overrides global key)
-	PasswordKey string `json:"password_key,omitempty"` // Password key name (optional)
-	Type        string `json:"type,omitempty"`         // System type (linux/windows/macos)
+	Name        string `json:"name"`                  // Host name (unique identifier)
+	Description string `json:"description,omitempty"` // Description
+	Host        string `json:"host"`                  // IP or hostname
+	Port        string `json:"port,omitempty"`        // Port (default: 22)
+	User        string `json:"user,omitempty"`        // Username (default: master)
+	Key         string `json:"key,omitempty"`         // SSH private key path (optional, overrides global key)
+	// PasswordKey is the legacy sudo-only keyring reference. Prefer SudoPasswordKey.
+	// It must never be treated as an SSH login credential.
+	PasswordKey string `json:"password_key,omitempty"`
+	// SSHPasswordKey is a typed keyring reference for SSH password authentication only.
+	SSHPasswordKey string `json:"ssh_password_key,omitempty"`
+	// SudoPasswordKey is a typed keyring reference for sudo auto-fill only.
+	SudoPasswordKey string `json:"sudo_password_key,omitempty"`
+	// Groups are optional inventory labels used by multi-host selectors.
+	Groups []string `json:"groups,omitempty"`
+	// Tags are optional key/value inventory labels; selectors AND all predicates.
+	Tags map[string]string `json:"tags,omitempty"`
+	Type string            `json:"type,omitempty"` // System type (linux/windows/macos)
+}
+
+// EffectiveSudoPasswordKey returns the sudo keyring reference, preferring the
+// typed field and falling back to the legacy password_key alias.
+func (h HostConfig) EffectiveSudoPasswordKey() string {
+	if h.SudoPasswordKey != "" {
+		return h.SudoPasswordKey
+	}
+	return h.PasswordKey
+}
+
+// EffectiveSSHPasswordKey returns the SSH-login keyring reference only.
+func (h HostConfig) EffectiveSSHPasswordKey() string {
+	return h.SSHPasswordKey
+}
+
+// NormalizeCredentialKeys migrates legacy password_key into sudo_password_key
+// in memory. Loading settings must not rewrite the file by itself.
+func (h *HostConfig) NormalizeCredentialKeys() {
+	if h == nil {
+		return
+	}
+	if h.SudoPasswordKey == "" && h.PasswordKey != "" {
+		h.SudoPasswordKey = h.PasswordKey
+	}
+}
+
+// ForSave returns a copy prepared for explicit settings serialization. Legacy
+// password_key is emitted as sudo_password_key and omitted when identical.
+func (h HostConfig) ForSave() HostConfig {
+	h.NormalizeCredentialKeys()
+	out := h
+	if out.SudoPasswordKey != "" {
+		// Prefer typed field on explicit writes; drop legacy alias to avoid dual meaning.
+		out.PasswordKey = ""
+	}
+	return out
 }
 
 // Settings represents the user-level configuration
@@ -83,6 +130,10 @@ func LoadSettings() (*Settings, error) {
 	if settings.Hosts == nil {
 		settings.Hosts = make([]HostConfig, 0)
 	}
+	// In-memory credential-role normalization only; do not rewrite the file here.
+	for i := range settings.Hosts {
+		settings.Hosts[i].NormalizeCredentialKeys()
+	}
 
 	return &settings, nil
 }
@@ -104,8 +155,15 @@ func SaveSettings(settings *Settings) error {
 		return err
 	}
 
+	// Explicit saves serialize typed credential keys (legacy password_key → sudo_password_key).
+	toSave := *settings
+	toSave.Hosts = make([]HostConfig, len(settings.Hosts))
+	for i := range settings.Hosts {
+		toSave.Hosts[i] = settings.Hosts[i].ForSave()
+	}
+
 	// Marshal settings to JSON with indentation
-	data, err := json.MarshalIndent(settings, "", "  ")
+	data, err := json.MarshalIndent(toSave, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}

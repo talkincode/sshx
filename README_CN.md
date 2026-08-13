@@ -62,14 +62,15 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 
 ## 核心特性
 
-1. Agent 友好的 JSON、稳定退出码、stdout/stderr 分离和错误分类。
-2. dry-run 执行计划预览，以及默认启用、自动脱敏的本地结构化审计。
-3. 命名主机管理和 OpenSSH config 选择性导入，支持每台主机独立 SSH key。
-4. 严格 host-key 校验、危险命令护栏和显式安全绕过语义。
-5. 系统密钥链密码管理和通过 stdin 完成的 sudo 自动填充。
-6. 跨平台 SSH/SFTP 命令与文件动作。
-7. 服务器到服务器直接文件传输，数据经本机流式中转而不落地。
-8. 单次主机环境探测：内置系统/网络能力，应用级插件归 sshx 本地运行目录管理，
+1. Agent 友好的 JSON/JSONL、稳定退出码、stdout/stderr 分离和错误分类。
+2. 规范 `sshx run` 契约：严格选择器、脚本字节保真、有界多主机并发执行。
+3. dry-run 执行计划预览，以及默认启用、自动脱敏的本地结构化审计。
+4. 命名主机管理（groups/tags）和 OpenSSH config 选择性导入。
+5. 严格 host-key 校验、危险命令护栏和显式安全绕过语义。
+6. 系统密钥链密码管理，SSH 登录与 sudo 凭据角色分离。
+7. 跨平台 SSH/SFTP 命令与文件动作。
+8. 服务器到服务器直接文件传输，数据经本机流式中转而不落地。
+9. 单次主机环境探测：内置系统/网络能力，应用级插件归 sshx 本地运行目录管理，
    支持摘要信任和有有效期的观察快照。
 
 ## 安装
@@ -278,6 +279,18 @@ sshx -h=prod-web --json "systemctl is-active nginx"
 当发生 `sshx` 层面的失败时，对象中 `exit_code` 为 `-1` 且 `error_kind` 非空（取值为
 `timeout`、`auth`、`host_key`、`connect`、`blocked`、`exit_missing`、`config`、`error`
 之一），因此始终可以与"远程命令恰好退出 255"区分开来。
+
+### 规范契约 `sshx run`
+
+严格别名、复杂脚本和有界多主机执行请优先使用：
+
+```bash
+sshx run --target=prod-web --json -- "systemctl is-active nginx"
+sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+sshx run --target=prod-web --script-file=./check.sh --json
+```
+
+多主机退出码：`0` 全部成功，`1` 部分失败/跳过/不确定，`255` 请求级失败。
 
 ### `--dry-run` 执行计划预览
 

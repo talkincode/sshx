@@ -2,6 +2,26 @@
 
 `sshx` is designed to be called by scripts and AI agents. The contract is intentionally simple: predictable streams, predictable exit codes, optional JSON, and optional local audit events.
 
+## Canonical Run Contract
+
+Prefer `sshx run` for strict alias selection, complex scripts, and multi-host fan-out:
+
+```bash
+sshx run --target=prod-web --json -- "systemctl is-active nginx"
+sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+sshx run --target=prod-web --script-file=./check.sh --dry-run --json
+cat ./check.sh | sshx run --target=prod-web --script-stdin --json
+```
+
+- Selectors resolve configured hosts only. Use `--address=` for one literal address.
+- Script payloads are streamed on SSH stdin and are not reconstructed through shell joining.
+- Dry-run and results expose payload SHA-256 and byte length, not raw script contents.
+- Multi-target `--jsonl` streams `run_started`, per-target events, and `run_finished`.
+- Multi-target exit codes: `0` all succeeded, `1` partial/failed/skipped/uncertain, `255` request-level failure.
+- High-risk bypasses require explicit flags; `sshx run` also requires `--bypass-reason=`.
+- Working-directory `.env` files are not loaded. Inherited `SSH_FORCE` /
+  `SSH_NO_SAFETY_CHECK` / host-key env switches do not authorize trust relaxation.
+
 ## Default Stream Behavior
 
 By default `sshx` does not request a PTY. That keeps stdout and stderr separate and avoids terminal control characters in script output.

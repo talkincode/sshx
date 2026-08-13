@@ -62,14 +62,15 @@ It remains a single binary with one-shot invocations and no resident component o
 
 ## Key Features
 
-1. Agent-friendly JSON, stable exit codes, separated stdout/stderr, and classified failures.
-2. Dry-run execution plans and default-on local structured auditing with safe redaction.
-3. Named host management and selective OpenSSH config import with per-host SSH keys.
-4. Strict host-key verification, destructive-command guardrails, and explicit bypass semantics.
-5. OS-keyring password management and sudo auto-fill over stdin.
-6. Cross-platform SSH/SFTP command and file actions.
-7. Direct server-to-server transfer, streamed through the local machine without touching local disk.
-8. One-shot host inspection with built-in system/network capabilities, local
+1. Agent-friendly JSON/JSONL, stable exit codes, separated stdout/stderr, and classified failures.
+2. Canonical `sshx run` contract: strict selectors, byte-preserving scripts, and bounded multi-host fan-out.
+3. Dry-run execution plans and default-on local structured auditing with safe redaction.
+4. Named host management with groups/tags and selective OpenSSH config import.
+5. Strict host-key verification, destructive-command guardrails, and explicit bypass semantics.
+6. OS-keyring password management with distinct SSH-login and sudo credential roles.
+7. Cross-platform SSH/SFTP command and file actions.
+8. Direct server-to-server transfer, streamed through the local machine without touching local disk.
+9. One-shot host inspection with built-in system/network capabilities, local
    sshx-owned plugins, explicit digest trust, and freshness-bounded observations.
 
 ## Installation
@@ -276,6 +277,20 @@ On an `sshx`-level failure the object has `exit_code: -1` and a non-empty
 `error_kind` (one of `timeout`, `auth`, `host_key`, `connect`, `blocked`,
 `exit_missing`, `config`, `error`), so it is always distinguishable from a
 remote command that happens to exit `255`.
+
+### Canonical `sshx run` contract
+
+Prefer `sshx run` for strict aliases, complex scripts, and bounded multi-host
+execution:
+
+```bash
+sshx run --target=prod-web --json -- "systemctl is-active nginx"
+sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
+sshx run --target=prod-web --script-file=./check.sh --json
+```
+
+Multi-target exit codes: `0` all succeeded, `1` partial failure/skip/uncertain,
+`255` request-level failure (invalid selectors, zero matches, bad input).
 
 ### `--dry-run` execution plan preview
 

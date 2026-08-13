@@ -430,17 +430,19 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	passwordKeyName := "prod-web-password" //nolint:gosec // G101: keyring key name used in a test, not secret material.
+	sudoKeyName := "prod-web-sudo" //nolint:gosec // G101: keyring key name used in a test, not secret material.
+	sshKeyName := "prod-web-login" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	err := SaveSettings(&Settings{
 		Key: "/keys/default.pem",
 		Hosts: []HostConfig{
 			{
-				Name:        "prod-web",
-				Host:        "10.0.0.5",
-				Port:        "2222",
-				User:        "root",
-				Key:         "/keys/prod-web.pem",
-				PasswordKey: passwordKeyName,
+				Name:            "prod-web",
+				Host:            "10.0.0.5",
+				Port:            "2222",
+				User:            "root",
+				Key:             "/keys/prod-web.pem",
+				SudoPasswordKey: sudoKeyName,
+				SSHPasswordKey:  sshKeyName,
 			},
 		},
 	})
@@ -462,14 +464,31 @@ func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	if result["key_path"] != "/keys/prod-web.pem" {
 		t.Errorf("expected configured host key path, got %v", result["key_path"])
 	}
-	if result["sudo_key"] != passwordKeyName {
-		t.Errorf("expected configured password key, got %v", result["sudo_key"])
+	if result["sudo_key"] != sudoKeyName {
+		t.Errorf("expected configured sudo password key, got %v", result["sudo_key"])
 	}
 	if result["would_connect"] != true {
 		t.Errorf("expected real host test would connect, got %v", result["would_connect"])
 	}
+	// Host diagnostics may read only the typed SSH login password key.
 	if result["would_read_secret"] != true {
-		t.Errorf("expected real host test would read configured password key, got %v", result["would_read_secret"])
+		t.Errorf("expected real host test would read SSH password key, got %v", result["would_read_secret"])
+	}
+
+	// sudo-only hosts must not imply an SSH login secret read.
+	err = SaveSettings(&Settings{
+		Hosts: []HostConfig{{
+			Name:            "sudo-only",
+			Host:            "10.0.0.6",
+			SudoPasswordKey: sudoKeyName,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveSettings() error = %v", err)
+	}
+	sudoOnly := runDryRunJSON(t, []string{"sshx", "--host-test=sudo-only", "--dry-run", "--json"})
+	if sudoOnly["would_read_secret"] != false {
+		t.Errorf("expected sudo-only host test not to read secrets, got %v", sudoOnly["would_read_secret"])
 	}
 }
 

@@ -565,11 +565,12 @@ func TestParseArgs_EnvVariables(t *testing.T) {
 	if config.KeyPath != "/env/key/path" {
 		t.Errorf("Expected key path from env '/env/key/path', got %s", config.KeyPath)
 	}
-	if config.SafetyCheck {
-		t.Errorf("Expected SafetyCheck to be false from env")
+	// High-risk trust switches must not be authorized by environment variables.
+	if !config.SafetyCheck {
+		t.Errorf("Expected SafetyCheck to remain true; SSH_NO_SAFETY_CHECK must be ignored")
 	}
-	if !config.Force {
-		t.Errorf("Expected Force to be true from env")
+	if config.Force {
+		t.Errorf("Expected Force to remain false; SSH_FORCE must be ignored")
 	}
 	if config.SudoKey != "custom-sudo" {
 		t.Errorf("Expected sudo key 'custom-sudo', got %s", config.SudoKey)
@@ -580,11 +581,11 @@ func TestParseArgs_EnvVariables(t *testing.T) {
 	if config.KnownHostsPath != "/env/known_hosts" {
 		t.Errorf("Expected KnownHostsPath '/env/known_hosts', got %s", config.KnownHostsPath)
 	}
-	if !config.AcceptUnknownHost {
-		t.Errorf("Expected AcceptUnknownHost to be true from env")
+	if config.AcceptUnknownHost {
+		t.Errorf("Expected AcceptUnknownHost to remain false; SSH_ACCEPT_UNKNOWN_HOST must be ignored")
 	}
-	if !config.AllowInsecureHostKey {
-		t.Errorf("Expected AllowInsecureHostKey to be true from env")
+	if config.AllowInsecureHostKey {
+		t.Errorf("Expected AllowInsecureHostKey to remain false; SSH_INSECURE_HOST_KEY must be ignored")
 	}
 }
 

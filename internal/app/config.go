@@ -50,6 +50,7 @@ func ParseArgs(args []string) *sshclient.Config {
 		Force:        false,
 		UseKeyAuth:   true,
 		AuditEnabled: true,
+		RunTags:      map[string]string{},
 	}
 
 	if password := os.Getenv("SSH_PASSWORD"); password != "" {
@@ -71,19 +72,13 @@ func ParseArgs(args []string) *sshclient.Config {
 	if noAudit := os.Getenv("SSHX_NO_AUDIT"); strings.EqualFold(noAudit, "true") || noAudit == "1" {
 		config.AuditEnabled = false
 	}
-	if acceptUnknown := os.Getenv("SSH_ACCEPT_UNKNOWN_HOST"); strings.EqualFold(acceptUnknown, "true") || acceptUnknown == "1" {
-		config.AcceptUnknownHost = true
-	}
-	if insecure := os.Getenv("SSH_INSECURE_HOST_KEY"); strings.EqualFold(insecure, "true") || insecure == "1" {
-		config.AllowInsecureHostKey = true
-	}
+	// High-risk trust relaxations must be explicit CLI/request fields. Inherited
+	// environment values and repository-local .env files must not authorize them.
+	warnDeprecatedTrustEnv("SSH_ACCEPT_UNKNOWN_HOST")
+	warnDeprecatedTrustEnv("SSH_INSECURE_HOST_KEY")
+	warnDeprecatedTrustEnv("SSH_NO_SAFETY_CHECK")
+	warnDeprecatedTrustEnv("SSH_FORCE")
 
-	if os.Getenv("SSH_NO_SAFETY_CHECK") == "true" {
-		config.SafetyCheck = false
-	}
-	if os.Getenv("SSH_FORCE") == "true" {
-		config.Force = true
-	}
 	if timeoutStr := os.Getenv("SSH_TIMEOUT"); timeoutStr != "" {
 		if d, err := parseTimeout(timeoutStr); err == nil {
 			config.Timeout = d
@@ -97,6 +92,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		sudoKey = sshclient.DefaultSudoKey
 	}
 	config.SudoKey = sudoKey
+	if sshPasswordKey := os.Getenv("SSH_PASSWORD_KEY"); sshPasswordKey != "" {
+		config.SSHPasswordKey = sshPasswordKey
+	}
 
 	if len(args) > 1 {
 		switch args[1] {
@@ -108,6 +106,9 @@ func ParseArgs(args []string) *sshclient.Config {
 			return config
 		case "inspect":
 			parseInspectArgs(config, args[2:])
+			return config
+		case "run":
+			parseRunArgs(config, args[2:])
 			return config
 		}
 	}
@@ -350,6 +351,173 @@ func parsePluginArgs(config *sshclient.Config, args []string) {
 			config.ArgumentError = fmt.Sprintf("unexpected plugin argument %q", arg)
 		default:
 			config.ArgumentError = fmt.Sprintf("unknown plugin option %q", arg)
+		}
+	}
+}
+
+// warnDeprecatedTrustEnv emits a diagnostic when a high-risk env switch is set
+// without applying it. Explicit CLI flags remain the only authorization path.
+func warnDeprecatedTrustEnv(name string) {
+	val := os.Getenv(name)
+	if val == "" {
+		return
+	}
+	if strings.EqualFold(val, "true") || val == "1" {
+		fmt.Fprintf(os.Stderr, "sshx: ignoring deprecated trust env %s=%q; use an explicit CLI flag/request field instead\n", name, val)
+	}
+}
+
+func parseRunArgs(config *sshclient.Config, args []string) {
+	config.Mode = "run"
+	config.FailureMode = "continue"
+	config.RunConcurrency = 4
+	commandParts := []string{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			commandParts = append(commandParts, args[i+1:]...)
+			break
+		}
+		switch {
+		case strings.HasPrefix(arg, "--target="):
+			name := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
+			if name != "" {
+				config.RunTargets = append(config.RunTargets, name)
+			}
+		case strings.HasPrefix(arg, "--targets="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			for _, part := range strings.Split(raw, ",") {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					config.RunTargets = append(config.RunTargets, part)
+				}
+			}
+		case strings.HasPrefix(arg, "--group="):
+			g := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
+			if g != "" {
+				config.RunGroups = append(config.RunGroups, g)
+			}
+		case strings.HasPrefix(arg, "--tag="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			kv := strings.SplitN(raw, "=", 2)
+			if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" {
+				config.ArgumentError = fmt.Sprintf("invalid --tag value %q (want key=value)", raw)
+				continue
+			}
+			if config.RunTags == nil {
+				config.RunTags = map[string]string{}
+			}
+			config.RunTags[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+		case arg == "--all-hosts":
+			config.RunAllHosts = true
+		case strings.HasPrefix(arg, "--address="):
+			config.RunAddress = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
+			// Compatibility alias for a single strict target name.
+			name := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
+			if name != "" {
+				config.RunTargets = append(config.RunTargets, name)
+			}
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="), strings.HasPrefix(arg, "--sudo-password-key="):
+			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--force", arg == "-f":
+			config.Force = true
+		case arg == "--no-safety-check":
+			config.SafetyCheck = false
+		case strings.HasPrefix(arg, "--bypass-reason="):
+			config.BypassReason = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--dry-run":
+			config.DryRun = true
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--jsonl":
+			config.JSONLOutput = true
+			config.JSONOutput = true
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
+		case strings.HasPrefix(arg, "--concurrency="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				config.ArgumentError = fmt.Sprintf("invalid --concurrency value %q", raw)
+			} else {
+				config.RunConcurrency = n
+			}
+		case strings.HasPrefix(arg, "--failure-mode="):
+			config.FailureMode = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--intent="):
+			config.RunIntent = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--request-id="):
+			config.RequestID = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--script-file="):
+			config.ScriptFile = strings.SplitN(arg, "=", 2)[1]
+			config.RunActionKind = "script"
+		case arg == "--script-stdin":
+			config.ScriptStdin = true
+			config.RunActionKind = "script"
+		case arg == "--sudo":
+			config.RunUseSudo = true
+		case strings.HasPrefix(arg, "--max-output-bytes="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				config.ArgumentError = fmt.Sprintf("invalid --max-output-bytes value %q", raw)
+			} else {
+				config.MaxOutputBytes = n
+			}
+		case strings.HasPrefix(arg, "--max-payload-bytes="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				config.ArgumentError = fmt.Sprintf("invalid --max-payload-bytes value %q", raw)
+			} else {
+				config.MaxPayloadBytes = n
+			}
+		case strings.HasPrefix(arg, "--host-group="):
+			// Host management convenience while adding hosts is separate; ignore here.
+			config.ArgumentError = fmt.Sprintf("unknown run option %q (did you mean --group=)", arg)
+		case !strings.HasPrefix(arg, "-"):
+			commandParts = append(commandParts, args[i:]...)
+			i = len(args)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown run option %q", arg)
+		}
+	}
+	if len(commandParts) > 0 {
+		config.Command = strings.Join(commandParts, " ")
+		if config.RunActionKind == "" {
+			config.RunActionKind = "command"
 		}
 	}
 }

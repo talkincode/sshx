@@ -134,6 +134,26 @@ type Config struct {
 	ArgumentError      string
 	ReportedErrorKind  string
 	ReportedError      string
+
+	// Run-mode execution contract fields (Mode == "run").
+	RequestID       string
+	RunTargets      []string
+	RunGroups       []string
+	RunTags         map[string]string
+	RunAllHosts     bool
+	RunAddress      string
+	RunActionKind   string
+	RunIntent       string
+	RunUseSudo      bool
+	RunConcurrency  int
+	FailureMode     string
+	BypassReason    string
+	ScriptFile      string
+	ScriptStdin     bool
+	JSONLOutput     bool
+	MaxOutputBytes  int
+	MaxPayloadBytes int
+	SSHPasswordKey  string
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.

@@ -104,9 +104,11 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   usage.go                → PrintUsage() help text (keep in sync with flags)
   dryrun.go               → --dry-run local execution plan preview
   audit.go                → local structured JSONL audit events + redaction
+  run.go                  → sshx run: selectors, scripts, fan-out, versioned results
   skill.go                → install the canonical Agent skill embedded in sshx
   plugin.go               → local plugin create/list/show/validate/test/trust/remove
   inspect.go              → one-shot capability execution + observation caching
+internal/execution/       → versioned request/result model, selectors, executor
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/skillinstall/    → conflict-safe, atomic Agent skill installation
@@ -126,6 +128,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | Mode       | Trigger                                   | Responsibility                          |
 |------------|-------------------------------------------|-----------------------------------------|
 | `ssh`      | default; a command argument is present    | run a remote command (sudo auto-fill)   |
+| `run`      | `sshx run ...`                            | canonical multi-host/script execution   |
 | `sftp`     | `--upload/--download/--list/--mkdir/--rm` | file transfer & remote FS ops           |
 | `password` | `--password-*`                            | manage keyring secrets                  |
 | `host`     | `--host-*`                                | manage `settings.json` host entries     |
