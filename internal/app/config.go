@@ -144,6 +144,8 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.UseKeyAuth = true
 		case arg == "--force", arg == "-f":
 			config.Force = true
+		case strings.HasPrefix(arg, "--bypass-reason="):
+			config.BypassReason = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--accept-unknown-host":
 			config.AcceptUnknownHost = true
 		case arg == "--insecure-hostkey":

@@ -138,6 +138,8 @@ Audit Trail:
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
   --no-safety-check     Disable safety checks completely (not recommended)
+  --bypass-reason=TEXT  Required with --force / --no-safety-check in command
+                        mode and sshx run (recorded in dry-run, result, audit)
 
   Safety checks protect against:
     - Destructive operations (rm -rf /, mkfs, dd)

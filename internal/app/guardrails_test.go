@@ -8,6 +8,9 @@ import (
 func TestApplyCommandModeBypassReason(t *testing.T) {
 	args := []string{"sshx", "-h=host", "--force", "--bypass-reason=maintenance window", "sudo reboot"}
 	config := ParseArgs(args)
+	if config.BypassReason != "maintenance window" {
+		t.Fatalf("ParseArgs BypassReason=%q", config.BypassReason)
+	}
 	applyCommandModeBypassReason(config, args)
 	if config.BypassReason != "maintenance window" {
 		t.Fatalf("BypassReason=%q", config.BypassReason)

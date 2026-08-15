@@ -71,6 +71,7 @@ func TestPrintUsage(t *testing.T) {
 		"--audit-output",
 		"--force",
 		"--no-safety-check",
+		"--bypass-reason",
 		"sshx inspect",
 		"sshx plugin create",
 		"sshx skill install",

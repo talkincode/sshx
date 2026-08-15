@@ -90,8 +90,8 @@ func Run(args []string) (err error) {
 	}
 
 	if config.Mode == "ssh" {
-		if err := requireBypassReason(config); err != nil {
-			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", err)
+		if bypassErr := requireBypassReason(config); bypassErr != nil {
+			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", bypassErr)
 		}
 	}
 
