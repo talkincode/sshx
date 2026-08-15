@@ -1,0 +1,257 @@
+package app
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/talkincode/sshx/internal/sqlsafe"
+)
+
+func TestParseArgs_SQLBasic(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db=app", "--db-user=app",
+		"--db-password-key=app-db", "--json",
+		"UPDATE users SET active=false WHERE id=42",
+	})
+	if config.Mode != "sql" {
+		t.Fatalf("expected mode sql, got %s", config.Mode)
+	}
+	if config.Host != "db1" || config.SQLDatabase != "app" || config.SQLUser != "app" {
+		t.Fatalf("unexpected sql routing: %#v", config)
+	}
+	if config.SQLPasswordKey != "app-db" {
+		t.Fatalf("expected password key app-db, got %s", config.SQLPasswordKey)
+	}
+	if config.SQLHost != "127.0.0.1" {
+		t.Fatalf("expected --db-password-key to default SQLHost to 127.0.0.1, got %q", config.SQLHost)
+	}
+	if config.SQLStatement != "UPDATE users SET active=false WHERE id=42" {
+		t.Fatalf("unexpected statement: %q", config.SQLStatement)
+	}
+	if config.SQLEngine != "postgres" {
+		t.Fatalf("expected default engine postgres, got %s", config.SQLEngine)
+	}
+	if !config.JSONOutput {
+		t.Fatal("json flag was not parsed")
+	}
+}
+
+func TestParseArgs_SQLAfterDoubleDash(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db=app", "--",
+		"SELECT", "count(*)", "FROM", "users",
+	})
+	if config.SQLStatement != "SELECT count(*) FROM users" {
+		t.Fatalf("unexpected statement: %q", config.SQLStatement)
+	}
+}
+
+func TestParseArgs_SQLSafetyFlags(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db=app", "--allow-full-table",
+		"--no-backup", "--force", "--explain", "--row-threshold=50",
+		"--backup-dir=/tmp/bk", "--dry-run",
+		"DELETE FROM users",
+	})
+	if !config.SQLAllowFullTable || !config.SQLNoBackup || !config.Force || !config.SQLExplainOnly {
+		t.Fatalf("safety flags not parsed: %#v", config)
+	}
+	if config.SQLRowThreshold != 50 {
+		t.Fatalf("expected row threshold 50, got %d", config.SQLRowThreshold)
+	}
+	if config.SQLBackupDir != "/tmp/bk" || !config.DryRun {
+		t.Fatalf("backup-dir/dry-run not parsed: %#v", config)
+	}
+}
+
+func TestParseArgs_SQLUnknownOption(t *testing.T) {
+	config := ParseArgs([]string{"sshx", "sql", "-h=db1", "--db=app", "--bogus", "SELECT 1"})
+	if config.ArgumentError == "" {
+		t.Fatal("expected an argument error for unknown option")
+	}
+}
+
+func TestParseArgs_SQLDockerAndCredFrom(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--docker=pg-prod", "--db-cred-from=docker:pg-prod",
+		"SELECT 1",
+	})
+	if config.SQLDockerContainer != "pg-prod" || config.SQLCredFrom != "docker:pg-prod" {
+		t.Fatalf("docker/cred-from not parsed: %#v", config)
+	}
+	if config.SQLCredCacheTTL != DefaultCredCacheTTL {
+		t.Fatalf("expected default cred cache TTL %v, got %v", DefaultCredCacheTTL, config.SQLCredCacheTTL)
+	}
+	if config.SQLHost != "" {
+		t.Fatalf("docker mode must keep the container-local socket, got host %q", config.SQLHost)
+	}
+
+	config = ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db-cred-from=env-file:/opt/.env",
+		"--cred-cache=off", "--cred-refresh", "SELECT 1",
+	})
+	if config.SQLCredCacheTTL != 0 {
+		t.Fatalf("--cred-cache=off must disable caching, got %v", config.SQLCredCacheTTL)
+	}
+	if !config.SQLCredRefresh {
+		t.Fatal("--cred-refresh not parsed")
+	}
+
+	config = ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db-cred-from=docker:pg", "--cred-cache=1h", "SELECT 1",
+	})
+	if config.SQLCredCacheTTL != time.Hour {
+		t.Fatalf("expected 1h TTL, got %v", config.SQLCredCacheTTL)
+	}
+
+	config = ParseArgs([]string{"sshx", "sql", "-h=db1", "--cred-cache=nonsense", "SELECT 1"})
+	if config.ArgumentError == "" {
+		t.Fatal("expected argument error for invalid --cred-cache")
+	}
+}
+
+func TestValidateSQLConfig_CredFrom(t *testing.T) {
+	// --db becomes optional when a credential source can provide it.
+	config := ParseArgs([]string{"sshx", "sql", "-h=db1", "--db-cred-from=docker:pg", "SELECT 1"})
+	if err := validateSQLConfig(config); err != nil {
+		t.Fatalf("cred-from without --db must validate: %v", err)
+	}
+
+	config = ParseArgs([]string{
+		"sshx", "sql", "-h=db1", "--db=app", "--db-cred-from=docker:pg",
+		"--db-password-key=k", "SELECT 1",
+	})
+	if err := validateSQLConfig(config); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutual-exclusion error, got %v", err)
+	}
+
+	config = ParseArgs([]string{"sshx", "sql", "-h=db1", "--db=app", "--db-cred-from=vault:x", "SELECT 1"})
+	if err := validateSQLConfig(config); err == nil {
+		t.Fatal("expected error for unsupported cred source kind")
+	}
+
+	config = ParseArgs([]string{"sshx", "sql", "-h=db1", "--db=app", "--docker=bad name", "SELECT 1"})
+	if err := validateSQLConfig(config); err == nil {
+		t.Fatal("expected error for invalid container name")
+	}
+}
+
+func TestValidateSQLConfig(t *testing.T) {
+	base := func() []string {
+		return []string{"sshx", "sql", "-h=db1", "--db=app", "SELECT 1"}
+	}
+
+	if err := validateSQLConfig(ParseArgs(base())); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"missing host", []string{"sshx", "sql", "--db=app", "SELECT 1"}, "host is required"},
+		{"missing db", []string{"sshx", "sql", "-h=db1", "SELECT 1"}, "--db="},
+		{"missing statement", []string{"sshx", "sql", "-h=db1", "--db=app"}, "SQL statement is required"},
+		{"bad engine", []string{"sshx", "sql", "-h=db1", "--db=app", "--engine=mysql", "SELECT 1"}, "unsupported --engine"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSQLConfig(ParseArgs(tc.args))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestFillDryRunSQL(t *testing.T) {
+	t.Run("dml with where plans row backup", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--db-password-key=k", "--dry-run",
+			"UPDATE users SET active=false WHERE id=42",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil {
+			t.Fatal("expected sql plan")
+		}
+		if plan.SQL.Class != string(sqlsafe.ClassDML) || plan.SQL.Verb != "UPDATE" || plan.SQL.Table != "users" {
+			t.Fatalf("unexpected classification: %#v", plan.SQL)
+		}
+		if plan.SQL.BackupKind != string(sqlsafe.BackupRows) {
+			t.Fatalf("expected row backup, got %s", plan.SQL.BackupKind)
+		}
+		if plan.SQL.ExplainCommand == "" || plan.SQL.ExecuteCommand == "" {
+			t.Fatalf("expected command previews: %#v", plan.SQL)
+		}
+		if strings.Contains(plan.SQL.ExecuteCommand, "PGPASSWORD=") {
+			t.Fatal("password must never appear in the command preview")
+		}
+		if !plan.WouldConnect || !plan.WouldExecute || !plan.WouldMutateRemote || !plan.WouldReadSecret {
+			t.Fatalf("unexpected effects: %#v", plan)
+		}
+	})
+
+	t.Run("full table delete is blocked", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "DELETE FROM users",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SafetyCheck.Status != "blocked" {
+			t.Fatalf("expected blocked safety check, got %#v", plan.SafetyCheck)
+		}
+		if plan.WouldConnect || plan.WouldExecute || plan.WouldMutateRemote {
+			t.Fatalf("blocked plan must not report side effects: %#v", plan)
+		}
+	})
+
+	t.Run("hard blocked statement", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "DROP DATABASE app",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SafetyCheck.Status != "blocked" {
+			t.Fatalf("expected blocked safety check, got %#v", plan.SafetyCheck)
+		}
+	})
+
+	t.Run("docker cred-from plans remote resolution and local cache", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--docker=pg-prod", "--db-cred-from=docker:pg-prod",
+			"--dry-run", "UPDATE users SET x=1 WHERE id=1",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil {
+			t.Fatal("expected sql plan")
+		}
+		if plan.SQL.Docker != "pg-prod" || plan.SQL.CredSource != "docker:pg-prod" {
+			t.Fatalf("docker/cred plan missing: %#v", plan.SQL)
+		}
+		if plan.SQL.CredCache != DefaultCredCacheTTL.String() {
+			t.Fatalf("expected default cache TTL in plan, got %q", plan.SQL.CredCache)
+		}
+		if !strings.Contains(plan.SQL.ExecuteCommand, "docker exec -i -e PGPASSWORD pg-prod psql") {
+			t.Fatalf("execute preview must run inside the container: %s", plan.SQL.ExecuteCommand)
+		}
+		if !plan.WouldReadSecret || !plan.WouldWriteLocalState {
+			t.Fatalf("cred resolution effects missing: %#v", plan)
+		}
+	})
+
+	t.Run("read skips backup and mutation", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "SELECT count(*) FROM users",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil || plan.SQL.Class != string(sqlsafe.ClassRead) {
+			t.Fatalf("expected read classification: %#v", plan.SQL)
+		}
+		if plan.SQL.BackupKind != string(sqlsafe.BackupNone) {
+			t.Fatalf("expected no backup, got %s", plan.SQL.BackupKind)
+		}
+		if plan.WouldMutateRemote || plan.WouldWriteRemoteState {
+			t.Fatalf("read must not mutate: %#v", plan)
+		}
+	})
+}

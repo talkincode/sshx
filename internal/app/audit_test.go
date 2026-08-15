@@ -168,6 +168,30 @@ func TestRedactSensitiveTextCoversQuotedAndUnquotedValues(t *testing.T) {
 	}
 }
 
+func TestSQLAuditUsesRedactedStatementAndDigest(t *testing.T) {
+	statement := "UPDATE users SET password = 'super-secret', pin=1234 WHERE id=42"
+	config := &sshclient.Config{
+		Mode:         "sql",
+		SQLEngine:    "postgres",
+		SQLDatabase:  "app",
+		SQLStatement: statement,
+		AuditEnabled: true,
+	}
+	recorder := newAuditRecorder(config)
+	if recorder == nil {
+		t.Fatal("expected audit recorder")
+	}
+	recorder.refresh(config)
+	if strings.Contains(recorder.event.SQLStatement, "super-secret") ||
+		strings.Contains(recorder.event.SQLStatement, "1234") {
+		t.Fatalf("SQL audit statement leaked literals: %q", recorder.event.SQLStatement)
+	}
+	if recorder.event.SQLStatementHash != sqlStatementDigest(statement) ||
+		len(recorder.event.SQLStatementHash) != 64 {
+		t.Fatalf("unexpected statement digest %q", recorder.event.SQLStatementHash)
+	}
+}
+
 func TestRun_DryRunDoesNotWriteAuditEvent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	auditDir := filepath.Join(t.TempDir(), "audit")

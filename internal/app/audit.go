@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
+	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -111,6 +113,27 @@ type auditEvent struct {
 	TargetIndex    *int   `json:"target_index,omitempty"`
 	Completion     string `json:"completion,omitempty"`
 	Phase          string `json:"phase,omitempty"`
+
+	// Guarded SQL execution fields (Mode == "sql", additive). Literal values
+	// and comments are removed; the digest correlates the exact input without
+	// persisting credentials or personal data embedded in SQL.
+	SQLEngine        string `json:"sql_engine,omitempty"`
+	SQLDatabase      string `json:"sql_database,omitempty"`
+	SQLStatement     string `json:"sql_statement,omitempty"`
+	SQLStatementHash string `json:"sql_statement_sha256,omitempty"`
+	SQLClass         string `json:"sql_class,omitempty"`
+	SQLVerb          string `json:"sql_verb,omitempty"`
+	SQLTable         string `json:"sql_table,omitempty"`
+	SQLHasWhere      bool   `json:"sql_has_where,omitempty"`
+	SQLEstimatedRows *int64 `json:"sql_estimated_rows,omitempty"`
+	SQLAffectedRows  *int64 `json:"sql_affected_rows,omitempty"`
+	SQLBackupKind    string `json:"sql_backup_kind,omitempty"`
+	SQLBackupPath    string `json:"sql_backup_path,omitempty"`
+	SQLBackupRows    *int64 `json:"sql_backup_rows,omitempty"`
+	SQLPhase         string `json:"sql_phase,omitempty"`
+	SQLDocker        string `json:"sql_docker,omitempty"`
+	SQLCredSource    string `json:"sql_cred_source,omitempty"`
+	SQLCredCache     string `json:"sql_cred_cache,omitempty"`
 }
 
 type auditRecorder struct {
@@ -206,6 +229,58 @@ func (r *auditRecorder) recordFailure(config *sshclient.Config, authMethod sshcl
 	r.completed = true
 }
 
+// sqlAuditMeta captures the guarded-SQL pipeline facts for one invocation.
+type sqlAuditMeta struct {
+	Class         string
+	Verb          string
+	Table         string
+	HasWhere      bool
+	Phase         string
+	Mutates       bool
+	EstimatedRows *int64
+	AffectedRows  *int64
+	BackupKind    string
+	BackupPath    string
+	BackupRows    *int64
+	CredSource    string
+	CredCache     string
+}
+
+// recordSQLOutcome finalizes the audit event for one sql-mode invocation.
+func (r *auditRecorder) recordSQLOutcome(config *sshclient.Config, authMethod sshclient.AuthMethod, meta sqlAuditMeta, exitCode int, errKind string, execErr error) {
+	if r == nil {
+		return
+	}
+	r.refresh(config)
+	r.event.AuthMethod = string(authMethod)
+	r.event.SQLClass = meta.Class
+	r.event.SQLVerb = meta.Verb
+	r.event.SQLTable = meta.Table
+	r.event.SQLHasWhere = meta.HasWhere
+	r.event.SQLPhase = meta.Phase
+	r.event.SQLEstimatedRows = meta.EstimatedRows
+	r.event.SQLAffectedRows = meta.AffectedRows
+	r.event.SQLBackupKind = meta.BackupKind
+	r.event.SQLBackupPath = meta.BackupPath
+	r.event.SQLBackupRows = meta.BackupRows
+	r.event.SQLDocker = config.SQLDockerContainer
+	r.event.SQLCredSource = meta.CredSource
+	r.event.SQLCredCache = meta.CredCache
+	r.event.WouldMutateRemote = meta.Mutates
+	r.event.DurationMs = time.Since(r.started).Milliseconds()
+	r.event.ExitCode = intPtr(exitCode)
+	if execErr != nil {
+		r.event.Outcome = auditStatus{
+			Status:    "failure",
+			ErrorKind: errKind,
+			Message:   redactError(execErr),
+		}
+	} else {
+		r.event.Outcome = auditStatus{Status: "success"}
+	}
+	r.completed = true
+}
+
 func (r *auditRecorder) finish(config *sshclient.Config, err error) error {
 	if r == nil {
 		return nil
@@ -259,9 +334,16 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 		r.event.HostResolvedBy = "settings"
 	}
 	r.event.Command = redactSensitiveText(config.Command)
+	if config.Mode == "sql" {
+		r.event.SQLEngine = config.SQLEngine
+		r.event.SQLDatabase = config.SQLDatabase
+		r.event.SQLStatement = sqlsafe.RedactForAudit(config.SQLStatement)
+		r.event.SQLStatementHash = sqlStatementDigest(config.SQLStatement)
+	}
 	if config.Mode == "plugin" {
 		r.event.PluginID = config.PluginID
 	}
+
 	if config.Mode == "inspect" {
 		r.event.PluginID = config.InspectCapability
 		r.event.CacheMode = config.InspectCacheMode
@@ -311,6 +393,11 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	if r.event.DurationMs == 0 {
 		r.event.DurationMs = time.Since(r.started).Milliseconds()
 	}
+}
+
+func sqlStatementDigest(statement string) string {
+	sum := sha256.Sum256([]byte(statement))
+	return fmt.Sprintf("%x", sum)
 }
 
 func writeAuditEvent(config *sshclient.Config, event auditEvent, now time.Time) error {
@@ -382,6 +469,8 @@ func auditAction(config *sshclient.Config) string {
 		return config.SkillAction
 	case "inspect":
 		return "inspect"
+	case "sql":
+		return "sql"
 	default:
 		return ""
 	}
@@ -408,6 +497,8 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 			return privilegeErr == nil && useSudo && config.SudoKey != ""
 		}
 		return config.InspectUseSudo && config.SudoKey != ""
+	case "sql":
+		return config.SQLPasswordKey != "" || config.SQLCredFrom != ""
 	default:
 		return false
 	}
@@ -440,6 +531,10 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 		return config.HostAction == "test" || config.HostAction == "test-all"
 	case "inspect":
 		return config.InspectCacheMode == "remote-prefer"
+	case "sql":
+		// Conservative: refined by the sql handler once the statement class
+		// is known (reads do not mutate).
+		return true
 	default:
 		return false
 	}

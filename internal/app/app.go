@@ -88,6 +88,11 @@ func Run(args []string) (err error) {
 		return emitDryRunPlan(config)
 	}
 
+	// Guarded SQL execution pipeline (owns its own SSH connection).
+	if config.Mode == "sql" {
+		return HandleSQL(config, audit)
+	}
+
 	// Handle password management mode
 	if config.Mode == "password" {
 		if pwdErr := HandlePasswordManagement(config); pwdErr != nil {

@@ -1,6 +1,6 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, and store SSH/sudo passwords in the OS keyring. Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, or keyring-backed secrets. Prefer `--json` for programmatic/agent use.
+description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL statements through the remote psql client (with EXPLAIN gates, automatic backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
 ---
 
 # sshx
@@ -19,6 +19,8 @@ its work, and exits — there is no daemon, shell, tunneling, or port forwarding
 - Upload/download a file or list/make/remove remote paths over SFTP.
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
+- Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized)
+  with classification, EXPLAIN gates, automatic backups, and a full audit trail.
 - Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
 
 ## Inspect before repeating discovery commands
@@ -141,7 +143,9 @@ In `--json` mode an sshx-level failure has `exit_code: -1` and a non-empty
 `error_kind`, so it is always distinguishable from a remote `exit 255`.
 
 `error_kind` values: `timeout`, `auth`, `host_key`, `connect`, `blocked`,
-`exit_missing`, `config`, `error`.
+`exit_missing`, `config`, `error`. SQL mode adds `explain_failed`,
+`impact_check_failed`, `remote_exit`, and
+`cred_source_failed`.
 
 ## Command execution
 
@@ -217,6 +221,83 @@ sshx -h=host --no-safety-check "<cmd>"    # disables checks entirely (not recomm
 ```
 
 This is a guardrail against mistakes, not a security sandbox.
+
+## Guarded SQL execution (PostgreSQL)
+
+`sshx sql` runs **exactly one** SQL statement through the `psql`
+clients already on the remote host (or inside a container). sshx embeds no
+database driver and opens no tunnel. The pipeline is fail-closed:
+classify locally → policy gates → `EXPLAIN (FORMAT JSON)` for every DML →
+automatic backup → execute → structured result + audit event.
+
+```bash
+# Reads run directly; no EXPLAIN, no backup.
+sshx sql -h=db1 --db=app --json "SELECT count(*) FROM users"
+
+# DML with WHERE: rows are snapshotted to CSV on the remote host first.
+sshx sql -h=db1 --db=app --db-user=app --db-password-key=app-db --json \
+    "UPDATE users SET active=false WHERE id=42"
+
+# Preview impact without executing.
+sshx sql -h=db1 --db=app --explain "DELETE FROM sessions WHERE expires_at < now()"
+
+# Local plan preview: classification, gates, backup plan, commands. No connection.
+sshx sql -h=db1 --db=app --dry-run --json "UPDATE users SET x=1 WHERE id=5"
+```
+
+Safety contract (what an agent must expect):
+
+- Multi-statement input, psql backslash meta-commands, data-modifying CTE
+  bodies,   `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`, dblink delegated execution, unknown statement heads,
+  `DROP DATABASE/SCHEMA`, `ALTER SYSTEM`, `COPY`, `DO`, and transaction control
+  are always blocked (`error_kind: "blocked"`). Accepted reads execute inside
+  a PostgreSQL read-only transaction so side-effecting functions fail.
+- `UPDATE`/`DELETE` without a top-level `WHERE` requires `--allow-full-table`;
+  destructive DDL requires `--force --no-backup`; any DML `--no-backup`
+  requires `--force`.
+- Backups are automatic for DML: small change sets get a row-level CSV
+  snapshot; missing/complex WHERE, UPSERT, or an EXPLAIN estimate above
+  `--row-threshold` (default 1000) get a full-table CSV snapshot. The snapshot
+  and mutation run under one database transaction and table write lock, so no
+  row can enter the affected set between backup and execution. Backups land
+  on the remote host under `~/.sshx/sql-backups/` (`--backup-dir=` to override)
+  with owner-only permissions and the JSON result carries a `restore_hint`.
+  A catalog preflight blocks automatic execution when triggers, rewrite rules,
+  partitions, or cascading referential actions can affect related tables.
+  Continue only after an independent backup with `--force --no-backup`. UPSERT
+  (`INSERT ... ON CONFLICT DO UPDATE`) is treated as an overwrite and backed up.
+- Audits and JSON results contain a literal-redacted statement plus its exact
+  SHA-256 digest, classification, backup, and outcome. The DB password is
+  delivered via stdin/env passthrough — never argv.
+- JSON result fields to branch on: `success`, `error_kind`, `class`, `verb`,
+  `statement_sha256`, `estimated_rows`, `affected_rows`, `backup.kind`,
+  `backup.path`.
+
+### Dockerized production databases
+
+When PostgreSQL runs in a container and its credentials live in the production
+environment (container env or a deploy `.env`) rather than any local keyring:
+
+```bash
+# psql runs inside the container; credentials are read from the container env
+# (POSTGRES_*/PG*/DB_*/DATABASE_URL) and cached locally for 15 minutes.
+sshx sql -h=prod --docker=pg-prod --db-cred-from=docker:pg-prod --json \
+    "UPDATE users SET active=false WHERE id=42"
+
+# Credentials from a deployment env file, cached for 1 hour.
+sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
+    --cred-cache=1h --json "SELECT count(*) FROM orders"
+```
+
+- `--docker=<container>` executes psql via `docker exec -i` and defaults
+  to the container-local socket; backups still stream to the **host**.
+- `--db-cred-from=docker:<container>` or `env-file:<path>` resolves the DB user,
+  password, and database name remotely; `--db` becomes optional when the source
+  provides it. Mutually exclusive with `--db-password-key`.
+- Resolved secrets are cached only in the OS keyring with a TTL
+  (default 15m; `--cred-cache=off|<duration>`, `--cred-refresh` to force
+  re-resolution). Expired entries are actively deleted. The JSON result reports
+  `cred_source` and `cred_cache` (`hit`/`stored`/`resolved`).
 
 ## SFTP file operations
 
@@ -310,3 +391,7 @@ sshx --help      # full reference
    for ad-hoc IPs pass `-pk=<key>`. Use `--host-list` to see each host's key.
 4. Trust the safety check — only `--force` a blocked command when you are certain.
 5. Treat `exit_code` 1..254 as the remote program's status; `255` / `-1` is an sshx error.
+6. For database work use `sshx sql`, never raw `psql` strings through `sshx run`:
+   it classifies the statement, gates DML behind EXPLAIN, backs up affected data,
+   and audits everything. Preview with `--dry-run --json` first; add
+   `--docker=<container>` / `--db-cred-from=` for Dockerized production DBs.

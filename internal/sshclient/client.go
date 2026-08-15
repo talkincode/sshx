@@ -154,6 +154,44 @@ type Config struct {
 	MaxOutputBytes  int
 	MaxPayloadBytes int
 	SSHPasswordKey  string
+
+	// Guarded SQL execution fields (Mode == "sql").
+	SQLStatement string
+	// SQLEngine names the database engine; only "postgres" is implemented.
+	SQLEngine   string
+	SQLDatabase string
+	// SQLUser is the database role (-U), distinct from the SSH user.
+	SQLUser string
+	// SQLHost/SQLPort locate the database as seen from the remote host.
+	// SQLHost defaults to the local socket, or 127.0.0.1 when a password key
+	// is used (password auth implies TCP).
+	SQLHost string
+	SQLPort string
+	// SQLPasswordKey names the keyring entry holding the database password.
+	// The secret is delivered on the remote command's stdin, never in argv.
+	SQLPasswordKey string
+	// SQLRowThreshold switches from a row-level CSV snapshot to a full table
+	// dump when the EXPLAIN row estimate exceeds it (0 = package default).
+	SQLRowThreshold int64
+	// SQLAllowFullTable permits UPDATE/DELETE without a top-level WHERE.
+	SQLAllowFullTable bool
+	// SQLNoBackup skips pre-change backups; requires Force.
+	SQLNoBackup bool
+	// SQLExplainOnly stops after the remote EXPLAIN gate.
+	SQLExplainOnly bool
+	// SQLBackupDir overrides the remote backup directory.
+	SQLBackupDir string
+	// SQLDockerContainer runs psql inside this container via
+	// `docker exec -i` for databases deployed with Docker.
+	SQLDockerContainer string
+	// SQLCredFrom resolves database credentials on the remote host instead of
+	// the local keyring: "docker:<container>" or "env-file:<path>".
+	SQLCredFrom string
+	// SQLCredCacheTTL keeps remotely resolved credentials reusable in the OS
+	// keyring for this duration (0 = caching disabled).
+	SQLCredCacheTTL time.Duration
+	// SQLCredRefresh forces re-resolution, replacing any cached entry.
+	SQLCredRefresh bool
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.
@@ -667,6 +705,58 @@ func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) 
 	}
 	result.ExitCode = -1
 	return result, fmt.Errorf("collector failed: %w", runErr)
+}
+
+// RunCommandWithInput runs a caller-assembled command on a fresh SSH session
+// with the given bytes streamed to its stdin, capturing separated output. It
+// is used by the sql mode, whose commands are built from validated templates
+// and may carry a leading secret line on stdin (never in argv).
+func (c *SSHClient) RunCommandWithInput(command string, stdin []byte) (ExecResult, error) {
+	var result ExecResult
+	if strings.TrimSpace(command) == "" {
+		result.ExitCode = -1
+		return result, fmt.Errorf("command is empty")
+	}
+
+	session, err := c.client.NewSession()
+	if err != nil {
+		result.ExitCode = -1
+		return result, fmt.Errorf("failed to create session: %w", err)
+	}
+	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
+
+	session.Stdin = bytes.NewReader(stdin)
+	stdoutBuf := newCappedBuffer(MaxCaptureBytes)
+	stderrBuf := newCappedBuffer(MaxCaptureBytes)
+	session.Stdout = stdoutBuf
+	session.Stderr = stderrBuf
+
+	runErr := runSession(session, command, c.config.Timeout)
+	result.Stdout = stdoutBuf.String()
+	result.Stderr = stderrBuf.String()
+	result.StdoutTruncated = stdoutBuf.Truncated()
+	result.StderrTruncated = stderrBuf.Truncated()
+
+	switch {
+	case runErr == nil:
+		result.ExitCode = 0
+		return result, nil
+	case errors.Is(runErr, ErrCommandTimeout):
+		result.ExitCode = -1
+		return result, runErr
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(runErr, &exitErr) {
+		result.ExitCode = exitErr.ExitStatus()
+		return result, nil
+	}
+	var missingErr *ssh.ExitMissingError
+	if errors.As(runErr, &missingErr) {
+		result.ExitCode = -1
+		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
+	}
+	result.ExitCode = -1
+	return result, fmt.Errorf("command failed: %w", runErr)
 }
 
 // runSession runs command on session, optionally bounded by timeout. When the

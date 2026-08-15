@@ -1,6 +1,6 @@
 module github.com/talkincode/sshx
 
-go 1.25.10
+go 1.25.13
 
 require (
 	github.com/pkg/sftp v1.13.10

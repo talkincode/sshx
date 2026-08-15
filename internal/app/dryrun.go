@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
+	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -76,7 +77,32 @@ type dryRunPlan struct {
 
 	Notes []string `json:"notes,omitempty"`
 
+	// SQL is the guarded-SQL local plan (Mode == "sql").
+	SQL *sqlDryRunPlan `json:"sql,omitempty"`
+
 	hostTestReadsSecret bool
+}
+
+// sqlDryRunPlan is the local (connection-free) plan for one sql invocation.
+// The backup decision shown here uses no EXPLAIN estimate; a row-level backup
+// may still upgrade to a table dump at execution time.
+type sqlDryRunPlan struct {
+	Engine         string       `json:"engine"`
+	Database       string       `json:"database"`
+	Statement      string       `json:"statement"`
+	StatementHash  string       `json:"statement_sha256"`
+	Class          string       `json:"class,omitempty"`
+	Verb           string       `json:"verb,omitempty"`
+	Table          string       `json:"table,omitempty"`
+	HasWhere       bool         `json:"has_where"`
+	Docker         string       `json:"docker,omitempty"`
+	CredSource     string       `json:"cred_source,omitempty"`
+	CredCache      string       `json:"cred_cache,omitempty"`
+	PolicyCheck    dryRunStatus `json:"policy_check"`
+	BackupKind     string       `json:"backup_kind,omitempty"`
+	BackupReason   string       `json:"backup_reason,omitempty"`
+	ExplainCommand string       `json:"explain_command,omitempty"`
+	ExecuteCommand string       `json:"execute_command,omitempty"`
 }
 
 func emitDryRunPlan(config *sshclient.Config) error {
@@ -118,6 +144,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	fillDryRunKeyDefault(config, &plan)
 	fillDryRunSudo(config, &plan)
 	fillDryRunValidation(config, &plan)
+	fillDryRunSQL(config, &plan)
 	fillDryRunEffects(config, &plan)
 
 	return plan
@@ -162,6 +189,8 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Action = "inspect"
 		plan.PluginID = config.InspectCapability
 		plan.CacheMode = config.InspectCacheMode
+	case "sql":
+		plan.Action = "sql"
 	}
 }
 
@@ -175,7 +204,7 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.HostInput = config.Host
 	}
 
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" {
 		resolveDryRunSSHHost(config, plan)
 		return
 	}
@@ -472,12 +501,124 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		plan.WouldReadSecret = canProceed && plan.UsesSudo && config.SudoKey != ""
 		plan.WouldWriteRemoteState = canProceed && config.InspectCacheMode == "remote-prefer"
 		plan.WouldMutateRemote = plan.WouldWriteRemoteState
+	case "sql":
+		plan.WouldConnect = canProceed
+		plan.WouldExecute = canProceed && !config.SQLExplainOnly
+		plan.WouldReadSecret = canProceed && (config.SQLPasswordKey != "" || config.SQLCredFrom != "")
+		plan.WouldWriteLocalState = canProceed && config.SQLCredFrom != "" && config.SQLCredCacheTTL > 0
+		mutates := plan.SQL != nil && plan.SQL.Class != "" && plan.SQL.Class != string(sqlsafe.ClassRead)
+		plan.WouldMutateRemote = plan.WouldExecute && mutates
+		plan.WouldWriteRemoteState = plan.WouldExecute && plan.SQL != nil && plan.SQL.BackupKind != "" && plan.SQL.BackupKind != string(sqlsafe.BackupNone)
 	}
 	plan.MayMutateKnownHosts = plan.WouldConnect && config.AcceptUnknownHost
 }
 
+// fillDryRunSQL builds the local guarded-SQL plan: classification, policy
+// gates, and the planned pipeline commands — all without connecting. The
+// backup decision is previewed without an EXPLAIN row estimate.
+func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
+	if config.Mode != "sql" {
+		return
+	}
+	if err := validateSQLConfig(config); err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+
+	sqlPlan := &sqlDryRunPlan{
+		Engine:        config.SQLEngine,
+		Database:      config.SQLDatabase,
+		Statement:     sqlsafe.RedactForAudit(config.SQLStatement),
+		StatementHash: sqlStatementDigest(config.SQLStatement),
+		Docker:        config.SQLDockerContainer,
+	}
+	if config.SQLCredFrom != "" {
+		sqlPlan.CredSource = config.SQLCredFrom
+		if config.SQLCredCacheTTL > 0 {
+			sqlPlan.CredCache = config.SQLCredCacheTTL.String()
+		} else {
+			sqlPlan.CredCache = "off"
+		}
+		if sqlPlan.Database == "" {
+			sqlPlan.Database = "(from credential source)"
+		}
+	}
+	plan.SQL = sqlPlan
+	plan.Command = sqlPlan.Statement
+
+	cls, err := sqlsafe.Classify(config.SQLStatement)
+	if err != nil {
+		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
+		sqlPlan.PolicyCheck = plan.SafetyCheck
+		plan.Valid = false
+		return
+	}
+	sqlPlan.Class = string(cls.Class)
+	sqlPlan.Verb = cls.Verb
+	sqlPlan.Table = cls.Table
+	sqlPlan.HasWhere = cls.HasWhere
+
+	opts := sqlOptions(config)
+	if perr := sqlsafe.CheckPolicy(cls, opts); perr != nil {
+		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: perr.Error()}
+		sqlPlan.PolicyCheck = plan.SafetyCheck
+		plan.Valid = false
+		return
+	}
+	plan.SafetyCheck = dryRunStatus{Status: "passed"}
+	sqlPlan.PolicyCheck = plan.SafetyCheck
+
+	backup, err := sqlsafe.DecideBackup(cls, -1, opts)
+	if err != nil {
+		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
+		sqlPlan.PolicyCheck = plan.SafetyCheck
+		plan.Valid = false
+		return
+	}
+	sqlPlan.BackupKind = string(backup.Kind)
+	sqlPlan.BackupReason = backup.Reason
+	if backup.Kind == sqlsafe.BackupRows {
+		sqlPlan.BackupReason += " (may upgrade to a full-table CSV snapshot if the EXPLAIN estimate exceeds the row threshold)"
+	}
+	if cls.Class == sqlsafe.ClassDML && !opts.NoBackup {
+		sqlPlan.BackupReason += " (runtime catalog preflight blocks triggers, rewrite rules, partitions, and cascading referential actions)"
+	}
+
+	conn := sqlsafe.Conn{
+		Database:      firstNonEmpty(config.SQLDatabase, "<db>"),
+		User:          config.SQLUser,
+		Host:          config.SQLHost,
+		Port:          config.SQLPort,
+		PasswordStdin: config.SQLPasswordKey != "" || config.SQLCredFrom != "",
+		Docker:        config.SQLDockerContainer,
+	}
+	if cls.Class == sqlsafe.ClassDML || config.SQLExplainOnly {
+		sqlPlan.ExplainCommand = conn.ExplainCommand(cls.Statement).Command
+	}
+	if !config.SQLExplainOnly {
+		switch {
+		case cls.Class == sqlsafe.ClassRead:
+			sqlPlan.ExecuteCommand = conn.ExecuteReadCommand(cls.Statement).Command
+		case backup.Kind != sqlsafe.BackupNone:
+			transactional, buildErr := conn.ExecuteWithBackupCommand(
+				cls.Statement, cls.Table, cls.WhereClause, "<backup.csv>", backup.Kind,
+			)
+			if buildErr != nil {
+				plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: buildErr.Error()}
+				sqlPlan.PolicyCheck = plan.SafetyCheck
+				plan.Valid = false
+				return
+			}
+			sqlPlan.ExecuteCommand = transactional.Command
+		default:
+			sqlPlan.ExecuteCommand = conn.ExecuteCommand(cls.Statement).Command
+		}
+	}
+}
+
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")
@@ -510,6 +651,29 @@ func printDryRunPlan(plan dryRunPlan) {
 	}
 	if plan.Command != "" {
 		fmt.Printf("Command: %s\n", plan.Command)
+	}
+	if plan.SQL != nil {
+		fmt.Printf("SQL: engine=%s db=%s class=%s verb=%s", plan.SQL.Engine, plan.SQL.Database, firstNonEmpty(plan.SQL.Class, "-"), firstNonEmpty(plan.SQL.Verb, "-"))
+		if plan.SQL.Table != "" {
+			fmt.Printf(" table=%s", plan.SQL.Table)
+		}
+		fmt.Printf(" where=%t\n", plan.SQL.HasWhere)
+		if plan.SQL.Docker != "" {
+			fmt.Printf("SQL docker: clients run inside container %s\n", plan.SQL.Docker)
+		}
+		if plan.SQL.CredSource != "" {
+			fmt.Printf("SQL credentials: resolved remotely from %s (cache: %s)\n", plan.SQL.CredSource, plan.SQL.CredCache)
+		}
+		fmt.Printf("SQL policy: %s\n", statusText(plan.SQL.PolicyCheck))
+		if plan.SQL.BackupKind != "" {
+			fmt.Printf("SQL backup: %s (%s)\n", plan.SQL.BackupKind, plan.SQL.BackupReason)
+		}
+		if plan.SQL.ExplainCommand != "" {
+			fmt.Printf("SQL explain command: %s\n", plan.SQL.ExplainCommand)
+		}
+		if plan.SQL.ExecuteCommand != "" {
+			fmt.Printf("SQL execute command: %s\n", plan.SQL.ExecuteCommand)
+		}
 	}
 	if plan.SftpAction != "" {
 		fmt.Printf("SFTP: %s local=%q remote=%q\n", plan.SftpAction, plan.LocalPath, plan.RemotePath)
