@@ -115,7 +115,11 @@ Agent / 自动化 / 人类运维者
 
 - **通道信任与动作护栏**
 
-  默认通过 `known_hosts` 严格校验 host key；未知主机接受和不安全校验必须显式开启。明显破坏性命令默认被拦截，`--force` / `--no-safety-check` 是显式绕过。证据：`internal/sshclient/client.go`、`internal/sshclient/validate.go`、`internal/sshclient/client_test.go`、`internal/sshclient/validate_test.go`。
+  默认通过 `known_hosts` 严格校验 host key；未知主机接受和不安全校验必须显式开启。明显破坏性命令默认被拦截，`--force` / `--no-safety-check` 是显式绕过。命令位上的 `psql`/`pgcli`/`sqlite3` 被导向 `sshx sql`。证据：`internal/sshclient/client.go`、`internal/sshclient/validate.go`、`internal/sshclient/client_test.go`、`internal/sshclient/validate_test.go`。
+
+- **受控 SQL 执行**
+
+  `sshx sql` 通过远端已有的 `psql` 或 `sqlite3` 执行恰好一条语句：本地 fail-closed 分类、策略门闩、变更前备份、结构化 JSON 与审计。PostgreSQL 另有 EXPLAIN 行数估计、表锁事务备份和容器凭据发现；SQLite 以绝对文件路径为身份，只读走 `file:?mode=ro`，变更在 `BEGIN IMMEDIATE` 下做表 CSV 或整文件 `.backup`。证据：`internal/app/sql.go`、`internal/sqlsafe/`、`tests/e2e/sql_sqlite_e2e_test.go`。
 
 - **本地结构化审计**
 
@@ -240,5 +244,6 @@ Agent / 自动化 / 人类运维者
 | 远端观察缓存 | 高 | 是 | 是，远端 JSON | ✅ 冷写入/热复用/并发原子替换 | ✅ TTL/boot ID、格式、大小、属主、权限、symlink、只读端 | ✅ 可写/只读 SFTP | ✅ 失败写入保留原有效快照 | `tests/e2e/inspect_plugin_e2e_test.go` |
 | 有界多主机执行 | 高 | 是 | 可能，多主机 | ✅ `sshx run` 组/标签选择 + concurrency 1/4/8/32 | ✅ fail_fast、部分失败、零匹配 | ✅ operator 密码角色 | ✅ 每个选中目标都有终态事件 | `tests/e2e/run_e2e_test.go`、`internal/execution/*_test.go` |
 | 可解释执行治理 | 高 | 是 | 可能 | ✅ run 契约 dry-run/digest/intent/bypass_reason | ✅ blocked、uncertain completion、typed error.kind | ✅ SSH login vs sudo key 分离 | ✅ completion 指导 verify_first/unsafe | `tests/e2e/run_e2e_test.go`、`internal/app/run.go`、`internal/execution` |
+| 受控 SQL 执行（PostgreSQL / SQLite） | 高 | 是 | 是，远端库 | ✅ sqlite 只读查询与带备份 UPDATE | ✅ 直连客户端阻断、ATTACH 分类拒绝、缺路径 | ✅ operator 密码角色 | ✅ UPDATE 前 CSV 可还原旧值 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
 
 当前已达到已实现一级能力的覆盖底线。表中的剩余红项属于尚未实现的方向能力，而不是用组件测试掩盖的既有质量债。未来任何一级能力不得只以参数解析或组件测试作为完成依据；必须沿用编译后二进制边界补充 E2E，并同步更新本矩阵。

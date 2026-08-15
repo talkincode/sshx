@@ -29,11 +29,30 @@ func TestParseArgs_SQLBasic(t *testing.T) {
 	if config.SQLStatement != "UPDATE users SET active=false WHERE id=42" {
 		t.Fatalf("unexpected statement: %q", config.SQLStatement)
 	}
-	if config.SQLEngine != "postgres" {
+	if config.SQLEngine != sqlsafe.EnginePostgres {
 		t.Fatalf("expected default engine postgres, got %s", config.SQLEngine)
 	}
 	if !config.JSONOutput {
 		t.Fatal("json flag was not parsed")
+	}
+}
+
+func TestParseArgs_SQLSQLite(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=app1", "--engine=SQLite3", "--db-file=/var/lib/app/app.db",
+		"--json", "SELECT 1",
+	})
+	if config.SQLEngine != sqlsafe.EngineSQLite {
+		t.Fatalf("expected sqlite engine, got %s", config.SQLEngine)
+	}
+	if config.SQLFile != "/var/lib/app/app.db" {
+		t.Fatalf("expected db-file path, got %s", config.SQLFile)
+	}
+	if err := validateSQLConfig(config); err != nil {
+		t.Fatalf("sqlite config rejected: %v", err)
+	}
+	if config.SQLDatabase != "/var/lib/app/app.db" {
+		t.Fatalf("expected path copied into database field, got %s", config.SQLDatabase)
 	}
 }
 
@@ -155,6 +174,9 @@ func TestValidateSQLConfig(t *testing.T) {
 		{"missing db", []string{"sshx", "sql", "-h=db1", "SELECT 1"}, "--db="},
 		{"missing statement", []string{"sshx", "sql", "-h=db1", "--db=app"}, "SQL statement is required"},
 		{"bad engine", []string{"sshx", "sql", "-h=db1", "--db=app", "--engine=mysql", "SELECT 1"}, "unsupported --engine"},
+		{"sqlite missing path", []string{"sshx", "sql", "-h=db1", "--engine=sqlite", "SELECT 1"}, "absolute-path"},
+		{"sqlite postgres flags", []string{"sshx", "sql", "-h=db1", "--engine=sqlite", "--db-file=/tmp/app.db", "--db-user=app", "SELECT 1"}, "does not use"},
+		{"db-file on postgres", []string{"sshx", "sql", "-h=db1", "--db=app", "--db-file=/tmp/app.db", "SELECT 1"}, "--db-file"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,6 +261,44 @@ func TestFillDryRunSQL(t *testing.T) {
 		}
 	})
 
+	t.Run("sqlite dml plans table backup", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/var/lib/app/app.db",
+			"--dry-run", "UPDATE users SET active=0 WHERE id=42",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil {
+			t.Fatal("expected sql plan")
+		}
+		if plan.SQL.Engine != sqlsafe.EngineSQLite || plan.SQL.Database != "/var/lib/app/app.db" {
+			t.Fatalf("unexpected sqlite identity: %#v", plan.SQL)
+		}
+		if plan.SQL.Class != string(sqlsafe.ClassDML) || plan.SQL.BackupKind != string(sqlsafe.BackupTable) {
+			t.Fatalf("unexpected sqlite plan: %#v", plan.SQL)
+		}
+		if !strings.Contains(plan.SQL.ExecuteCommand, "sqlite3 -batch -bail /var/lib/app/app.db") {
+			t.Fatalf("execute preview must use sqlite3: %s", plan.SQL.ExecuteCommand)
+		}
+		if strings.Contains(plan.SQL.ExecuteCommand, "psql") {
+			t.Fatal("sqlite plan must not assemble psql")
+		}
+		if !plan.WouldConnect || !plan.WouldMutateRemote || plan.WouldReadSecret {
+			t.Fatalf("unexpected sqlite effects: %#v", plan)
+		}
+	})
+	t.Run("sqlite attach is blocked", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/var/lib/app/app.db",
+			"--dry-run", "ATTACH DATABASE '/tmp/x.db' AS extra",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SafetyCheck.Status != "blocked" {
+			t.Fatalf("expected blocked safety check, got %#v", plan.SafetyCheck)
+		}
+		if plan.WouldConnect || plan.WouldExecute {
+			t.Fatalf("blocked sqlite plan must not connect: %#v", plan)
+		}
+	})
 	t.Run("read skips backup and mutation", func(t *testing.T) {
 		config := ParseArgs([]string{
 			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "SELECT count(*) FROM users",

@@ -31,7 +31,7 @@ Usage:
   sshx plugin create <id> [options]               # Scaffold a local inspection plugin
   sshx plugin list [--json]                       # List built-in and local capabilities
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
-  sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql
+  sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
 
 SSH Options:
   -h, --host=HOST          Remote host address (required in compatibility mode)
@@ -219,22 +219,28 @@ Inspection Capabilities:
   target. With remote-prefer caching, only redacted JSON is stored below the
   remote user's ~/.sshx/observations/v1 directory.
 
-Guarded SQL Execution (PostgreSQL):
+Guarded SQL Execution:
   sshx sql -h=<host> --db=<name> [options] "<single SQL statement>"
+  sshx sql -h=<host> --engine=sqlite --db-file=/abs/path.db [options] "SQL"
   sshx sql -h=<host> --db=<name> [options] -- <SQL words...>
 
-  Statements run through the psql client already present on the remote host;
-  sshx embeds no database driver and opens no tunnel. Exactly one statement
-  per invocation. Unknown or dangerous statement heads (DROP DATABASE/SCHEMA,
-  ALTER SYSTEM, COPY, DO, transaction control, multi-statement input) are
-  psql meta-commands, EXPLAIN ANALYZE, data-modifying CTE bodies, SELECT INTO,
-  CALL, dblink delegated execution, and other dangerous or unanalyzable forms
-  are blocked fail-closed. Read queries run in a read-only transaction. Every invocation is audited
+  Statements run through the database client already present on the remote
+  host (psql or sqlite3). sshx embeds no database driver and opens no tunnel.
+  Exactly one statement per invocation. Unknown or dangerous statement heads
+  (DROP DATABASE/SCHEMA, ALTER SYSTEM, COPY, DO, ATTACH, sqlite3 dot-commands,
+  transaction control, multi-statement input), psql meta-commands,
+  EXPLAIN ANALYZE, data-modifying CTE bodies, SELECT INTO, CALL, dblink,
+  load_extension, writable PRAGMA, and other unanalyzable forms are blocked
+  fail-closed. PostgreSQL reads run in a read-only transaction; SQLite reads
+  open the file URI with mode=ro. Direct psql/pgcli/sqlite3 invocations in
+  run/command mode are blocked — use sshx sql. Every invocation is audited
   with a literal-redacted statement, its exact SHA-256 digest, classification,
   backup, and outcome.
 
-  --db=NAME                 Target database (required)
-  --db-user=USER            Database role (default: remote psql default)
+  --engine=postgres|sqlite  SQL engine (default: postgres)
+  --db=NAME                 PostgreSQL database name, or SQLite path if --db-file is omitted
+  --db-file=PATH            Absolute SQLite database file path (required for --engine=sqlite)
+  --db-user=USER            Database role (default: remote psql default; sqlite unused)
   --db-host=HOST            Database host as seen from the remote (default: local socket)
   --db-port=PORT            Database port
   --db-password-key=KEY     Keyring key for the DB password; delivered via stdin,
@@ -253,7 +259,6 @@ Guarded SQL Execution (PostgreSQL):
                             ~/.sshx/sql-cred-cache.json records identity + expiry.
                             Expired entries are deleted from the keyring.
   --cred-refresh            Drop the cached entry and re-resolve from the source
-  --engine=postgres         SQL engine (only postgres today)
   --explain                 Run EXPLAIN only; never executes the statement
   --row-threshold=N         EXPLAIN row estimate that upgrades a row backup to a
                             full-table CSV snapshot (default: 1000)
@@ -263,9 +268,10 @@ Guarded SQL Execution (PostgreSQL):
   --force, -f               Confirms DDL; destructive DDL also requires --no-backup
 
   Safety pipeline for data changes: classify locally (fail-closed), gate by
-  policy, EXPLAIN (FORMAT JSON) to estimate impact, then snapshot affected rows
-  or the whole target table to CSV and execute the DML under one PostgreSQL
-  transaction plus a SHARE ROW EXCLUSIVE table lock. This closes the
+  policy, then snapshot and execute. PostgreSQL runs EXPLAIN (FORMAT JSON)
+  and snapshots rows or the table under one transaction plus a SHARE ROW
+  EXCLUSIVE lock. SQLite skips row estimates and snapshots the table (CSV)
+  or the whole file (sqlite3 .backup) under BEGIN IMMEDIATE. This closes the
   backup-to-mutation race. SELECT and other reads skip EXPLAIN and backups.
   Catalog preflight blocks automatic execution when triggers, rewrite rules,
   partitions, or cascading referential actions can affect related tables;
@@ -285,6 +291,8 @@ Guarded SQL Execution (PostgreSQL):
       "UPDATE users SET active=false WHERE id=42"
   sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
       --cred-cache=1h "SELECT count(*) FROM orders"
+  sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+      "UPDATE users SET active=0 WHERE id=42"
 
 Plugin Management:
   sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]

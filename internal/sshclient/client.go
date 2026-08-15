@@ -157,9 +157,12 @@ type Config struct {
 
 	// Guarded SQL execution fields (Mode == "sql").
 	SQLStatement string
-	// SQLEngine names the database engine; only "postgres" is implemented.
+	// SQLEngine names the database engine: "postgres" (default) or "sqlite".
 	SQLEngine   string
 	SQLDatabase string
+	// SQLFile is the --db-file path for --engine=sqlite. Copied into
+	// SQLDatabase after validation so JSON/audit keep a single identity field.
+	SQLFile string
 	// SQLUser is the database role (-U), distinct from the SSH user.
 	SQLUser string
 	// SQLHost/SQLPort locate the database as seen from the remote host.

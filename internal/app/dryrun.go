@@ -547,7 +547,7 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 	plan.SQL = sqlPlan
 	plan.Command = sqlPlan.Statement
 
-	cls, err := sqlsafe.Classify(config.SQLStatement)
+	cls, err := sqlsafe.ClassifyFor(config.SQLEngine, config.SQLStatement)
 	if err != nil {
 		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
 		sqlPlan.PolicyCheck = plan.SafetyCheck
@@ -569,7 +569,12 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 	plan.SafetyCheck = dryRunStatus{Status: "passed"}
 	sqlPlan.PolicyCheck = plan.SafetyCheck
 
-	backup, err := sqlsafe.DecideBackup(cls, -1, opts)
+	var backup sqlsafe.BackupPlan
+	if sqlsafe.NormalizeEngine(config.SQLEngine) == sqlsafe.EngineSQLite {
+		backup, err = sqlsafe.DecideSQLiteBackup(cls, opts)
+	} else {
+		backup, err = sqlsafe.DecideBackup(cls, -1, opts)
+	}
 	if err != nil {
 		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
 		sqlPlan.PolicyCheck = plan.SafetyCheck
@@ -581,18 +586,11 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 	if backup.Kind == sqlsafe.BackupRows {
 		sqlPlan.BackupReason += " (may upgrade to a full-table CSV snapshot if the EXPLAIN estimate exceeds the row threshold)"
 	}
-	if cls.Class == sqlsafe.ClassDML && !opts.NoBackup {
+	if cls.Class == sqlsafe.ClassDML && !opts.NoBackup && backup.Kind != sqlsafe.BackupFile {
 		sqlPlan.BackupReason += " (runtime catalog preflight blocks triggers, rewrite rules, partitions, and cascading referential actions)"
 	}
 
-	conn := sqlsafe.Conn{
-		Database:      firstNonEmpty(config.SQLDatabase, "<db>"),
-		User:          config.SQLUser,
-		Host:          config.SQLHost,
-		Port:          config.SQLPort,
-		PasswordStdin: config.SQLPasswordKey != "" || config.SQLCredFrom != "",
-		Docker:        config.SQLDockerContainer,
-	}
+	conn := newSQLExecutor(config, "")
 	if cls.Class == sqlsafe.ClassDML || config.SQLExplainOnly {
 		sqlPlan.ExplainCommand = conn.ExplainCommand(cls.Statement).Command
 	}
@@ -601,8 +599,12 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 		case cls.Class == sqlsafe.ClassRead:
 			sqlPlan.ExecuteCommand = conn.ExecuteReadCommand(cls.Statement).Command
 		case backup.Kind != sqlsafe.BackupNone:
+			previewPath := "backup.csv"
+			if backup.Kind == sqlsafe.BackupFile {
+				previewPath = "backup.db"
+			}
 			transactional, buildErr := conn.ExecuteWithBackupCommand(
-				cls.Statement, cls.Table, cls.WhereClause, "<backup.csv>", backup.Kind,
+				cls.Statement, cls.Table, cls.WhereClause, previewPath, backup.Kind,
 			)
 			if buildErr != nil {
 				plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: buildErr.Error()}

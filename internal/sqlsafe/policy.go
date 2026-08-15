@@ -69,6 +69,8 @@ const (
 	BackupRows BackupKind = "rows"
 	// BackupTable snapshots the whole target table to CSV before the change.
 	BackupTable BackupKind = "table"
+	// BackupFile snapshots the whole SQLite database file with .backup.
+	BackupFile BackupKind = "file"
 )
 
 // BackupPlan describes the pre-change backup decided for one statement.

@@ -61,7 +61,7 @@ type sqlRun struct {
 
 	cls  *sqlsafe.Classification
 	opts sqlsafe.Options
-	conn sqlsafe.Conn
+	exec sqlsafe.SQLExecutor
 	// password is the database password (stdin-only delivery); empty when the
 	// remote side authenticates via peer/ident/.pgpass.
 	password string
@@ -97,7 +97,7 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 		return run.fail("config", cfgErr)
 	}
 
-	cls, clsErr := sqlsafe.Classify(config.SQLStatement)
+	cls, clsErr := sqlsafe.ClassifyFor(config.SQLEngine, config.SQLStatement)
 	if clsErr != nil {
 		return run.fail("blocked", clsErr)
 	}
@@ -115,7 +115,7 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 			logger.GetLogger().Info("Note: Could not find host '%s' in settings, using as hostname directly", config.Host)
 		}
 	}
-	if config.SQLPasswordKey != "" {
+	if config.SQLPasswordKey != "" && sqlsafe.NormalizeEngine(config.SQLEngine) != sqlsafe.EngineSQLite {
 		password, pwdErr := sshclient.GetSudoPassword(config.SQLPasswordKey)
 		if pwdErr != nil {
 			return run.fail("config", fmt.Errorf("failed to read database password key %q from keyring: %w", config.SQLPasswordKey, pwdErr))
@@ -163,14 +163,7 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	if config.SQLDatabase == "" {
 		return run.fail("config", fmt.Errorf("could not determine the database: pass --db=<name> (the credential source did not provide one)"))
 	}
-	run.conn = sqlsafe.Conn{
-		Database:      config.SQLDatabase,
-		User:          config.SQLUser,
-		Host:          config.SQLHost,
-		Port:          config.SQLPort,
-		PasswordStdin: run.password != "",
-		Docker:        config.SQLDockerContainer,
-	}
+	run.exec = newSQLExecutor(config, run.password)
 
 	// EXPLAIN gate: mandatory for DML (row estimate feeds the backup
 	// decision), on demand via --explain for anything EXPLAIN supports.
@@ -188,18 +181,42 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	return run.executePhase()
 }
 
+func newSQLExecutor(config *sshclient.Config, password string) sqlsafe.SQLExecutor {
+	if sqlsafe.NormalizeEngine(config.SQLEngine) == sqlsafe.EngineSQLite {
+		return sqlsafe.SQLiteConn{Path: config.SQLDatabase}
+	}
+	return sqlsafe.Conn{
+		Database:      config.SQLDatabase,
+		User:          config.SQLUser,
+		Host:          config.SQLHost,
+		Port:          config.SQLPort,
+		PasswordStdin: password != "" || config.SQLPasswordKey != "" || config.SQLCredFrom != "",
+		Docker:        config.SQLDockerContainer,
+	}
+}
+
 func validateSQLConfig(config *sshclient.Config) error {
 	if config.ArgumentError != "" {
 		return fmt.Errorf("%s", config.ArgumentError)
 	}
-	if config.SQLEngine != "postgres" {
-		return fmt.Errorf("unsupported --engine %q (only \"postgres\" is implemented)", config.SQLEngine)
+	config.SQLEngine = sqlsafe.NormalizeEngine(config.SQLEngine)
+	switch config.SQLEngine {
+	case sqlsafe.EnginePostgres:
+	case sqlsafe.EngineSQLite:
+	default:
+		return fmt.Errorf("unsupported --engine %q (implemented: postgres, sqlite)", config.SQLEngine)
 	}
 	if config.Host == "" {
 		return fmt.Errorf("host is required (use -h=<host>)")
 	}
 	if config.SQLStatement == "" {
 		return fmt.Errorf("SQL statement is required (positional argument or after --)")
+	}
+	if config.SQLEngine == sqlsafe.EngineSQLite {
+		return validateSQLiteConfig(config)
+	}
+	if config.SQLFile != "" {
+		return fmt.Errorf("--db-file is only valid with --engine=sqlite")
 	}
 	if config.SQLDatabase == "" && config.SQLCredFrom == "" {
 		return fmt.Errorf("--db=<database> is required")
@@ -231,11 +248,36 @@ func validateSQLConfig(config *sshclient.Config) error {
 	return nil
 }
 
+func validateSQLiteConfig(config *sshclient.Config) error {
+	if config.SQLUser != "" || config.SQLHost != "" || config.SQLPort != "" ||
+		config.SQLPasswordKey != "" || config.SQLCredFrom != "" || config.SQLDockerContainer != "" {
+		return fmt.Errorf("sqlite does not use --db-user/--db-host/--db-port/--db-password-key/--db-cred-from/--docker; pass --db-file=<absolute-path>")
+	}
+	path := config.SQLFile
+	if path == "" {
+		path = config.SQLDatabase
+	}
+	if config.SQLFile != "" && config.SQLDatabase != "" && config.SQLFile != config.SQLDatabase {
+		return fmt.Errorf("--db and --db-file disagree (%q vs %q)", config.SQLDatabase, config.SQLFile)
+	}
+	if err := sqlsafe.ValidateSQLitePath(path); err != nil {
+		return err
+	}
+	if err := sqlsafe.ValidateBackupDir(config.SQLBackupDir); err != nil {
+		return err
+	}
+	config.SQLDatabase = path
+	if config.Timeout < 0 {
+		return fmt.Errorf("invalid --timeout value (use e.g. 30s, 2m, or 30)")
+	}
+	return nil
+}
+
 // runRemote executes one assembled remote command, prepending the database
 // password line to stdin when password delivery is enabled.
 func (r *sqlRun) runRemote(rc sqlsafe.RemoteCommand) (sshclient.ExecResult, error) {
 	stdin := rc.Stdin
-	if r.conn.NeedsPasswordLine() {
+	if r.exec != nil && r.exec.NeedsPasswordLine() {
 		stdin = r.password + "\n" + stdin
 	}
 	return r.client.RunCommandWithInput(rc.Command, []byte(stdin))
@@ -313,15 +355,21 @@ func (r *sqlRun) explainPhase() error {
 	if !needEstimate && !r.config.SQLExplainOnly {
 		return nil
 	}
-	if !explainableVerbs[r.cls.Verb] {
+	if !explainableVerbs[r.cls.Verb] && r.cls.Verb != "PRAGMA" {
 		if r.config.SQLExplainOnly {
 			return r.fail("config", fmt.Errorf("%s statements do not support EXPLAIN", r.cls.Verb))
 		}
 		return nil
 	}
 
+	// SQLite EXPLAIN QUERY PLAN has no Plan Rows estimate. L1 uses it only
+	// for --explain; DML backup always snapshots the table or the whole file.
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineSQLite && !r.config.SQLExplainOnly {
+		return nil
+	}
+
 	r.phase = "explain"
-	res, execErr := r.runRemote(r.conn.ExplainCommand(r.cls.Statement))
+	res, execErr := r.runRemote(r.exec.ExplainCommand(r.cls.Statement))
 	if execErr != nil {
 		return r.fail(classifyError(execErr), fmt.Errorf("EXPLAIN failed: %w", execErr))
 	}
@@ -329,6 +377,9 @@ func (r *sqlRun) explainPhase() error {
 		return r.fail("explain_failed", fmt.Errorf("EXPLAIN exited with status %d", res.ExitCode))
 	}
 	r.explainPlan = strings.TrimSpace(res.Stdout)
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineSQLite {
+		return nil
+	}
 	rows, parseErr := sqlsafe.ParseExplainRows(res.Stdout)
 	if parseErr != nil {
 		return r.fail("explain_failed", fmt.Errorf("cannot parse EXPLAIN output: %w", parseErr))
@@ -343,11 +394,19 @@ func (r *sqlRun) backupPhase() error {
 	if r.estimatedRows != nil {
 		estimate = *r.estimatedRows
 	}
-	plan, planErr := sqlsafe.DecideBackup(r.cls, estimate, r.opts)
+	var plan sqlsafe.BackupPlan
+	var planErr error
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineSQLite {
+		plan, planErr = sqlsafe.DecideSQLiteBackup(r.cls, r.opts)
+	} else {
+		plan, planErr = sqlsafe.DecideBackup(r.cls, estimate, r.opts)
+	}
 	if planErr != nil {
 		return r.fail("blocked", planErr)
 	}
-	if !r.opts.NoBackup && (plan.Kind != sqlsafe.BackupNone || r.cls.Class == sqlsafe.ClassDML) {
+	needImpact := !r.opts.NoBackup && plan.Kind != sqlsafe.BackupFile &&
+		(plan.Kind != sqlsafe.BackupNone || r.cls.Class == sqlsafe.ClassDML)
+	if needImpact {
 		related, impactErr := r.checkRelatedEffects()
 		if impactErr != nil {
 			return impactErr
@@ -365,20 +424,20 @@ func (r *sqlRun) backupPhase() error {
 
 	path := sqlsafe.BackupPath(r.config.SQLBackupDir, r.config.SQLDatabase, plan.Table, plan.Kind)
 	r.backup.Path = path
-	r.backup.RestoreHint = sqlsafe.RestoreHint(plan, path)
+	r.backup.RestoreHint = sqlsafe.RestoreHintFor(r.config.SQLEngine, plan, path)
 	return nil
 }
 
 func (r *sqlRun) checkRelatedEffects() (bool, error) {
 	switch r.cls.Verb {
-	case "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE":
+	case "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE", "REPLACE":
 	default:
 		return r.cls.MayAffectRelated, nil
 	}
 	if r.cls.Table == "" {
 		return false, r.fail("blocked", fmt.Errorf("cannot determine the mutation target for related-effect inspection"))
 	}
-	rc, buildErr := r.conn.RelatedEffectsCommand(r.cls.Table, r.cls.Verb)
+	rc, buildErr := r.exec.RelatedEffectsCommand(r.cls.Table, r.cls.Verb)
 	if buildErr != nil {
 		return false, r.fail("blocked", buildErr)
 	}
@@ -400,12 +459,12 @@ func (r *sqlRun) checkRelatedEffects() (bool, error) {
 
 func (r *sqlRun) executePhase() error {
 	r.phase = "execute"
-	command := r.conn.ExecuteCommand(r.cls.Statement)
+	command := r.exec.ExecuteCommand(r.cls.Statement)
 	if r.cls.Class == sqlsafe.ClassRead {
-		command = r.conn.ExecuteReadCommand(r.cls.Statement)
+		command = r.exec.ExecuteReadCommand(r.cls.Statement)
 	} else if r.backup != nil && r.backup.Kind != string(sqlsafe.BackupNone) {
 		var buildErr error
-		command, buildErr = r.conn.ExecuteWithBackupCommand(
+		command, buildErr = r.exec.ExecuteWithBackupCommand(
 			r.cls.Statement, r.cls.Table, r.cls.WhereClause, r.backup.Path,
 			sqlsafe.BackupKind(r.backup.Kind),
 		)
@@ -426,6 +485,8 @@ func (r *sqlRun) executePhase() error {
 	}
 	if r.cls.Class == sqlsafe.ClassDML {
 		if rows, ok := sqlsafe.ParseCommandTag(res.Stdout); ok {
+			r.affectedRows = &rows
+		} else if rows, ok := sqlsafe.ParseChangesOutput(res.Stdout); ok {
 			r.affectedRows = &rows
 		}
 	}

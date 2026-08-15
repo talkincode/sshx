@@ -38,6 +38,9 @@ func TestValidateCommand_BlocksDirectDBClients(t *testing.T) {
 		{"command wrapper executes", `command psql appdb`},
 		{"multiline script", "set -e\npsql -U app -c \"SELECT 1\"\n"},
 		{"heredoc", "psql -U app appdb <<EOF\nSELECT 1;\nEOF"},
+		{"plain sqlite3", `sqlite3 /var/lib/app.db "DELETE FROM users"`},
+		{"sudo sqlite3", `sudo -u app sqlite3 /data/app.db "SELECT 1"`},
+		{"sh -c sqlite3", `sh -c 'sqlite3 /tmp/app.db "SELECT 1"'`},
 	}
 	for _, tt := range blocked {
 		t.Run(tt.name, func(t *testing.T) {
@@ -58,6 +61,8 @@ func TestValidateCommand_AllowsNonExecutionDBReferences(t *testing.T) {
 		`command -v psql`,
 		`psql --version`,
 		`psql -V`,
+		`sqlite3 --version`,
+		`which sqlite3`,
 		`psql --help`,
 		`docker exec tsdb psql --version`,
 		`grep psql /var/log/syslog`,

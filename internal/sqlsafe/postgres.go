@@ -20,6 +20,8 @@ const DefaultBackupDir = ".sshx/sql-backups"
 // is set, the generated command reads PGPASSWORD from the first stdin line.
 // When Docker is set, the database clients run inside the container via
 // `docker exec -i` (the password crosses only via env passthrough, not argv).
+//
+// Conn implements SQLExecutor.
 type Conn struct {
 	Database      string
 	User          string // database role, not the SSH user
@@ -281,8 +283,11 @@ func BackupPath(dir, database, table string, kind BackupKind) string {
 		dir = DefaultBackupDir
 	}
 	ext := ".sql"
-	if kind == BackupRows || kind == BackupTable {
+	switch kind {
+	case BackupRows, BackupTable:
 		ext = ".csv"
+	case BackupFile:
+		ext = ".db"
 	}
 	var suffix [4]byte
 	token := "0000"
