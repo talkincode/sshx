@@ -232,7 +232,7 @@ func TestCLISafetyBlockPreventsConnectionAndForceIsExplicit(t *testing.T) {
 	assertSSHXFailure(t, blocked, "blocked")
 	assert.Equal(t, connectionsBefore, server.connections.Load(), "blocked commands must not touch the network")
 
-	forced := runSSHX(t, home, append(append([]string{}, base...), "--force", "--accept-unknown-host", "rm -rf /"), map[string]string{
+	forced := runSSHX(t, home, append(append([]string{}, base...), "--force", "--bypass-reason=e2e destructive command", "--accept-unknown-host", "rm -rf /"), map[string]string{
 		"SSH_PASSWORD": operatorPassword,
 	})
 	require.Equal(t, 0, forced.exitCode, forced.stderr)

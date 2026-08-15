@@ -18,7 +18,7 @@ cat ./check.sh | sshx run --target=prod-web --script-stdin --json
 - Dry-run and results expose payload SHA-256 and byte length, not raw script contents.
 - Multi-target `--jsonl` streams `run_started`, per-target events, and `run_finished`.
 - Multi-target exit codes: `0` all succeeded, `1` partial/failed/skipped/uncertain, `255` request-level failure.
-- High-risk bypasses require explicit flags; `sshx run` also requires `--bypass-reason=`.
+- High-risk bypasses require explicit flags; command mode and `sshx run` require `--bypass-reason=` with `--force` / `--no-safety-check`.
 - Working-directory `.env` files are not loaded. Inherited `SSH_FORCE` /
   `SSH_NO_SAFETY_CHECK` / host-key env switches do not authorize trust relaxation.
 
@@ -125,11 +125,15 @@ Use dry-run to verify host resolution, selected sudo key, safety status, and whe
 
 ## Timeouts
 
-Always set timeouts for unattended workflows:
+Always set timeouts for unattended workflows. `sshx run` defaults the command
+timeout to 60s when `--timeout` / `SSH_TIMEOUT` are unset; compatibility
+`sshx -h=...` command mode still has no command timeout unless you set one.
+The SSH dial timeout is independent (30s).
 
 ```bash
 sshx -h=prod-web --timeout=30s --json "systemctl is-active nginx"
 sshx -h=prod-web --timeout=2m --json "sudo apt-get update"
+sshx run --target=prod-web --json -- "uptime"   # command timeout defaults to 60s
 ```
 
 ## Audit Events
