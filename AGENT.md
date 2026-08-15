@@ -255,7 +255,11 @@ tests.
    wrappers or pipelines is left untouched.
 5. **Command safety checks.** Destructive patterns (`rm -rf /`, `mkfs`, `dd`,
    fork bombs, `curl | sh`, critical file edits, shutdown/reboot) are blocked
-   unless `--force`/`-f` or `--no-safety-check` is given. The validator is a
+   unless `--force`/`-f` or `--no-safety-check` is given. Direct database
+   client execution (`psql`/`pgcli` in command position, including
+   `docker exec`, `sudo -u`, `sh -c`, `kubectl exec`, and pipe wrappers) is
+   also blocked and redirected to `sshx sql`; availability probes such as
+   `which psql` and `psql --version` stay allowed. The validator is a
    guardrail against mistakes, **not** a security sandbox.
 6. **Auth order.** SSH key first; password fallback happens only when an SSH
    login password is already provided (for example through `SSH_PASSWORD`).

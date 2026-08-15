@@ -145,6 +145,8 @@ Safety Options:
     - Critical file modifications (/etc/passwd, /etc/shadow)
     - Dangerous pipe operations (curl | sh)
     - Fork bombs and other malicious patterns
+    - Direct database client execution (psql/pgcli, incl. docker exec,
+      sudo -u, sh -c, kubectl exec wrappers) — use 'sshx sql' instead
 
 SFTP Options:
   --upload=<local>      Upload file (use with --to=<remote>)
