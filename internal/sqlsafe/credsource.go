@@ -48,8 +48,8 @@ func ParseCredSource(spec string) (CredSource, error) {
 		}
 		return CredSource{Kind: "docker", Container: rest}, nil
 	case "env-file":
-		if strings.ContainsAny(rest, "\n\r") {
-			return CredSource{}, fmt.Errorf("invalid env file path in --db-cred-from")
+		if err := validateEnvFilePath(rest); err != nil {
+			return CredSource{}, err
 		}
 		return CredSource{Kind: "env-file", Path: rest}, nil
 	default:
@@ -80,8 +80,8 @@ func (s CredSource) ExtractionCommand() (string, error) {
 		}
 		return "docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' " + s.Container, nil
 	case "env-file":
-		if s.Path == "" || strings.ContainsAny(s.Path, "\n\r") {
-			return "", fmt.Errorf("invalid env file path")
+		if err := validateEnvFilePath(s.Path); err != nil {
+			return "", err
 		}
 		return "cat " + maybeQuote(s.Path), nil
 	default:
@@ -203,6 +203,24 @@ func unquoteEnvValue(v string) string {
 func ValidateContainerName(name string) error {
 	if !containerNameRE.MatchString(name) {
 		return &BlockedError{Reason: fmt.Sprintf("container name %q contains unsupported characters", name)}
+	}
+	return nil
+}
+
+// validateEnvFilePath requires an absolute remote path and rejects parent
+// directory segments so env-file: cannot be used to walk the remote tree via
+// relative or .. paths. Newlines were already rejected; this tightens the rest.
+func validateEnvFilePath(path string) error {
+	if path == "" || strings.ContainsAny(path, "\x00\r\n") {
+		return fmt.Errorf("invalid env file path in --db-cred-from")
+	}
+	if !isAbsoluteSQLitePath(path) {
+		return fmt.Errorf("env-file path in --db-cred-from must be absolute")
+	}
+	for _, seg := range splitPathSegments(path) {
+		if seg == ".." {
+			return fmt.Errorf("env-file path in --db-cred-from must not contain .. segments")
+		}
 	}
 	return nil
 }

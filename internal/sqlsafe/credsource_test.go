@@ -19,7 +19,7 @@ func TestParseCredSource(t *testing.T) {
 	assert.Equal(t, CredSource{Kind: "env-file", Path: "/opt/app/.env"}, s)
 	assert.Equal(t, "env-file:/opt/app/.env", s.String())
 
-	for _, bad := range []string{"", "docker:", "docker:bad name", "docker:-leading", "vault:x", "env-file:", "plain"} {
+	for _, bad := range []string{"", "docker:", "docker:bad name", "docker:-leading", "vault:x", "env-file:", "plain", "env-file:relative.env", "env-file:./.env", "env-file:opt/app/.env", "env-file:/opt/../etc/passwd", "env-file:/tmp/../.env"} {
 		_, err := ParseCredSource(bad)
 		assert.Error(t, err, "spec %q must be rejected", bad)
 	}
