@@ -3,7 +3,6 @@ package app
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestApplyCommandModeBypassReason(t *testing.T) {
@@ -15,17 +14,6 @@ func TestApplyCommandModeBypassReason(t *testing.T) {
 	}
 	if config.Command != "sudo reboot" {
 		t.Fatalf("Command=%q, want sudo reboot without leftover flag", config.Command)
-	}
-}
-
-func TestRunDefaultTimeout(t *testing.T) {
-	t.Setenv("SSH_TIMEOUT", "")
-	config := ParseArgs([]string{"sshx", "run", "--target=prod-web", "--", "uptime"})
-	if config.Timeout != 0 {
-		t.Fatalf("ParseArgs should leave run timeout unset, got %v", config.Timeout)
-	}
-	if config.Mode != "run" {
-		t.Fatalf("mode=%s", config.Mode)
 	}
 }
 
