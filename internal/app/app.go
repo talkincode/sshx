@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/talkincode/sshx/internal/execution"
@@ -72,6 +73,10 @@ func Run(args []string) (err error) {
 	if config.ArgumentError != "" {
 		return fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError)
 	}
+	applyCommandModeBypassReason(config, args)
+	if config.Mode == "run" && config.Timeout == 0 {
+		config.Timeout = 60 * time.Second
+	}
 	audit := newAuditRecorder(config)
 	defer func() {
 		if auditErr := audit.finish(config, err); auditErr != nil {
@@ -82,6 +87,12 @@ func Run(args []string) (err error) {
 	// Canonical multi-host / script execution contract.
 	if config.Mode == "run" {
 		return HandleRun(config, audit)
+	}
+
+	if config.Mode == "ssh" {
+		if err := requireBypassReason(config); err != nil {
+			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", err)
+		}
 	}
 
 	if config.DryRun {
@@ -146,7 +157,6 @@ func Run(args []string) (err error) {
 			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config",
 				fmt.Errorf("--pty cannot be combined with --json (a PTY merges stderr into stdout)"))
 		}
-
 		// Reject dangerous commands before doing any network work so the
 		// rejection is deterministic and cheap, and reports a precise
 		// error_kind ("blocked") instead of being masked by a connect error.
@@ -288,6 +298,46 @@ func classifyError(err error) string {
 		return "error"
 	}
 	return kind
+}
+
+// applyCommandModeBypassReason lifts --bypass-reason= from argv for compatibility
+// command mode, where ParseArgs historically treated the flag as the start of the
+// remote command. It also strips a leftover flag token from Config.Command so it
+// is never executed remotely.
+func applyCommandModeBypassReason(config *sshclient.Config, args []string) {
+	if config == nil || config.Mode != "ssh" {
+		return
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			return
+		}
+		if strings.HasPrefix(arg, "--bypass-reason=") {
+			config.BypassReason = strings.SplitN(arg, "=", 2)[1]
+			if config.Command == arg {
+				config.Command = ""
+			} else if strings.HasPrefix(config.Command, arg+" ") {
+				config.Command = strings.TrimPrefix(config.Command, arg+" ")
+			}
+			return
+		}
+	}
+}
+
+// requireBypassReason enforces the run-mode rule on command mode: --force and
+// --no-safety-check are explicit break-glass switches and must carry a
+// non-empty --bypass-reason for audit. Skill/SQL --force keep their own
+// semantics and are not gated here.
+func requireBypassReason(config *sshclient.Config) error {
+	if config == nil {
+		return nil
+	}
+	if config.Force || !config.SafetyCheck {
+		if strings.TrimSpace(config.BypassReason) == "" {
+			return fmt.Errorf("safety bypass requires a non-empty --bypass-reason")
+		}
+	}
+	return nil
 }
 
 // isIPAddress checks if a string is a valid IP address
