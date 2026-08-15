@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-15
+
+### Added
+
+- Add guarded PostgreSQL execution through `sshx sql`: strict single-statement
+  classification, fail-closed policy gates, mandatory DML `EXPLAIN`, row-impact
+  estimation, automatic row/table backups, dry-run plans, structured JSON
+  results, and SQL-specific audit metadata.
+- Add production Docker database support with container-local `psql`,
+  remote credential discovery from container environments or deployment env
+  files, and short-lived OS-keyring caching with explicit refresh and expiry.
+- Extend the embedded Agent skill with the SQL safety contract, backup strategy,
+  Docker credential workflow, stable result fields, and operational examples.
+
+### Security
+
+- Keep database passwords out of command arguments and audit records by
+  delivering them through SSH stdin and environment passthrough only.
+- Permanently block multi-statement input and SQL forms that cannot be safely
+  bounded, including psql meta-commands, data-modifying CTE bodies,
+  `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`, dblink delegated execution, `DROP DATABASE/SCHEMA`,
+  `ALTER SYSTEM`, `COPY`, `DO`, and transaction-control statements; execute
+  accepted reads in a PostgreSQL read-only transaction.
+- Redact SQL literal values from audit/JSON output while recording an exact
+  SHA-256 digest, create backup artifacts with owner-only permissions, and
+  run DML backup and mutation under one transaction plus a target-table write
+  lock. Catalog preflight blocks automatic execution when triggers, rewrite
+  rules, partitions, or cascading referential actions prevent a bounded backup;
+  UPSERT targets are backed up before overwrite.
+
 ## [0.3.0] - 2026-08-13
 
 ### Added

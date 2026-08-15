@@ -31,6 +31,7 @@ Usage:
   sshx plugin create <id> [options]               # Scaffold a local inspection plugin
   sshx plugin list [--json]                       # List built-in and local capabilities
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
+  sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql
 
 SSH Options:
   -h, --host=HOST          Remote host address (required in compatibility mode)
@@ -215,6 +216,73 @@ Inspection Capabilities:
   Collectors execute once through SSH stdin and are never installed on the
   target. With remote-prefer caching, only redacted JSON is stored below the
   remote user's ~/.sshx/observations/v1 directory.
+
+Guarded SQL Execution (PostgreSQL):
+  sshx sql -h=<host> --db=<name> [options] "<single SQL statement>"
+  sshx sql -h=<host> --db=<name> [options] -- <SQL words...>
+
+  Statements run through the psql client already present on the remote host;
+  sshx embeds no database driver and opens no tunnel. Exactly one statement
+  per invocation. Unknown or dangerous statement heads (DROP DATABASE/SCHEMA,
+  ALTER SYSTEM, COPY, DO, transaction control, multi-statement input) are
+  psql meta-commands, EXPLAIN ANALYZE, data-modifying CTE bodies, SELECT INTO,
+  CALL, dblink delegated execution, and other dangerous or unanalyzable forms
+  are blocked fail-closed. Read queries run in a read-only transaction. Every invocation is audited
+  with a literal-redacted statement, its exact SHA-256 digest, classification,
+  backup, and outcome.
+
+  --db=NAME                 Target database (required)
+  --db-user=USER            Database role (default: remote psql default)
+  --db-host=HOST            Database host as seen from the remote (default: local socket)
+  --db-port=PORT            Database port
+  --db-password-key=KEY     Keyring key for the DB password; delivered via stdin,
+                            never via argv (implies --db-host=127.0.0.1 when unset)
+  --docker=CONTAINER        Run psql inside this container via docker exec -i
+                            (default connection becomes the container-local socket;
+                            backups still land on the host)
+  --db-cred-from=SOURCE     Resolve DB credentials on the remote host instead of the
+                            local keyring: docker:<container> (container env) or
+                            env-file:<path> (KEY=VALUE file). Recognizes PG*,
+                            POSTGRES_*, DB_* keys and DATABASE_URL. Mutually
+                            exclusive with --db-password-key; --db becomes optional
+                            when the source provides the database name.
+  --cred-cache=off|DURATION Temporary local cache for remotely resolved credentials
+                            (default: 15m). The secret lives only in the OS keyring;
+                            ~/.sshx/sql-cred-cache.json records identity + expiry.
+                            Expired entries are deleted from the keyring.
+  --cred-refresh            Drop the cached entry and re-resolve from the source
+  --engine=postgres         SQL engine (only postgres today)
+  --explain                 Run EXPLAIN only; never executes the statement
+  --row-threshold=N         EXPLAIN row estimate that upgrades a row backup to a
+                            full-table CSV snapshot (default: 1000)
+  --allow-full-table        Required for UPDATE/DELETE without a WHERE clause
+  --no-backup               Skip pre-change backup (requires --force)
+  --backup-dir=PATH         Remote backup directory (default: ~/.sshx/sql-backups)
+  --force, -f               Confirms DDL; destructive DDL also requires --no-backup
+
+  Safety pipeline for data changes: classify locally (fail-closed), gate by
+  policy, EXPLAIN (FORMAT JSON) to estimate impact, then snapshot affected rows
+  or the whole target table to CSV and execute the DML under one PostgreSQL
+  transaction plus a SHARE ROW EXCLUSIVE table lock. This closes the
+  backup-to-mutation race. SELECT and other reads skip EXPLAIN and backups.
+  Catalog preflight blocks automatic execution when triggers, rewrite rules,
+  partitions, or cascading referential actions can affect related tables;
+  proceed only after an independent backup with --force --no-backup. Automatic
+  backups are not claimed for destructive DDL, which also requires
+  --force --no-backup. Backup directories/files are owner-only. --dry-run
+  previews the local plan without connecting; runtime catalog checks may block.
+
+  sshx sql -h=db1 --db=app "SELECT count(*) FROM users"
+  sshx sql -h=db1 --db=app --db-user=app --db-password-key=app-db \
+      "UPDATE users SET active=false WHERE id=42"
+  sshx sql -h=db1 --db=app --explain "DELETE FROM sessions WHERE expires_at < now()"
+  sshx sql -h=db1 --db=app --force "TRUNCATE staging_events"
+  # Dockerized production DB: credentials live in the container env, psql runs
+  # inside the container, resolved credentials are cached in the keyring for 15m
+  sshx sql -h=prod --docker=pg-prod --db-cred-from=docker:pg-prod \
+      "UPDATE users SET active=false WHERE id=42"
+  sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
+      --cred-cache=1h "SELECT count(*) FROM orders"
 
 Plugin Management:
   sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]

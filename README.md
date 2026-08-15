@@ -343,6 +343,64 @@ sshx -h=prod-web --pty "top -b -n1"
 
 The timeout can also be set via the `SSH_TIMEOUT` environment variable.
 
+## Guarded PostgreSQL Execution
+
+Use `sshx sql` instead of sending raw `psql` commands through `sshx run`. It
+accepts exactly one statement, classifies it locally, blocks unbounded or
+unsupported forms, runs `EXPLAIN (FORMAT JSON)` before DML, backs up affected
+data, and records a structured audit event. Psql backslash commands,
+data-modifying CTE bodies, `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`, and dblink
+delegated execution are blocked. Accepted reads run in a PostgreSQL read-only
+transaction to prevent writes through the current connection.
+
+```bash
+# Read-only query
+sshx sql -h=prod-db --db=app --json "SELECT count(*) FROM users"
+
+# Preview classification, gates, and backup plan without connecting
+sshx sql -h=prod-db --db=app --dry-run --json \
+  "UPDATE users SET active=false WHERE id=42"
+
+# Execute with a keyring-backed database password
+sshx sql -h=prod-db --db=app --db-user=app \
+  --db-password-key=app-db --json \
+  "UPDATE users SET active=false WHERE id=42"
+```
+
+`UPDATE`/`DELETE` without a top-level `WHERE` requires
+`--allow-full-table`. Destructive DDL requires `--force --no-backup`; sshx does
+not claim an automatic restorable backup for schema destruction. Skipping a DML
+backup also requires both `--no-backup` and `--force`. Small changes receive a
+row CSV snapshot; complex or large changes receive a full-table CSV snapshot
+under `~/.sshx/sql-backups/`. Backup and mutation run in one PostgreSQL
+transaction while holding a target-table write lock, closing the concurrency
+window between them. Catalog preflight blocks automatic execution when
+triggers, rewrite rules, partitions, or cascading referential actions can
+affect related tables; proceed only after an independent backup with
+`--force --no-backup`.
+UPSERTs are treated as overwrites and receive a table backup.
+Backups are created with owner-only permissions. Audit records and JSON results
+replace literal values with a redacted statement while retaining the exact
+statement's SHA-256 digest.
+
+For PostgreSQL running in a production container, execute the database clients
+inside the container and resolve credentials from its environment:
+
+```bash
+sshx sql -h=prod --docker=pg-prod \
+  --db-cred-from=docker:pg-prod --json \
+  "UPDATE users SET active=false WHERE id=42"
+
+sshx sql -h=prod --docker=pg-prod \
+  --db-cred-from=env-file:/opt/app/.env \
+  --cred-cache=1h --json "SELECT count(*) FROM orders"
+```
+
+Remotely resolved credentials are cached for 15 minutes by default. Secret
+values live only in the OS keyring; local metadata records identity and expiry.
+Use `--cred-cache=off` to disable caching or `--cred-refresh` to discard and
+resolve the current value again.
+
 ## Host Inspection and Local Plugins
 
 Use one structured inspection instead of repeatedly probing an unfamiliar host:

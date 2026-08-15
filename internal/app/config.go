@@ -110,6 +110,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "run":
 			parseRunArgs(config, args[2:])
 			return config
+		case "sql":
+			parseSQLArgs(config, args[2:])
+			return config
 		}
 	}
 
@@ -520,6 +523,142 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 			config.RunActionKind = "command"
 		}
 	}
+}
+
+// parseSQLArgs parses the `sshx sql` guarded SQL execution subcommand. The
+// SQL statement is the positional argument (or everything after `--`).
+func parseSQLArgs(config *sshclient.Config, args []string) {
+	config.Mode = "sql"
+	config.SQLEngine = "postgres"
+	sqlParts := []string{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			sqlParts = append(sqlParts, args[i+1:]...)
+			break
+		}
+		switch {
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
+			config.Host = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
+			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--engine="):
+			config.SQLEngine = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db="), strings.HasPrefix(arg, "--database="):
+			config.SQLDatabase = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-user="):
+			config.SQLUser = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-host="):
+			config.SQLHost = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-port="):
+			config.SQLPort = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-password-key="):
+			config.SQLPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--row-threshold="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			n, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || n <= 0 {
+				config.ArgumentError = fmt.Sprintf("invalid --row-threshold value %q", raw)
+			} else {
+				config.SQLRowThreshold = n
+			}
+		case arg == "--allow-full-table":
+			config.SQLAllowFullTable = true
+		case arg == "--no-backup":
+			config.SQLNoBackup = true
+		case arg == "--explain":
+			config.SQLExplainOnly = true
+		case strings.HasPrefix(arg, "--backup-dir="):
+			config.SQLBackupDir = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--docker="):
+			config.SQLDockerContainer = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-cred-from="):
+			config.SQLCredFrom = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--cred-cache="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if raw == "off" {
+				config.SQLCredCacheTTL = 0
+			} else if d, err := parseTimeout(raw); err == nil && d > 0 {
+				config.SQLCredCacheTTL = d
+			} else {
+				config.ArgumentError = fmt.Sprintf("invalid --cred-cache value %q (use off or a duration like 15m)", raw)
+			}
+		case arg == "--cred-refresh":
+			config.SQLCredRefresh = true
+		case arg == "--force", arg == "-f":
+			config.Force = true
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--json":
+			config.JSONOutput = true
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case !strings.HasPrefix(arg, "-"):
+			sqlParts = append(sqlParts, args[i:]...)
+			i = len(args)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown sql option %q", arg)
+		}
+	}
+	config.SQLStatement = strings.TrimSpace(strings.Join(sqlParts, " "))
+
+	// Password auth implies TCP: peer/ident auth on the local socket ignores
+	// PGPASSWORD, so default the database host to loopback in that case.
+	// Docker mode is exempt: inside the container the local socket works and
+	// PGPASSWORD is forwarded through docker exec when needed.
+	if config.SQLPasswordKey != "" && config.SQLHost == "" && config.SQLDockerContainer == "" {
+		config.SQLHost = "127.0.0.1"
+	}
+	// Remote credential resolution defaults to a short-lived local cache so
+	// repeated statements don't re-read the production environment.
+	if config.SQLCredFrom != "" && config.SQLCredCacheTTL == 0 && !sqlCredCacheExplicit(args) {
+		config.SQLCredCacheTTL = DefaultCredCacheTTL
+	}
+}
+
+// sqlCredCacheExplicit reports whether the operator explicitly set
+// --cred-cache (including --cred-cache=off, which must stay off).
+func sqlCredCacheExplicit(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if strings.HasPrefix(arg, "--cred-cache=") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseInspectArgs(config *sshclient.Config, args []string) {

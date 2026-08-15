@@ -45,6 +45,7 @@ func TestPrintUsage(t *testing.T) {
 		"SFTP Options:",
 		"Password Management",
 		"Inspection Capabilities:",
+		"Guarded SQL Execution (PostgreSQL):",
 		"Plugin Management:",
 		"Agent Skill Installation:",
 		"Environment Variables",
