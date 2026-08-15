@@ -21,7 +21,8 @@ import (
 // production environment on every statement, not to become a credential store.
 const DefaultCredCacheTTL = 15 * time.Minute
 
-const credCacheFileName = "sql-cred-cache.json" //nolint:gosec // file name of the non-secret metadata index, not a credential
+// #nosec G101 -- file name of the non-secret metadata index, not a credential.
+const credCacheFileName = "sql-cred-cache.json" //nolint:gosec
 
 // Keyring operations are indirected so tests never touch the OS keychain.
 var (
@@ -248,7 +249,8 @@ func storeCredCacheUnlocked(host, source string, creds sqlsafe.Credentials, ttl 
 	if err != nil {
 		return err
 	}
-	secret, err := json.Marshal(creds) //nolint:gosec // destination is the OS keyring, never plaintext storage
+	// #nosec G117 -- serialized bytes are written only to the OS keyring.
+	secret, err := json.Marshal(creds) //nolint:gosec
 	if err != nil {
 		return err
 	}
