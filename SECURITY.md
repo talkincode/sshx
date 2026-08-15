@@ -6,10 +6,12 @@ We take security seriously. The following versions of SSHX are currently support
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.0.7   | :white_check_mark: |
-| 0.0.6   | :white_check_mark: |
-| 0.0.5   | :white_check_mark: |
-| < 0.0.5 | :x:                |
+| 0.5.x   | :white_check_mark: |
+| 0.4.x   | :white_check_mark: |
+| < 0.4.0 | :x:                |
+
+Security updates are provided for the latest minor release and the previous
+minor release (N-1). Older lines do not receive patches; please upgrade.
 
 ## Reporting a Vulnerability
 
@@ -25,10 +27,11 @@ If you discover a security vulnerability in SSHX, please report it by **one** of
    - Click "Report a vulnerability"
    - Fill in the details of the vulnerability
 
-2. **Email**
-   - Send an email to the project maintainers
-   - Include detailed information about the vulnerability
-   - If possible, include steps to reproduce the issue
+2. **GitHub private vulnerability reporting**
+   - If Security Advisories are unavailable, use GitHub's private vulnerability
+     reporting on this repository (Security tab → Report a vulnerability)
+   - Do not open a public issue for an unfixed vulnerability
+   - Do not send reports to an unpublished maintainer email
 
 ### What to Include
 
@@ -97,7 +100,7 @@ SSHX includes built-in validation to prevent dangerous commands (e.g., `rm -rf /
 
 ## Contact
 
-For security-related questions or concerns that are not vulnerabilities, please open a regular issue on GitHub or contact the maintainers directly.
+For security-related questions or concerns that are not vulnerabilities, please open a regular issue on GitHub. Do not use public issues to disclose unfixed vulnerabilities.
 
 ---
 
