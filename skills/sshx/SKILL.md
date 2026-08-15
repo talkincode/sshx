@@ -211,6 +211,14 @@ By default sshx blocks obviously destructive commands (`rm -rf /`, `mkfs`, `dd`,
 fork bombs, `curl | sh`, edits to `/etc/passwd|shadow`, shutdown/reboot). A blocked
 command never touches the network and reports `error_kind: "blocked"`.
 
+Direct database client execution is also blocked in run/script mode: any
+command that puts `psql`/`pgcli` in command position — including wrapped forms
+like `docker exec <c> psql ...`, `sudo -u postgres psql ...`,
+`sh -c 'psql ...'`, `kubectl exec ... -- psql ...`, or `echo "SQL" | psql` —
+is rejected with a pointer to `sshx sql`. Availability probes stay allowed
+(`which psql`, `psql --version`, `pg_isready`). Do not `--force` around this;
+run the statement through `sshx sql` instead.
+
 ```bash
 sshx -h=host "sudo rm -rf /tmp/*"   # allowed
 sshx -h=host "sudo rm -rf /"        # BLOCKED
@@ -395,3 +403,5 @@ sshx --help      # full reference
    it classifies the statement, gates DML behind EXPLAIN, backs up affected data,
    and audits everything. Preview with `--dry-run --json` first; add
    `--docker=<container>` / `--db-cred-from=` for Dockerized production DBs.
+   Direct `psql` invocations (including `docker exec ... psql`) are blocked by
+   the safety check — rework the command as `sshx sql`, do not bypass with `--force`.

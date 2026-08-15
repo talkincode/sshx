@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Block direct database client execution in run/script mode: commands that put
+  `psql`/`pgcli` in command position — including `docker exec <c> psql ...`,
+  `sudo -u postgres psql ...`, `sh -c 'psql ...'`, `kubectl exec ... -- psql`,
+  pipes into psql, and command substitution — are rejected before any network
+  work with guidance to use the guarded `sshx sql` pipeline instead.
+  Availability probes (`which psql`, `psql --version`, `pg_isready`) remain
+  allowed, and `--force` still provides an audited explicit bypass.
+
 ## [0.4.0] - 2026-08-15
 
 ### Added

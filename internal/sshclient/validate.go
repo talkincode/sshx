@@ -128,6 +128,15 @@ func ValidateCommand(command string) error {
 		}
 	}
 
+	if engine, client, found := detectGuardedDBClient(cmd, 0); found {
+		return &CommandBlockedError{
+			Command: cmd,
+			Reason: fmt.Sprintf("Direct %s client execution (%q) bypasses the guarded SQL pipeline. "+
+				"Use: sshx sql -h=<host> --db=<name> [--docker=<container>] \"<SQL>\" "+
+				"(adds classification, EXPLAIN, atomic backups, and audit)", engine, client),
+		}
+	}
+
 	return nil
 }
 
