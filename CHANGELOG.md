@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock. Catalog preflight blocks automatic execution when triggers, rewrite
   rules, partitions, or cascading referential actions prevent a bounded backup;
   UPSERT targets are backed up before overwrite.
+- Raise the build and CI toolchain to Go 1.25.13, which contains the standard
+  library fixes for GO-2026-6218 and GO-2026-5972.
 
 ## [0.3.0] - 2026-08-13
 
