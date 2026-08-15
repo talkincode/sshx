@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-15
+
 ### Security
 
 - Block direct database client execution in run/script mode: commands that put
@@ -368,7 +370,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/talkincode/sshx/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/talkincode/sshx/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/talkincode/sshx/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/talkincode/sshx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/talkincode/sshx/compare/v0.0.14...v0.1.0
