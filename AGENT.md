@@ -88,8 +88,8 @@ management, authentication UX, safety checks, auditing, and cross-platform
 correctness. Read-only host inspection, local plugin lifecycle, explicit plugin
 trust, and bounded observation reuse are also in scope. Guarded SQL execution
 (`sshx sql`) is a deliberate scope expansion: statements run through the
-database client already present on the remote host (psql), sshx embeds
-no database driver, opens no tunnel, and keeps the one-shot
+database client already present on the remote host (psql or sqlite3), sshx
+embeds no database driver, opens no tunnel, and keeps the one-shot
 connect–execute–exit model.
 
 ## 4. Architecture
@@ -117,7 +117,7 @@ internal/execution/       → versioned request/result model, selectors, executo
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/skillinstall/    → conflict-safe, atomic Agent skill installation
-internal/sqlsafe/         → fail-closed SQL classification, policy gates, transactional backup decisions, psql assembly
+internal/sqlsafe/         → fail-closed SQL classification, policy gates, transactional backup decisions, psql/sqlite3 assembly
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   remote_state.go         → restrictive atomic remote observation I/O
@@ -141,7 +141,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | `skill`    | `sshx skill install`                      | install/update the embedded Agent skill |
 | `plugin`   | `sshx plugin <action>`                    | manage local inspection plugins         |
 | `inspect`  | `sshx inspect ... <capability-id>`        | collect/reuse one host observation      |
-| `sql`      | `sshx sql ... "<statement>"`              | guarded SQL via the remote psql client  |
+| `sql`      | `sshx sql ... "<statement>"`              | guarded SQL via remote psql or sqlite3  |
 
 ### State & storage
 

@@ -1,6 +1,6 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL statements through the remote psql client (with EXPLAIN gates, automatic backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
+description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
 ---
 
 # sshx
@@ -20,7 +20,7 @@ its work, and exits — there is no daemon, shell, tunneling, or port forwarding
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
 - Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized)
-  with classification, EXPLAIN gates, automatic backups, and a full audit trail.
+  or a remote SQLite file, with classification, backups, and a full audit trail.
 - Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
 
 ## Inspect before repeating discovery commands
@@ -212,12 +212,13 @@ fork bombs, `curl | sh`, edits to `/etc/passwd|shadow`, shutdown/reboot). A bloc
 command never touches the network and reports `error_kind: "blocked"`.
 
 Direct database client execution is also blocked in run/script mode: any
-command that puts `psql`/`pgcli` in command position — including wrapped forms
-like `docker exec <c> psql ...`, `sudo -u postgres psql ...`,
-`sh -c 'psql ...'`, `kubectl exec ... -- psql ...`, or `echo "SQL" | psql` —
-is rejected with a pointer to `sshx sql`. Availability probes stay allowed
-(`which psql`, `psql --version`, `pg_isready`). Do not `--force` around this;
-run the statement through `sshx sql` instead.
+command that puts `psql`/`pgcli`/`sqlite3` in command position — including
+wrapped forms like `docker exec <c> psql ...`, `sudo -u postgres psql ...`,
+`sudo -u app sqlite3 ...`, `sh -c 'psql ...'`, `kubectl exec ... -- psql ...`,
+or `echo "SQL" | psql` — is rejected with a pointer to `sshx sql`.
+Availability probes stay allowed (`which psql`, `psql --version`,
+`pg_isready`, `sqlite3 --version`). Do not `--force` around this; run the
+statement through `sshx sql` instead.
 
 ```bash
 sshx -h=host "sudo rm -rf /tmp/*"   # allowed
@@ -306,6 +307,34 @@ sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
   (default 15m; `--cred-cache=off|<duration>`, `--cred-refresh` to force
   re-resolution). Expired entries are actively deleted. The JSON result reports
   `cred_source` and `cred_cache` (`hit`/`stored`/`resolved`).
+
+### SQLite files on the remote host
+
+SQLite is a file, not a server. Identity is an absolute path; there is no
+database role or password flag.
+
+```bash
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+    "SELECT count(*) FROM users"
+
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --dry-run --json \
+    "UPDATE users SET active=0 WHERE id=42"
+
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+    "UPDATE users SET active=0 WHERE id=42"
+```
+
+- Reads open `file:<path>?mode=ro`. DML does not use EXPLAIN row estimates:
+  a bounded `UPDATE`/`DELETE` snapshots the table to CSV; overwrites
+  (`REPLACE`, `INSERT OR REPLACE`, UPSERT) and unbounded changes take a
+  whole-file `sqlite3 .backup` under `BEGIN IMMEDIATE`.
+- Always blocked: sqlite3 dot-commands (`.shell`, `.read`, `.once`),
+  `ATTACH`/`DETACH`, `load_extension`, writable `PRAGMA`, `VACUUM INTO`,
+  URI or `:memory:` identities, and relative paths.
+- Table CSV snapshots still run trigger/FK preflight. A whole-file backup
+  already covers related tables, so that check is skipped.
+- `--db-user`, `--db-password-key`, `--docker`, and `--db-cred-from` are
+  rejected. `--db=` may be used as an alias for the absolute file path.
 
 ## SFTP file operations
 
@@ -399,9 +428,9 @@ sshx --help      # full reference
    for ad-hoc IPs pass `-pk=<key>`. Use `--host-list` to see each host's key.
 4. Trust the safety check — only `--force` a blocked command when you are certain.
 5. Treat `exit_code` 1..254 as the remote program's status; `255` / `-1` is an sshx error.
-6. For database work use `sshx sql`, never raw `psql` strings through `sshx run`:
-   it classifies the statement, gates DML behind EXPLAIN, backs up affected data,
-   and audits everything. Preview with `--dry-run --json` first; add
-   `--docker=<container>` / `--db-cred-from=` for Dockerized production DBs.
-   Direct `psql` invocations (including `docker exec ... psql`) are blocked by
-   the safety check — rework the command as `sshx sql`, do not bypass with `--force`.
+6. For database work use `sshx sql`, never raw `psql` or `sqlite3` strings
+   through `sshx run`: it classifies the statement, backs up affected data,
+   and audits everything. Preview with `--dry-run --json` first. PostgreSQL
+   adds `--docker=<container>` / `--db-cred-from=` for containerized DBs;
+   SQLite uses `--engine=sqlite --db-file=/abs/path.db`. Direct `psql` /
+   `sqlite3` invocations are blocked — rework as `sshx sql`, do not `--force`.

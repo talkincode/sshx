@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -529,7 +530,7 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 // SQL statement is the positional argument (or everything after `--`).
 func parseSQLArgs(config *sshclient.Config, args []string) {
 	config.Mode = "sql"
-	config.SQLEngine = "postgres"
+	config.SQLEngine = sqlsafe.EnginePostgres
 	sqlParts := []string{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -565,9 +566,11 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 		case strings.HasPrefix(arg, "--known-hosts="):
 			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--engine="):
-			config.SQLEngine = strings.SplitN(arg, "=", 2)[1]
+			config.SQLEngine = sqlsafe.NormalizeEngine(strings.SplitN(arg, "=", 2)[1])
 		case strings.HasPrefix(arg, "--db="), strings.HasPrefix(arg, "--database="):
 			config.SQLDatabase = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--db-file="):
+			config.SQLFile = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--db-user="):
 			config.SQLUser = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--db-host="):

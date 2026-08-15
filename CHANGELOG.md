@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-15
+
+### Added
+
+- Add guarded SQLite execution through `sshx sql --engine=sqlite --db-file=<abs-path>`.
+  Statements run via the remote `sqlite3` client with fail-closed dialect
+  classification, table or whole-file backups under `BEGIN IMMEDIATE`,
+  trigger/FK preflight for table CSV snapshots, read-only `file:` URIs, and
+  the same JSON/audit contract as PostgreSQL.
+
+### Security
+
+- Reject SQLite `ATTACH`/`DETACH`, sqlite3 dot-commands, `load_extension`,
+  writable `PRAGMA`, `VACUUM INTO`, and in-memory/URI database identities.
+  `REPLACE` / `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` are treated as
+  overwrites and snapshotted before mutation.
+- Extend the run-mode database-client block to `sqlite3` so embedded-file
+  mutations also go through `sshx sql`.
+
 ## [0.4.1] - 2026-08-15
 
 ### Security

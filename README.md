@@ -343,15 +343,19 @@ sshx -h=prod-web --pty "top -b -n1"
 
 The timeout can also be set via the `SSH_TIMEOUT` environment variable.
 
-## Guarded PostgreSQL Execution
+## Guarded SQL Execution
 
-Use `sshx sql` instead of sending raw `psql` commands through `sshx run`. It
-accepts exactly one statement, classifies it locally, blocks unbounded or
-unsupported forms, runs `EXPLAIN (FORMAT JSON)` before DML, backs up affected
-data, and records a structured audit event. Psql backslash commands,
-data-modifying CTE bodies, `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`, and dblink
-delegated execution are blocked. Accepted reads run in a PostgreSQL read-only
-transaction to prevent writes through the current connection.
+Use `sshx sql` instead of sending raw `psql` or `sqlite3` commands through
+`sshx run`. It accepts exactly one statement, classifies it locally, blocks
+unbounded or unsupported forms, backs up affected data, and records a
+structured audit event. Direct `psql`/`pgcli`/`sqlite3` invocations in
+run/command mode are blocked.
+
+For PostgreSQL, sshx runs `EXPLAIN (FORMAT JSON)` before DML. Psql backslash
+commands, data-modifying CTE bodies, `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`,
+and dblink delegated execution are blocked. Accepted reads run in a
+PostgreSQL read-only transaction to prevent writes through the current
+connection.
 
 ```bash
 # Read-only query
@@ -398,6 +402,22 @@ sshx sql -h=prod --docker=pg-prod \
 
 Remotely resolved credentials are cached for 15 minutes by default. Secret
 values live only in the OS keyring; local metadata records identity and expiry.
+
+SQLite files live on the application host. Pass an absolute path; there is no
+database role or password:
+
+```bash
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+  "SELECT count(*) FROM users"
+
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+  "UPDATE users SET active=0 WHERE id=42"
+```
+
+SQLite reads open `file:<path>?mode=ro`. Bounded DML snapshots the table to
+CSV; overwrites and unbounded changes take a whole-file `sqlite3 .backup`
+under `BEGIN IMMEDIATE`. `ATTACH`, sqlite3 dot-commands, `load_extension`,
+and writable `PRAGMA` are blocked.
 Use `--cred-cache=off` to disable caching or `--cred-refresh` to discard and
 resolve the current value again.
 

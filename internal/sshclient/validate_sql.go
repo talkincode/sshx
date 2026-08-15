@@ -16,8 +16,9 @@ import (
 // guardedDBClients maps the basename of a client binary to the engine name
 // used in the block reason. Only clients covered by `sshx sql` are listed.
 var guardedDBClients = map[string]string{
-	"psql":  "PostgreSQL",
-	"pgcli": "PostgreSQL",
+	"psql":    "PostgreSQL",
+	"pgcli":   "PostgreSQL",
+	"sqlite3": "SQLite",
 }
 
 // dbClientHarmlessArgs are client arguments that cannot execute SQL. A client
