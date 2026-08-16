@@ -7,6 +7,7 @@
   - [Guarded File Apply](apply.md)
   - [Agent and Script Mode](agent-scripting.md)
   - [Inspection Capabilities and Local Plugins](inspection-plugins.md)
+  - [MCP Server (stdio)](mcp.md)
   - [Usage Scenarios](usage-scenarios.md)
   - [Security Guidelines](security-guidelines.md)
   - [Troubleshooting](troubleshooting.md)

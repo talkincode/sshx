@@ -105,6 +105,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "skill":
 			parseSkillArgs(config, args[2:])
 			return config
+		case "mcp":
+			parseMCPArgs(config, args[2:])
+			return config
 		case "inspect":
 			parseInspectArgs(config, args[2:])
 			return config

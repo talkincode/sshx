@@ -63,8 +63,11 @@ the project's mission:
 
 **Out of scope (will not be accepted by default):**
 
-- ❌ **MCP server / Model Context Protocol** — removed on purpose. `sshx` is
-  CLI-only. Do not reintroduce an `mcp-stdio` mode or MCP tools.
+- ❌ **HTTP/SSE MCP server, daemons, or resident protocol services** — the
+  stdio MCP server (`sshx mcp`) is in scope: it is spawned and owned by an MCP
+  client, lives for exactly one client session, and re-enters sshx as one-shot
+  child processes per tool call. Do not add an HTTP/SSE transport, a listening
+  socket, or any server that outlives its client.
 - ❌ **Daemons / long-running services / connection pools** — every command opens
   a connection, does its work, and exits. There is no background process.
 - ❌ **Resident remote agent / control plane** — do not require a service to be
@@ -90,7 +93,11 @@ correctness. Read-only host inspection, local plugin lifecycle, explicit plugin
 trust, and bounded observation reuse are also in scope. Guarded SQL execution
 (`sshx sql`) and guarded file apply (`sshx apply`) are deliberate scope
 expansions: they absorb mutation risk (classify → precondition → backup →
-atomic change → structured result) without becoming a workflow engine.
+atomic change → structured result) without becoming a workflow engine. The
+stdio MCP server (`sshx mcp`) is a thin adapter over the same contract: tools
+map 1:1 to CLI verbs, results are the CLI's versioned JSON, every call is a
+one-shot child invocation audited with `entry=mcp`, and password management is
+never exposed as a tool.
 
 **Convergence test:** every new sshx feature must remove an Agent judgment, not
 add a command the Agent has to learn. Absorb remote tax (host, credential,
@@ -118,6 +125,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   inspect.go              → one-shot capability execution + observation caching
   sql.go                  → sshx sql: guarded SQL pipeline (classify → gate → explain → backup → execute)
   apply.go                → sshx apply: guarded single-file mutation (hash → backup → atomic write)
+  mcp.go                  → sshx mcp: stdio MCP server; tools self-exec sshx as one-shot children
 internal/execution/       → versioned request/result model, selectors, executor
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
@@ -362,7 +370,9 @@ Items must respect the boundaries in §3.
 
 **Now / recently shipped**
 
-- ✅ CLI-only refactor (MCP server + connection pool removed).
+- ✅ CLI-only refactor (resident MCP server + connection pool removed), later
+  followed by the deliberate reintroduction of a **stdio-only** MCP adapter
+  (`sshx mcp`) over the same one-shot execution contract.
 - ✅ Per-host SSH keys and per-host password keys.
 - ✅ Strict host-key verification with opt-in overrides.
 - ✅ Hardened sudo password handling (stdin), atomic config writes, secure
@@ -388,8 +398,9 @@ Items must respect the boundaries in §3.
 
 - ⬜ Pluggable secret backends behind the existing keyring abstraction.
 
-Anything implying a daemon, MCP, tunneling, or a GUI is explicitly **rejected**
-unless the mission in §1–§3 is formally revised.
+Anything implying a daemon, a resident protocol server (including HTTP/SSE
+MCP), tunneling, or a GUI is explicitly **rejected** unless the mission in
+§1–§3 is formally revised.
 
 ## 11. Release Process
 
@@ -406,8 +417,8 @@ unless the mission in §1–§3 is formally revised.
 When working in this repo:
 
 1. **Stay within the mission.** Re-read §3 before adding features. Default to a
-   smaller change. Never reintroduce MCP, a daemon, a connection pool, tunneling,
-   or a GUI.
+   smaller change. Never introduce a daemon, a connection pool, an HTTP/SSE
+   protocol server, tunneling, or a GUI.
 2. **Hold the toolchain line.** Keep `go.mod` at `go 1.25.13`. If a dependency
    forces a newer directive, pin an older compatible version instead of bumping
    the directive (CI runs Go 1.25.13).

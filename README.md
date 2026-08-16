@@ -20,7 +20,7 @@ Agent-Native Remote Execution over SSH
 [![Release](https://img.shields.io/github/v/release/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshx/blob/main/LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshx?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshx)
-[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
+[![Coverage](https://img.shields.io/badge/coverage-48.4%25-yellowgreen?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
 
 [![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/network/members)
@@ -73,6 +73,8 @@ It remains a single binary with one-shot invocations and no resident component o
 9. One-shot host inspection with built-in system/network capabilities, local
    sshx-owned plugins, explicit digest trust, and freshness-bounded observations.
 10. Guarded single-file apply: hash precondition, backup, and atomic replace.
+11. Built-in stdio MCP server (`sshx mcp`): the same execution contract, safety
+    gates, and audit trail exposed as Model Context Protocol tools.
 
 ## Installation
 
@@ -343,6 +345,29 @@ sshx -h=prod-web --pty "top -b -n1"
 ```
 
 The timeout can also be set via the `SSH_TIMEOUT` environment variable.
+
+### MCP server (stdio)
+
+MCP-capable agents can consume the same execution contract as native tools:
+
+```bash
+sshx mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "sshx": { "command": "sshx", "args": ["mcp"] }
+  }
+}
+```
+
+The server speaks MCP over stdio only, is spawned and owned by the client, and
+re-enters sshx as a one-shot child process per tool call — identical safety
+gates, keyring roles, and audit trail (events carry `entry: "mcp"`). Exposed
+tools: `sshx_run`, `sshx_sql`, `sshx_apply`, `sshx_inspect`, `sshx_sftp`,
+`sshx_transfer`, `sshx_host_list`. Password management is deliberately not
+exposed over MCP. See [docs/mcp.md](docs/mcp.md).
 
 ## Guarded SQL Execution
 
@@ -869,6 +894,13 @@ make lint
 
 The normal E2E run uses an isolated, test-only keyring provider. CI additionally
 checks the production binary against an ephemeral macOS Keychain.
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow, testing requirements (including the acceptance-matrix
+rule for new features), and PR expectations, and [AGENT.md](AGENT.md) for the
+project's mission and scope boundaries.
 
 ## License
 

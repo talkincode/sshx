@@ -125,6 +125,10 @@ Agent / 自动化 / 人类运维者
 
   `sshx apply` 替换一个远程正则文件：绝对路径门闩、可选 `--expect-sha256` 前置条件、默认 owner-only 备份、同目录临时文件 + rename、保留权限/所有者。`--sudo` 先经 SFTP 暂存再特权安装。不包含 nginx -t 或 reload。证据：`internal/app/apply.go`、`internal/sshclient/apply.go`、`tests/e2e/apply_e2e_test.go`。
 
+- **stdio MCP server**
+
+  `sshx mcp` 通过 stdio 提供 Model Context Protocol 工具面：`sshx_run`、`sshx_sql`、`sshx_apply`、`sshx_inspect`、`sshx_sftp`、`sshx_transfer`、`sshx_host_list` 与 CLI 契约 1:1 映射，每次 tool call 以一次性子进程重新进入 sshx，结果就是 CLI 的版本化 JSON；force/bypass_reason 必须显式传参，密码管理不暴露，审计事件带 `entry=mcp` 标记。证据：`internal/app/mcp.go`、`internal/app/mcp_test.go`、`tests/e2e/mcp_e2e_test.go`。
+
 - **本地结构化审计**
 
   非 dry-run 调用默认写入本地 JSONL 审计事件，记录目标、动作、安全上下文、结果和耗时，排除 stdout/stderr，并对命令中的 secret-like 参数做尽力脱敏。证据：`internal/app/audit.go`、`internal/app/audit_test.go`。
@@ -153,7 +157,7 @@ Agent / 自动化 / 人类运维者
 
 - **不成为 Ansible、Salt 或工作流引擎。** 可以提供有界的多主机执行，但不引入期望状态语言、playbook 生态、调度系统或长期任务编排。
 
-- **不在核心二进制内重新引入 MCP server。** CLI 和进程级结构化契约是稳定集成面；需要 MCP 或其他协议时，应由外部适配层调用 sshx，而不是扩张核心运行模型。
+- **不做 HTTP/SSE MCP server、守护进程或常驻协议服务。** stdio MCP server（`sshx mcp`）在范围内：它由 MCP 客户端拉起并随会话生灭，每个 tool call 都以一次性子进程重新进入 sshx，复用同一套契约、安全门禁与审计。不得添加 HTTP/SSE 传输、监听端口或任何寿命超过其客户端的服务。
 
 - **不把危险命令防护宣传成沙箱。** sshx 降低误操作和凭据泄露风险，但不承诺安全执行恶意或不可信命令。
 
@@ -213,7 +217,7 @@ Agent / 自动化 / 人类运维者
 - 明显危险动作默认受阻，特权执行与安全绕过显式可见；secret 不出现在普通配置、命令拼接、审计记录或默认终端回显中。
 - 多主机执行即使部分失败，也能逐主机说明状态，并避免不受控并发和盲目重试。
 - 会修改远端状态的操作能够说明是否执行、是否部分完成以及下一步如何安全判断，而不是只返回一个模糊 EOF 或通用错误。
-- 项目继续保持单二进制、无远端驻留组件、无核心 MCP server、无长期控制面的轻量边界。
+- 项目继续保持单二进制、无远端驻留组件、无常驻协议服务（stdio MCP 随客户端会话生灭）、无长期控制面的轻量边界。
 - Agent 能在 sshx 运行目录快速创建、测试和信任应用探测插件；skill 只维护调用方法，不维护插件脚本。
 - 常见系统/网络或应用部署探索可在一次调用中形成可复用观察，且陈旧、身份漂移或不可信缓存不会被静默采用。
 - 每项一级能力都有覆盖真实 CLI 与真实 SSH/SFTP 边界的验收证据；安全与状态修改路径同时覆盖失败和恢复语义。
@@ -250,5 +254,6 @@ Agent / 自动化 / 人类运维者
 | 可解释执行治理 | 高 | 是 | 可能 | ✅ run 契约 dry-run/digest/intent/bypass_reason | ✅ blocked、uncertain completion、typed error.kind | ✅ SSH login vs sudo key 分离 | ✅ completion 指导 verify_first/unsafe | `tests/e2e/run_e2e_test.go`、`internal/app/run.go`、`internal/execution` |
 | 受控 SQL 执行（PostgreSQL / SQLite） | 高 | 是 | 是，远端库 | ✅ sqlite 只读查询与带备份 UPDATE | ✅ 直连客户端阻断、ATTACH 分类拒绝、缺路径 | ✅ operator 密码角色 | ✅ UPDATE 前 CSV 可还原旧值 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
 | 受控文件 Apply | 高 | 是 | 是，远端文件 | ✅ 创建/覆盖/幂等 | ✅ 哈希不匹配、符号链接、只读端 | ✅ operator/reader | ✅ 覆盖前备份可还原旧值 | `tests/e2e/apply_e2e_test.go`、`internal/app/apply_test.go`、`internal/sshclient/apply_test.go` |
+| stdio MCP 工具面 | 高 | 是 | 可能，经子进程 | ✅ initialize/tools/list/tools/call 真实执行 | ✅ force 缺 bypass_reason 被拒、非法输入本地拒绝 | ✅ operator 密码角色 | ✅ dry-run 零连接；审计 `entry=mcp` 可追溯 | `tests/e2e/mcp_e2e_test.go`、`internal/app/mcp_test.go` |
 
 当前已达到已实现一级能力的覆盖底线。表中的剩余红项属于尚未实现的方向能力，而不是用组件测试掩盖的既有质量债。未来任何一级能力不得只以参数解析或组件测试作为完成依据；必须沿用编译后二进制边界补充 E2E，并同步更新本矩阵。
