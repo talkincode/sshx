@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-16
+
+### Added
+
+- Add `sshx mcp`, a stdio Model Context Protocol server built on the official
+  `modelcontextprotocol/go-sdk`. Tools (`sshx_run`, `sshx_sql`, `sshx_apply`,
+  `sshx_inspect`, `sshx_sftp`, `sshx_transfer`, `sshx_host_list`) map 1:1 to
+  the CLI execution contract; every tool call re-enters sshx as a one-shot
+  child process and returns the CLI's versioned JSON verbatim. The server is
+  spawned and owned by an MCP client, holds no connections, and exits with its
+  client — HTTP/SSE transports and resident services remain out of scope.
+- `--host-list --json` now emits a machine-readable `sshx.hosts.v1` document
+  (names, addresses, groups, tags, and credential key references only).
+- Audit events record an `entry` field (currently `mcp`) so MCP-originated
+  executions are distinguishable from direct CLI use. The marker is metadata
+  only and never affects trust, safety, or credential decisions.
+- Add Windows CI coverage: build, vet, and unit tests for the cross-platform
+  core packages (`cmd`, `execution`, `keyringstore`, `sqlsafe`, `pkg`);
+  full-suite Windows enablement is tracked in issue #50.
+- Add `make test-keychain-macos` and `scripts/macos-dev-keychain.sh`: run the
+  real-keyring E2E suite locally inside an ephemeral macOS Keychain with no
+  GUI authorization prompts, restoring the original keychain afterwards.
+- Add `CONTRIBUTING.md` and unit coverage for `internal/keyringstore` (system
+  and `sshx_e2e` backends).
+
+### Security
+
+- Password management is deliberately not exposed over MCP; secret set/get
+  remains CLI-only. `force` / `no_safety_check` require an explicit
+  `bypass_reason` tool parameter, mirroring the CLI contract.
+
 ## [0.6.0] - 2026-08-16
 
 ### Added

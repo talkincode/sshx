@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -406,6 +407,10 @@ func handleHostList(config *sshclient.Config) error {
 
 	hosts := ListHosts(settings)
 
+	if config.JSONOutput {
+		return printHostListJSON(hosts)
+	}
+
 	if len(hosts) == 0 {
 		fmt.Println("No hosts configured.")
 		fmt.Println("\nTo add hosts:")
@@ -453,6 +458,52 @@ func handleHostList(config *sshclient.Config) error {
 	fmt.Printf("  sshx -h=%s \"command\"\n", hosts[0].Name)
 	fmt.Printf("  sshx --host-test %s\n", hosts[0].Name)
 
+	return nil
+}
+
+// hostListJSONEntry is the machine-readable projection of one configured
+// host. It references credential keys but never secret values.
+type hostListJSONEntry struct {
+	Name            string            `json:"name"`
+	Host            string            `json:"host"`
+	Port            string            `json:"port,omitempty"`
+	User            string            `json:"user,omitempty"`
+	Description     string            `json:"description,omitempty"`
+	KeyPath         string            `json:"key_path,omitempty"`
+	SSHPasswordKey  string            `json:"ssh_password_key,omitempty"`
+	SudoPasswordKey string            `json:"sudo_password_key,omitempty"`
+	Groups          []string          `json:"groups,omitempty"`
+	Tags            map[string]string `json:"tags,omitempty"`
+	Type            string            `json:"type,omitempty"`
+}
+
+func printHostListJSON(hosts []HostConfig) error {
+	entries := make([]hostListJSONEntry, 0, len(hosts))
+	for _, host := range hosts {
+		entries = append(entries, hostListJSONEntry{
+			Name:            host.Name,
+			Host:            host.Host,
+			Port:            host.Port,
+			User:            host.User,
+			Description:     host.Description,
+			KeyPath:         host.Key,
+			SSHPasswordKey:  host.EffectiveSSHPasswordKey(),
+			SudoPasswordKey: host.EffectiveSudoPasswordKey(),
+			Groups:          host.Groups,
+			Tags:            host.Tags,
+			Type:            host.Type,
+		})
+	}
+	doc := struct {
+		SchemaVersion string              `json:"schema_version"`
+		Count         int                 `json:"count"`
+		Hosts         []hostListJSONEntry `json:"hosts"`
+	}{SchemaVersion: "sshx.hosts.v1", Count: len(entries), Hosts: entries}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode host list: %w", err)
+	}
+	fmt.Println(string(data))
 	return nil
 }
 

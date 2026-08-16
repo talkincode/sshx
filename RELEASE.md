@@ -26,6 +26,10 @@ First, update `CHANGELOG.md` to record the changes for this release:
 - Bug fixes description
 ```
 
+Then update the supported-versions table in `SECURITY.md` so it matches the
+N / N-1 policy for the new release (e.g. releasing `v0.7.0` means `0.7.x` and
+`0.6.x` are supported and everything older is not).
+
 ### 2. Commit Changes
 
 ```bash

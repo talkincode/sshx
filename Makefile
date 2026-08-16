@@ -75,6 +75,10 @@ test-e2e: ## Run compiled-binary SSH/SFTP E2E tests (native keyring is opt-in)
 	@echo "Running compiled-binary E2E tests..."
 	$(GOTEST) -v ./tests/e2e
 
+test-keychain-macos: ## Run real-keyring E2E in an ephemeral macOS Keychain (no GUI prompts)
+	@echo "Running real-keyring E2E tests in an ephemeral macOS Keychain..."
+	bash scripts/macos-dev-keychain.sh
+
 test-verbose: ## Run verbose tests
 	@echo "Running verbose tests..."
 	$(GOTEST) -v -race ./...

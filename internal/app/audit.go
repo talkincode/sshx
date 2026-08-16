@@ -42,6 +42,7 @@ type auditEvent struct {
 	Timestamp     string `json:"timestamp"`
 	Version       string `json:"version,omitempty"`
 	Actor         string `json:"actor,omitempty"`
+	Entry         string `json:"entry,omitempty"`
 	OS            string `json:"os"`
 	Arch          string `json:"arch"`
 
@@ -171,6 +172,7 @@ func newAuditRecorder(config *sshclient.Config) *auditRecorder {
 			Timestamp:     started.UTC().Format(time.RFC3339Nano),
 			Version:       Version,
 			Actor:         currentActor(),
+			Entry:         currentEntry(),
 			OS:            runtime.GOOS,
 			Arch:          runtime.GOARCH,
 			HostInput:     config.Host,
@@ -625,6 +627,23 @@ func currentActor() string {
 		}
 	}
 	return ""
+}
+
+// currentEntry reports the invocation entry point declared by a wrapping sshx
+// process (currently "mcp" for the stdio MCP server). It is audit metadata
+// only: the value never participates in trust, safety, or credential
+// decisions, and anything but a short lowercase token is ignored.
+func currentEntry() string {
+	value := os.Getenv("SSHX_ENTRY")
+	if value == "" || len(value) > 32 {
+		return ""
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return ""
+		}
+	}
+	return value
 }
 
 func intPtr(value int) *int {

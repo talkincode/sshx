@@ -77,6 +77,14 @@ func Run(args []string) (err error) {
 	if config.Mode == "run" && config.Timeout == 0 {
 		config.Timeout = 60 * time.Second
 	}
+
+	// Serve the Model Context Protocol over stdio. The server writes no audit
+	// event itself: every tool call re-enters sshx as a one-shot child process
+	// that records its own audit trail with the MCP entry marker.
+	if config.Mode == "mcp" {
+		return RunMCPServer()
+	}
+
 	audit := newAuditRecorder(config)
 	defer func() {
 		if auditErr := audit.finish(config, err); auditErr != nil {

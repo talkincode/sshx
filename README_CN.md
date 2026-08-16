@@ -20,7 +20,7 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
 [![Release](https://img.shields.io/github/v/release/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/talkincode/sshx/blob/main/LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/talkincode/sshx?style=flat-square)](https://goreportcard.com/report/github.com/talkincode/sshx)
-[![Coverage](https://img.shields.io/badge/coverage-20.0%25-yellow?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
+[![Coverage](https://img.shields.io/badge/coverage-48.4%25-yellowgreen?style=flat-square&logo=go)](https://github.com/talkincode/sshx)
 
 [![GitHub Stars](https://img.shields.io/github/stars/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/talkincode/sshx?style=flat-square&logo=github)](https://github.com/talkincode/sshx/network/members)
@@ -73,6 +73,7 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 9. 单次主机环境探测：内置系统/网络能力，应用级插件归 sshx 本地运行目录管理，
    支持摘要信任和有有效期的观察快照。
 10. 受控单文件 apply：哈希前置条件、备份和原子替换。
+11. 内置 stdio MCP server（`sshx mcp`）：以 Model Context Protocol 工具形式暴露同一套执行契约、安全门禁与审计留痕。
 
 ## 安装
 
@@ -336,6 +337,24 @@ sshx -h=prod-web --pty "top -b -n1"
 ```
 
 超时也可以通过环境变量 `SSH_TIMEOUT` 设置。
+
+### MCP server（stdio）
+
+支持 MCP 的 Agent 可以把同一套执行契约当作原生工具消费：
+
+```bash
+sshx mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "sshx": { "command": "sshx", "args": ["mcp"] }
+  }
+}
+```
+
+server 仅通过 stdio 通信，由 MCP 客户端拉起并随之退出；每个 tool call 都以一次性子进程重新进入 sshx——安全门禁、keyring 凭据角色与审计留痕完全一致（审计事件带 `entry: "mcp"` 标记）。暴露的工具：`sshx_run`、`sshx_sql`、`sshx_apply`、`sshx_inspect`、`sshx_sftp`、`sshx_transfer`、`sshx_host_list`。密码管理刻意不经 MCP 暴露。详见 [docs/mcp.md](docs/mcp.md)。
 
 ## 主机探测与本地插件
 
@@ -702,6 +721,10 @@ make lint
 > lint 目标需要 `golangci-lint` v2.6.1 或更高版本。使用 `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.1` 安装。
 
 常规 E2E 使用仅供测试的隔离 keyring 后端；CI 还会让生产构建连接临时 macOS Keychain，验证真实系统 keyring 生命周期。
+
+## 贡献
+
+欢迎贡献。请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发流程、测试要求（包括新功能的验收矩阵规则）与 PR 规范，并阅读 [AGENT.md](AGENT.md) 了解项目使命与边界。
 
 ## 许可证
 

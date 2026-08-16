@@ -33,6 +33,7 @@ Usage:
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
   sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
   sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
+  sshx mcp                                        # Serve the execution contract over stdio (MCP)
 
 SSH Options:
   -h, --host=HOST          Remote host address (required in compatibility mode)

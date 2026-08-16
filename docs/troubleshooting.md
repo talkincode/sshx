@@ -142,3 +142,44 @@ sshx --version
 ```
 
 If installed with Go, confirm `~/go/bin` or your `GOPATH/bin` is in `PATH`.
+
+## macOS Keychain Prompts During Development
+
+Symptoms (contributors building sshx from source on macOS):
+
+- Every rebuilt binary triggers a Keychain authorization dialog when it reads
+  a stored password.
+- Real-keyring E2E runs interrupt with GUI prompts.
+
+Cause: Keychain item ACLs are bound to the binary's code signature. Each
+rebuild produces a new ad-hoc signature, so previously granted access no
+longer matches. macOS has no global per-app allowlist; the two supported
+mechanisms are a stable signing identity or an ephemeral test keychain.
+
+Fix 1 — ephemeral test keychain for E2E runs (recommended for tests):
+
+```bash
+make test-keychain-macos
+```
+
+This mirrors CI: it creates a throwaway keychain, makes it the user default,
+sets the key partition list so command-line tools need no GUI approval, runs
+the E2E suite with `SSHX_E2E_REAL_KEYRING=1`, and always restores your
+original keychain configuration afterwards.
+
+Fix 2 — stable self-signed identity for day-to-day manual use:
+
+1. Open Keychain Access → Certificate Assistant → Create a Certificate.
+   Name it `sshx-dev`, set Certificate Type to `Code Signing`.
+2. Sign every dev build with it:
+
+   ```bash
+   codesign -f -s sshx-dev ./bin/sshx
+   ```
+
+3. On the next Keychain prompt choose "Always Allow". Because the signing
+   identity now stays constant across rebuilds, the approval persists.
+
+Note: routine unit tests never touch the real Keychain — the `sshx_e2e` build
+tag swaps in a file-backed isolated keyring, and the E2E harness only uses the
+OS keyring when `SSHX_E2E_REAL_KEYRING=1` is set.
