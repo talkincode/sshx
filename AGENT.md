@@ -71,7 +71,8 @@ the project's mission:
   installed on managed hosts and do not turn sshx into a fleet control plane.
 - ❌ **Desired-state configuration / workflow orchestration** — bounded fan-out
   execution is in scope; playbooks, schedulers, reconciliation, and long-lived
-  workflow state are not.
+  workflow state are not. `sshx apply` may replace one file; it must not
+  validate-and-reload a service in the same invocation.
 - ❌ **GUI / TUI** — interaction is through flags and stdout/stderr only.
 - ❌ **Full OpenSSH replacement** — no interactive login shell multiplexing,
   port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
@@ -87,10 +88,13 @@ actions, bounded multi-host execution, password/secret references, named host
 management, authentication UX, safety checks, auditing, and cross-platform
 correctness. Read-only host inspection, local plugin lifecycle, explicit plugin
 trust, and bounded observation reuse are also in scope. Guarded SQL execution
-(`sshx sql`) is a deliberate scope expansion: statements run through the
-database client already present on the remote host (psql or sqlite3), sshx
-embeds no database driver, opens no tunnel, and keeps the one-shot
-connect–execute–exit model.
+(`sshx sql`) and guarded file apply (`sshx apply`) are deliberate scope
+expansions: they absorb mutation risk (classify → precondition → backup →
+atomic change → structured result) without becoming a workflow engine.
+
+**Convergence test:** every new sshx feature must remove an Agent judgment, not
+add a command the Agent has to learn. Absorb remote tax (host, credential,
+sudo, timeout, error class, backup). Do not wrap local Unix tools as new verbs.
 
 ## 4. Architecture
 
@@ -113,6 +117,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   plugin.go               → local plugin create/list/show/validate/test/trust/remove
   inspect.go              → one-shot capability execution + observation caching
   sql.go                  → sshx sql: guarded SQL pipeline (classify → gate → explain → backup → execute)
+  apply.go                → sshx apply: guarded single-file mutation (hash → backup → atomic write)
 internal/execution/       → versioned request/result model, selectors, executor
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
@@ -142,6 +147,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | `plugin`   | `sshx plugin <action>`                    | manage local inspection plugins         |
 | `inspect`  | `sshx inspect ... <capability-id>`        | collect/reuse one host observation      |
 | `sql`      | `sshx sql ... "<statement>"`              | guarded SQL via remote psql or sqlite3  |
+| `apply`    | `sshx apply --path= --from=`              | guarded single-file remote replace      |
 
 ### State & storage
 

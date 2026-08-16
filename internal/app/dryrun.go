@@ -79,8 +79,22 @@ type dryRunPlan struct {
 
 	// SQL is the guarded-SQL local plan (Mode == "sql").
 	SQL *sqlDryRunPlan `json:"sql,omitempty"`
+	// Apply is the guarded file-apply local plan (Mode == "apply").
+	Apply *applyDryRunPlan `json:"apply,omitempty"`
 
 	hostTestReadsSecret bool
+}
+
+type applyDryRunPlan struct {
+	RemotePath    string `json:"remote_path"`
+	LocalPath     string `json:"local_path"`
+	PayloadSHA256 string `json:"payload_sha256,omitempty"`
+	PayloadBytes  int    `json:"payload_bytes,omitempty"`
+	ExpectSHA256  string `json:"expect_sha256,omitempty"`
+	Backup        string `json:"backup"`
+	BackupDir     string `json:"backup_dir,omitempty"`
+	UseSudo       bool   `json:"use_sudo"`
+	Force         bool   `json:"force,omitempty"`
 }
 
 // sqlDryRunPlan is the local (connection-free) plan for one sql invocation.
@@ -145,6 +159,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	fillDryRunSudo(config, &plan)
 	fillDryRunValidation(config, &plan)
 	fillDryRunSQL(config, &plan)
+	fillDryRunApply(config, &plan)
 	fillDryRunEffects(config, &plan)
 
 	return plan
@@ -191,6 +206,10 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.CacheMode = config.InspectCacheMode
 	case "sql":
 		plan.Action = "sql"
+	case "apply":
+		plan.Action = "apply"
+		plan.LocalPath = config.LocalPath
+		plan.RemotePath = config.RemotePath
 	}
 }
 
@@ -204,7 +223,7 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.HostInput = config.Host
 	}
 
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" {
 		resolveDryRunSSHHost(config, plan)
 		return
 	}
@@ -333,6 +352,10 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 	}
 	if config.Mode == "inspect" {
 		plan.UsesSudo = config.InspectUseSudo
+		plan.SudoKey = config.SudoKey
+	}
+	if config.Mode == "apply" {
+		plan.UsesSudo = config.ApplyUseSudo
 		plan.SudoKey = config.SudoKey
 	}
 	if config.Mode == "host" && config.HostAction == "test" {
@@ -509,6 +532,12 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		mutates := plan.SQL != nil && plan.SQL.Class != "" && plan.SQL.Class != string(sqlsafe.ClassRead)
 		plan.WouldMutateRemote = plan.WouldExecute && mutates
 		plan.WouldWriteRemoteState = plan.WouldExecute && plan.SQL != nil && plan.SQL.BackupKind != "" && plan.SQL.BackupKind != string(sqlsafe.BackupNone)
+	case "apply":
+		plan.WouldConnect = canProceed
+		plan.WouldExecute = canProceed
+		plan.WouldReadSecret = canProceed && config.ApplyUseSudo && config.SudoKey != ""
+		plan.WouldMutateRemote = canProceed
+		plan.WouldWriteRemoteState = canProceed && !config.ApplyNoBackup
 	}
 	plan.MayMutateKnownHosts = plan.WouldConnect && config.AcceptUnknownHost
 }
@@ -619,8 +648,55 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 	}
 }
 
+func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
+	if config.Mode != "apply" {
+		return
+	}
+	if err := validateApplyConfig(config); err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: classifyError(err), Message: err.Error()}
+		if plan.ConfigCheck.ErrorKind == "error" {
+			plan.ConfigCheck.ErrorKind = "config"
+		}
+		plan.Valid = false
+		return
+	}
+	if err := applyPolicy(config); err != nil {
+		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+	applyPlan := &applyDryRunPlan{
+		RemotePath:   config.RemotePath,
+		LocalPath:    config.LocalPath,
+		ExpectSHA256: config.ApplyExpectSHA256,
+		Backup:       "file",
+		BackupDir:    config.ApplyBackupDir,
+		UseSudo:      config.ApplyUseSudo,
+		Force:        config.Force,
+	}
+	if config.ApplyNoBackup {
+		applyPlan.Backup = "none"
+	}
+	if data, err := os.ReadFile(config.LocalPath); err == nil {
+		if len(data) > sshclient.MaxApplyBytes {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: fmt.Sprintf("payload exceeds %d-byte apply limit", sshclient.MaxApplyBytes)}
+			plan.Valid = false
+			return
+		}
+		applyPlan.PayloadBytes = len(data)
+		applyPlan.PayloadSHA256 = sshclient.SHA256Hex(data)
+	} else {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "local_io", Message: fmt.Sprintf("read --from=%s: %v", config.LocalPath, err)}
+		plan.Valid = false
+		return
+	}
+	plan.Apply = applyPlan
+	plan.UsesSudo = config.ApplyUseSudo
+	plan.SafetyCheck = dryRunStatus{Status: "passed"}
+}
+
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")

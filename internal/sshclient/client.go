@@ -195,6 +195,12 @@ type Config struct {
 	SQLCredCacheTTL time.Duration
 	// SQLCredRefresh forces re-resolution, replacing any cached entry.
 	SQLCredRefresh bool
+
+	// Guarded file apply fields (Mode == "apply").
+	ApplyExpectSHA256 string
+	ApplyNoBackup     bool
+	ApplyBackupDir    string
+	ApplyUseSudo      bool
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.

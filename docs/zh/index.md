@@ -14,6 +14,7 @@
 - 把 sudo 密码保存到操作系统密钥链，而不是明文文件。
 - 用 `~/.sshx/settings.json` 里的主机短名称代替重复输入 IP、端口、用户和 key 路径。
 - 不打开交互式 SFTP 客户端，也能完成常见文件上传、下载和目录操作。
+- 用哈希前置条件、备份和原子替换安全地改一个远程文件。
 - 输出适合脚本和 AI agent 判断分支的 JSON。
 - 用 `--dry-run` 在连接、读取 secret、修改 `known_hosts` 或写配置前预览本地执行计划。
 - 写入本地 JSONL 审计日志，同时不记录明文密码、私钥、stdout 或 stderr。
@@ -82,3 +83,4 @@ sshx inspect -h=prod-web system.baseline --json
 - [Agent 与脚本模式](agent-scripting.md)说明 JSON、退出码、timeout 和审计日志。
 - [主机探测能力与本地插件](inspection-plugins.md)说明内置能力、`plugin create`、信任和观察快照。
 - [SFTP 工作流](sftp.md)覆盖上传、下载、列目录、创建目录和删除。
+- [受控文件 Apply](apply.md)用备份和哈希检查替换一个远程文件。

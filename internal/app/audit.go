@@ -134,6 +134,14 @@ type auditEvent struct {
 	SQLDocker        string `json:"sql_docker,omitempty"`
 	SQLCredSource    string `json:"sql_cred_source,omitempty"`
 	SQLCredCache     string `json:"sql_cred_cache,omitempty"`
+
+	ApplyExpectSHA256 string `json:"apply_expect_sha256,omitempty"`
+	ApplyPayloadHash  string `json:"apply_payload_sha256,omitempty"`
+	ApplyBeforeHash   string `json:"apply_before_sha256,omitempty"`
+	ApplyAfterHash    string `json:"apply_after_sha256,omitempty"`
+	ApplyBackupPath   string `json:"apply_backup_path,omitempty"`
+	ApplyChanged      bool   `json:"apply_changed,omitempty"`
+	ApplyCreated      bool   `json:"apply_created,omitempty"`
 }
 
 type auditRecorder struct {
@@ -281,6 +289,41 @@ func (r *auditRecorder) recordSQLOutcome(config *sshclient.Config, authMethod ss
 	r.completed = true
 }
 
+func (r *auditRecorder) recordApplyOutcome(config *sshclient.Config, authMethod sshclient.AuthMethod, outcome *sshclient.ApplyOutcome, payload []byte, phase string, exitCode int, kind string, failErr error) {
+	if r == nil {
+		return
+	}
+	r.refresh(config)
+	r.event.AuthMethod = string(authMethod)
+	r.event.Phase = phase
+	r.event.ActionIntent = "change"
+	if len(payload) > 0 {
+		r.event.ApplyPayloadHash = sshclient.SHA256Hex(payload)
+		r.event.PayloadSHA256 = r.event.ApplyPayloadHash
+	}
+	r.event.ApplyExpectSHA256 = config.ApplyExpectSHA256
+	if outcome != nil {
+		r.event.ApplyBeforeHash = outcome.BeforeSHA256
+		r.event.ApplyAfterHash = outcome.AfterSHA256
+		r.event.ApplyBackupPath = outcome.BackupPath
+		r.event.ApplyChanged = outcome.Changed
+		r.event.ApplyCreated = outcome.Created
+	}
+	r.event.WouldMutateRemote = failErr == nil && outcome != nil && outcome.Changed
+	r.event.DurationMs = time.Since(r.started).Milliseconds()
+	r.event.ExitCode = intPtr(exitCode)
+	if failErr != nil {
+		r.event.Outcome = auditStatus{
+			Status:    "failure",
+			ErrorKind: kind,
+			Message:   redactError(failErr),
+		}
+	} else {
+		r.event.Outcome = auditStatus{Status: "success"}
+	}
+	r.completed = true
+}
+
 func (r *auditRecorder) finish(config *sshclient.Config, err error) error {
 	if r == nil {
 		return nil
@@ -365,6 +408,9 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.PasswordValueProvided = config.PasswordValue != ""
 	r.event.PasswordKey = config.PasswordKey
 	r.event.UsesSudo = sshclient.CommandUsesSudo(config.Command)
+	if config.Mode == "apply" {
+		r.event.UsesSudo = config.ApplyUseSudo
+	}
 	if config.Mode == "inspect" {
 		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
 			if useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest); privilegeErr == nil {
@@ -471,6 +517,8 @@ func auditAction(config *sshclient.Config) string {
 		return "inspect"
 	case "sql":
 		return "sql"
+	case "apply":
+		return "apply"
 	default:
 		return ""
 	}
@@ -499,6 +547,8 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 		return config.InspectUseSudo && config.SudoKey != ""
 	case "sql":
 		return config.SQLPasswordKey != "" || config.SQLCredFrom != ""
+	case "apply":
+		return config.ApplyUseSudo && config.SudoKey != ""
 	default:
 		return false
 	}
@@ -534,6 +584,8 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 	case "sql":
 		// Conservative: refined by the sql handler once the statement class
 		// is known (reads do not mutate).
+		return true
+	case "apply":
 		return true
 	default:
 		return false

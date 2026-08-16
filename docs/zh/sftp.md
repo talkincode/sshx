@@ -8,16 +8,11 @@
 sshx -h=prod-web --upload=./deploy/nginx.conf --to=/tmp/nginx.conf
 ```
 
-生产环境更安全的模式：
+覆盖已有远程文件并需要备份/哈希前置条件时，用 [受控文件 Apply](apply.md)，不要自己拼 upload + `install`：
 
 ```bash
-# 先上传到临时路径
-sshx -h=prod-web --upload=./deploy/nginx.conf --to=/tmp/nginx.conf
-
-# 检查后再移动到正式位置
-sshx -h=prod-web "sudo install -m 0644 /tmp/nginx.conf /etc/nginx/nginx.conf"
-sshx -h=prod-web "sudo nginx -t"
-sshx -h=prod-web "sudo systemctl reload nginx"
+sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./deploy/nginx.conf --sudo --json
+sshx run --target=prod-web --json -- "sudo nginx -t"
 ```
 
 ## 下载文件

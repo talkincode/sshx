@@ -114,6 +114,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "sql":
 			parseSQLArgs(config, args[2:])
 			return config
+		case "apply":
+			parseApplyArgs(config, args[2:])
+			return config
 		}
 	}
 
@@ -649,6 +652,79 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 	// repeated statements don't re-read the production environment.
 	if config.SQLCredFrom != "" && config.SQLCredCacheTTL == 0 && !sqlCredCacheExplicit(args) {
 		config.SQLCredCacheTTL = DefaultCredCacheTTL
+	}
+}
+
+// parseApplyArgs parses the `sshx apply` guarded file-mutation subcommand.
+func parseApplyArgs(config *sshclient.Config, args []string) {
+	config.Mode = "apply"
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			config.ArgumentError = "apply does not take a positional command; use --from= and --path="
+			return
+		}
+		switch {
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--target="):
+			config.Host = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
+			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--path="):
+			config.RemotePath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--from="):
+			config.LocalPath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--expect-sha256="):
+			config.ApplyExpectSHA256 = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--backup-dir="):
+			config.ApplyBackupDir = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-backup":
+			config.ApplyNoBackup = true
+		case arg == "--sudo":
+			config.ApplyUseSudo = true
+		case arg == "--force", arg == "-f":
+			config.Force = true
+		case strings.HasPrefix(arg, "--bypass-reason="):
+			config.BypassReason = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--json":
+			config.JSONOutput = true
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown apply option %q", arg)
+		}
 	}
 }
 

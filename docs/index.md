@@ -14,6 +14,7 @@ The documentation starts in English by default. Use the language switch in the t
 - Save sudo passwords in the operating system keyring instead of plaintext files.
 - Use short host names from `~/.sshx/settings.json` instead of repeating IP, port, user, and key paths.
 - Perform small SFTP tasks without opening an interactive client.
+- Replace one remote regular file with a hash, backup, and atomic write.
 - Produce JSON output that scripts and AI agents can branch on.
 - Preview local execution plans with `--dry-run` before connecting, reading secrets, mutating `known_hosts`, or writing host config.
 - Keep a local JSONL audit trail without recording plaintext passwords, private keys, stdout, or stderr.
@@ -82,3 +83,4 @@ Read [Security Guidelines](security-guidelines.md) before using `sshx` in produc
 - [Agent and Script Mode](agent-scripting.md) explains JSON output, exit codes, timeouts, and audit logs.
 - [Inspection Capabilities and Local Plugins](inspection-plugins.md) explains built-ins, `plugin create`, trust, and observations.
 - [SFTP Workflows](sftp.md) covers upload, download, list, mkdir, and remove.
+- [Guarded File Apply](apply.md) replaces one remote file with backup and hash checks.

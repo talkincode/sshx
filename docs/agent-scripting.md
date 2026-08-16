@@ -76,6 +76,19 @@ else
 fi
 ```
 
+## Guarded File Apply
+
+Prefer `sshx apply` when replacing one remote regular file. Branch on
+`changed`, `completion`, and `error_kind`. A `precondition` failure means the
+file was not written.
+
+```bash
+sshx apply --target=prod-web --path=/etc/nginx/nginx.conf \
+    --from=./nginx.conf --expect-sha256="$current" --sudo --json
+```
+
+Reload stays a separate `sshx run`. See [Guarded File Apply](apply.md).
+
 ## Reusable Host Inspection
 
 Before repeating a chain of discovery commands, list and run a bounded

@@ -28,6 +28,10 @@ func Classify(err error) string {
 		return ErrorKindRemoteIO
 	case errors.Is(err, ErrBlocked):
 		return ErrorKindBlocked
+	case errors.Is(err, sshclient.ErrPrecondition):
+		return ErrorKindPrecondition
+	case errors.Is(err, sshclient.ErrApplyBlocked):
+		return ErrorKindBlocked
 	}
 	var blocked *sshclient.CommandBlockedError
 	if errors.As(err, &blocked) {
@@ -81,7 +85,7 @@ func BuildError(err error, kind, intent, completion string) *ErrorInfo {
 	case ErrorKindTimeout, ErrorKindConnect, ErrorKindProtocol:
 		info.Retryable = true
 		info.RetrySafety = RetryVerifyFirst
-	case ErrorKindAuth, ErrorKindHostKey, ErrorKindBlocked, ErrorKindConfig, ErrorKindLocalIO:
+	case ErrorKindAuth, ErrorKindHostKey, ErrorKindBlocked, ErrorKindConfig, ErrorKindLocalIO, ErrorKindPrecondition:
 		info.Retryable = false
 		info.RetrySafety = RetryUnsafe
 	case ErrorKindRemoteExit:

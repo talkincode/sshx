@@ -32,6 +32,7 @@ Usage:
   sshx plugin list [--json]                       # List built-in and local capabilities
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
   sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
+  sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
 
 SSH Options:
   -h, --host=HOST          Remote host address (required in compatibility mode)
@@ -295,6 +296,35 @@ Guarded SQL Execution:
       --cred-cache=1h "SELECT count(*) FROM orders"
   sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
       "UPDATE users SET active=0 WHERE id=42"
+
+Guarded File Apply:
+  sshx apply -h=<host> --path=/abs/remote.conf --from=./local.conf [options]
+  sshx apply --target=<name> --path=/abs/remote.conf --from=./local.conf --json
+
+  Replaces one remote regular file. sshx reads the current file, optionally
+  checks --expect-sha256, writes an owner-only backup, then atomically replaces
+  the target while preserving mode and owner. Reload/restart is not part of
+  this command — run a separate sshx run after apply succeeds.
+
+  --path=PATH             Absolute remote file path (required)
+  --from=PATH             Local source file (required)
+  --expect-sha256=HEX     Fail closed unless the current remote hash matches
+  --no-backup             Skip the pre-change copy (requires --force)
+  --backup-dir=PATH       Remote backup directory (default: ~/.sshx/file-backups)
+  --sudo                  Stage the payload over SFTP, then install with sudo
+  --force, -f             Skip the hash precondition; required with --no-backup
+  --bypass-reason=TEXT    Required with --force to overwrite /etc/passwd,
+                          /etc/shadow, or /etc/sudoers
+
+  JSON fields to branch on: success, changed, created, completion, error_kind
+  (precondition/blocked/remote_io/config/...), before_sha256, after_sha256,
+  backup.path, rollback_available. Identical content is success with
+  changed=false and does not write a backup.
+
+  sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
+      --expect-sha256=<current> --sudo --json
+  sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
+      --dry-run --json
 
 Plugin Management:
   sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]
