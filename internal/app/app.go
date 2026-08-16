@@ -104,6 +104,13 @@ func Run(args []string) (err error) {
 		return HandleSQL(config, audit)
 	}
 
+	if config.Mode == "apply" {
+		if config.Timeout == 0 {
+			config.Timeout = 60 * time.Second
+		}
+		return HandleApply(config, audit)
+	}
+
 	// Handle password management mode
 	if config.Mode == "password" {
 		if pwdErr := HandlePasswordManagement(config); pwdErr != nil {

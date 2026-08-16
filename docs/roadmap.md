@@ -121,6 +121,10 @@ Agent / 自动化 / 人类运维者
 
   `sshx sql` 通过远端已有的 `psql` 或 `sqlite3` 执行恰好一条语句：本地 fail-closed 分类、策略门闩、变更前备份、结构化 JSON 与审计。PostgreSQL 另有 EXPLAIN 行数估计、表锁事务备份和容器凭据发现；SQLite 以绝对文件路径为身份，只读走 `file:?mode=ro`，变更在 `BEGIN IMMEDIATE` 下做表 CSV 或整文件 `.backup`。证据：`internal/app/sql.go`、`internal/sqlsafe/`、`tests/e2e/sql_sqlite_e2e_test.go`。
 
+- **受控文件 Apply**
+
+  `sshx apply` 替换一个远程正则文件：绝对路径门闩、可选 `--expect-sha256` 前置条件、默认 owner-only 备份、同目录临时文件 + rename、保留权限/所有者。`--sudo` 先经 SFTP 暂存再特权安装。不包含 nginx -t 或 reload。证据：`internal/app/apply.go`、`internal/sshclient/apply.go`、`tests/e2e/apply_e2e_test.go`。
+
 - **本地结构化审计**
 
   非 dry-run 调用默认写入本地 JSONL 审计事件，记录目标、动作、安全上下文、结果和耗时，排除 stdout/stderr，并对命令中的 secret-like 参数做尽力脱敏。证据：`internal/app/audit.go`、`internal/app/audit_test.go`。
@@ -245,5 +249,6 @@ Agent / 自动化 / 人类运维者
 | 有界多主机执行 | 高 | 是 | 可能，多主机 | ✅ `sshx run` 组/标签选择 + concurrency 1/4/8/32 | ✅ fail_fast、部分失败、零匹配 | ✅ operator 密码角色 | ✅ 每个选中目标都有终态事件 | `tests/e2e/run_e2e_test.go`、`internal/execution/*_test.go` |
 | 可解释执行治理 | 高 | 是 | 可能 | ✅ run 契约 dry-run/digest/intent/bypass_reason | ✅ blocked、uncertain completion、typed error.kind | ✅ SSH login vs sudo key 分离 | ✅ completion 指导 verify_first/unsafe | `tests/e2e/run_e2e_test.go`、`internal/app/run.go`、`internal/execution` |
 | 受控 SQL 执行（PostgreSQL / SQLite） | 高 | 是 | 是，远端库 | ✅ sqlite 只读查询与带备份 UPDATE | ✅ 直连客户端阻断、ATTACH 分类拒绝、缺路径 | ✅ operator 密码角色 | ✅ UPDATE 前 CSV 可还原旧值 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
+| 受控文件 Apply | 高 | 是 | 是，远端文件 | ✅ 创建/覆盖/幂等 | ✅ 哈希不匹配、符号链接、只读端 | ✅ operator/reader | ✅ 覆盖前备份可还原旧值 | `tests/e2e/apply_e2e_test.go`、`internal/app/apply_test.go`、`internal/sshclient/apply_test.go` |
 
 当前已达到已实现一级能力的覆盖底线。表中的剩余红项属于尚未实现的方向能力，而不是用组件测试掩盖的既有质量债。未来任何一级能力不得只以参数解析或组件测试作为完成依据；必须沿用编译后二进制边界补充 E2E，并同步更新本矩阵。

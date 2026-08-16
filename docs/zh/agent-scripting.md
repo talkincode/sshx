@@ -74,6 +74,18 @@ else
 fi
 ```
 
+## 受控文件 Apply
+
+覆盖一个远程正则文件时优先用 `sshx apply`。根据 `changed`、`completion` 和
+`error_kind` 分支。`precondition` 表示文件没有被写入。
+
+```bash
+sshx apply --target=prod-web --path=/etc/nginx/nginx.conf \
+    --from=./nginx.conf --expect-sha256="$current" --sudo --json
+```
+
+reload 仍是另一次 `sshx run`。详见 [受控文件 Apply](apply.md)。
+
 ## 可复用主机探测
 
 在重复执行一串环境发现命令前，先列出并调用有界探测能力：

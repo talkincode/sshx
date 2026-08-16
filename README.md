@@ -72,6 +72,7 @@ It remains a single binary with one-shot invocations and no resident component o
 8. Direct server-to-server transfer, streamed through the local machine without touching local disk.
 9. One-shot host inspection with built-in system/network capabilities, local
    sshx-owned plugins, explicit digest trust, and freshness-bounded observations.
+10. Guarded single-file apply: hash precondition, backup, and atomic replace.
 
 ## Installation
 

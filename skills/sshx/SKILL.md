@@ -1,6 +1,6 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
+description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, apply a single remote file with hash/backup/atomic replace, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, safe config file changes, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
 ---
 
 # sshx
@@ -17,6 +17,7 @@ its work, and exits — there is no daemon, shell, tunneling, or port forwarding
 - Execute complex scripts byte-for-byte with `sshx run --script-file` / `--script-stdin`.
 - Fan out one action to a bounded host set with `--group` / `--tag` / `--targets`.
 - Upload/download a file or list/make/remove remote paths over SFTP.
+- Replace one remote regular file with `sshx apply` (hash precondition, backup, atomic write).
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
 - Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized)
@@ -145,7 +146,8 @@ In `--json` mode an sshx-level failure has `exit_code: -1` and a non-empty
 `error_kind` values: `timeout`, `auth`, `host_key`, `connect`, `blocked`,
 `exit_missing`, `config`, `error`. SQL mode adds `explain_failed`,
 `impact_check_failed`, `remote_exit`, and
-`cred_source_failed`.
+`cred_source_failed`. Apply mode adds `precondition` when `--expect-sha256`
+does not match the current remote file.
 
 ## Command execution
 
@@ -336,6 +338,33 @@ sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
 - `--db-user`, `--db-password-key`, `--docker`, and `--db-cred-from` are
   rejected. `--db=` may be used as an alias for the absolute file path.
 
+## Guarded file apply
+
+Prefer `sshx apply` over `sed -i`, in-place editors, or upload-then-`install`
+when replacing one remote regular file. The pipeline is fail-closed:
+absolute path → optional hash precondition → owner-only backup → atomic
+replace → structured result. Reload/restart is a separate `sshx run`.
+
+```bash
+sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
+    --expect-sha256=<current> --sudo --json
+sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
+    --dry-run --json
+```
+
+- `--path` must be a clean absolute file path. Symlinks, directories, and
+  device nodes are blocked (`error_kind: "blocked"`).
+- `--expect-sha256` is optional CAS. Mismatch is `error_kind: "precondition"`
+  with `completion: "not_started"` and no write.
+- Backups default to `~/.sshx/file-backups/`. `--no-backup` requires `--force`.
+- `--sudo` stages the payload over SFTP, then installs with a privileged
+  stdin script. Use it when the SSH user cannot write the target.
+- `/etc/passwd`, `/etc/shadow`, and `/etc/sudoers` require
+  `--force --bypass-reason=`.
+- JSON fields to branch on: `success`, `changed`, `created`, `completion`,
+  `error_kind`, `before_sha256`, `after_sha256`, `backup.path`,
+  `rollback_available`. Identical content is success with `changed=false`.
+
 ## SFTP file operations
 
 ```bash
@@ -434,3 +463,7 @@ sshx --help      # full reference
    adds `--docker=<container>` / `--db-cred-from=` for containerized DBs;
    SQLite uses `--engine=sqlite --db-file=/abs/path.db`. Direct `psql` /
    `sqlite3` invocations are blocked — rework as `sshx sql`, do not `--force`.
+7. For remote file edits use `sshx apply`, never `sed -i` or upload-then-`install`.
+   Preview with `--dry-run --json`. Branch on `changed` and `error_kind`
+   (`precondition` means the file was not written). Validate or reload with a
+   separate `sshx run` after apply succeeds.

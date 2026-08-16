@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-16
+
+### Added
+
+- Add guarded single-file apply through `sshx apply --path=<abs> --from=<local>`.
+  The pipeline checks an optional `--expect-sha256` precondition, writes an
+  owner-only backup, atomically replaces a regular file while preserving mode
+  and owner, and returns `changed`, hashes, and `rollback_available`. `--sudo`
+  stages the payload over SFTP and installs with a privileged stdin script.
+  Reload/restart stays outside the command.
+
+### Security
+
+- Refuse apply to symlinks, directories, and critical identity files
+  (`/etc/passwd`, `/etc/shadow`, `/etc/sudoers`) unless `--force --bypass-reason=`
+  is explicit. `--no-backup` requires `--force`.
+
 ## [0.5.0] - 2026-08-15
 
 ### Added
@@ -389,7 +406,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/talkincode/sshx/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/talkincode/sshx/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/talkincode/sshx/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/talkincode/sshx/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/talkincode/sshx/compare/v0.2.0...v0.3.0

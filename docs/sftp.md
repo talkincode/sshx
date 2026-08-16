@@ -8,16 +8,11 @@
 sshx -h=prod-web --upload=./deploy/nginx.conf --to=/tmp/nginx.conf
 ```
 
-Safe production pattern:
+To overwrite an existing remote file with a backup and hash precondition, use [Guarded File Apply](apply.md) instead of assembling upload + `install` yourself:
 
 ```bash
-# Upload to a temporary path first
-sshx -h=prod-web --upload=./deploy/nginx.conf --to=/tmp/nginx.conf
-
-# Inspect the uploaded file before moving it into place
-sshx -h=prod-web "sudo install -m 0644 /tmp/nginx.conf /etc/nginx/nginx.conf"
-sshx -h=prod-web "sudo nginx -t"
-sshx -h=prod-web "sudo systemctl reload nginx"
+sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./deploy/nginx.conf --sudo --json
+sshx run --target=prod-web --json -- "sudo nginx -t"
 ```
 
 ## Download A File
