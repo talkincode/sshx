@@ -364,6 +364,17 @@ func shellJoin(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
+// WrapSudoStdin runs command under `sudo -S` with an empty prompt. The caller
+// must prepend the sudo password plus a newline to stdin; sudo consumes that
+// first line and the original command sees the rest. The password never enters
+// argv. sh -c preserves pipelines, mkdir prefixes, and PGPASSWORD readers.
+func WrapSudoStdin(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return command
+	}
+	return "sudo -S -p '' sh -c " + shellQuote(command)
+}
+
 var safeArgRE = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
 
 // ParseExplainRows extracts the top-level plan row estimate from

@@ -195,6 +195,10 @@ type Config struct {
 	SQLCredCacheTTL time.Duration
 	// SQLCredRefresh forces re-resolution, replacing any cached entry.
 	SQLCredRefresh bool
+	// SQLUseSudo runs the remote database client via sudo -S. Use it when the
+	// SSH user cannot read or write the database file (typical for service-
+	// owned SQLite). The sudo password is delivered on stdin ahead of SQL.
+	SQLUseSudo bool
 
 	// Guarded file apply fields (Mode == "apply").
 	ApplyExpectSHA256 string

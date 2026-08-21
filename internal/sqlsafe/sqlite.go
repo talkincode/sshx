@@ -69,7 +69,11 @@ func (c SQLiteConn) sqliteCommand(readOnly bool) (string, error) {
 	}
 	argv := []string{"sqlite3", "-batch", "-bail"}
 	if readOnly {
-		argv = append(argv, "-readonly", "file:"+c.Path+"?mode=ro")
+		// Do not pass -readonly: that CLI flag is missing on sqlite 3.22
+		// (Ubuntu 18.04 / several still-deployed distro packages). The
+		// file: URI mode=ro is honored by the sqlite3 shell without extra
+		// flags and still rejects writes.
+		argv = append(argv, "file:"+c.Path+"?mode=ro")
 	} else {
 		argv = append(argv, c.Path)
 	}

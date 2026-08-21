@@ -174,6 +174,7 @@ type mcpSQLInput struct {
 	AllowFullTable bool   `json:"allow_full_table,omitempty" jsonschema:"Required for UPDATE/DELETE without a WHERE clause."`
 	NoBackup       bool   `json:"no_backup,omitempty" jsonschema:"Skip the pre-change backup; requires force."`
 	BackupDir      string `json:"backup_dir,omitempty" jsonschema:"Remote backup directory (default ~/.sshx/sql-backups)."`
+	Sudo           bool   `json:"sudo,omitempty" jsonschema:"Run the remote database client via sudo -S when the SSH user cannot open the database file."`
 	Force          bool   `json:"force,omitempty" jsonschema:"Confirms DDL; destructive DDL also requires no_backup."`
 	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"Preview the guarded SQL plan without connecting."`
 	TimeoutSecs    int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
@@ -338,6 +339,9 @@ func buildSQLArgs(in mcpSQLInput) ([]string, error) {
 	}
 	if in.BackupDir != "" {
 		args = append(args, "--backup-dir="+in.BackupDir)
+	}
+	if in.Sudo {
+		args = append(args, "--sudo")
 	}
 	if in.Force {
 		args = append(args, "--force")

@@ -73,6 +73,7 @@ func TestBuildSQLArgs(t *testing.T) {
 		DBPasswordKey: "app-db",
 		Explain:       true,
 		RowThreshold:  500,
+		Sudo:          true,
 		DryRun:        true,
 	})
 	if err != nil {
@@ -82,7 +83,7 @@ func TestBuildSQLArgs(t *testing.T) {
 		"sql", "--json", "-h=db-1",
 		"--engine=postgres", "--db=app", "--db-user=app",
 		"--db-password-key=app-db", "--explain", "--row-threshold=500",
-		"--dry-run",
+		"--sudo", "--dry-run",
 		"--", "SELECT count(*) FROM users",
 	}
 	assertArgs(t, args, want)

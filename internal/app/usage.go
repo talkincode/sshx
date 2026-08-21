@@ -269,6 +269,7 @@ Guarded SQL Execution:
   --allow-full-table        Required for UPDATE/DELETE without a WHERE clause
   --no-backup               Skip pre-change backup (requires --force)
   --backup-dir=PATH         Remote backup directory (default: ~/.sshx/sql-backups)
+  --sudo                    Run sqlite3/psql via sudo -S (SSH user cannot open the file)
   --force, -f               Confirms DDL; destructive DDL also requires --no-backup
 
   Safety pipeline for data changes: classify locally (fail-closed), gate by
@@ -296,6 +297,8 @@ Guarded SQL Execution:
   sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
       --cred-cache=1h "SELECT count(*) FROM orders"
   sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
+      "UPDATE users SET active=0 WHERE id=42"
+  sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --sudo --json \
       "UPDATE users SET active=0 WHERE id=42"
 
 Guarded File Apply:

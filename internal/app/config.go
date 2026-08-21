@@ -618,6 +618,8 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			}
 		case arg == "--cred-refresh":
 			config.SQLCredRefresh = true
+		case arg == "--sudo":
+			config.SQLUseSudo = true
 		case arg == "--force", arg == "-f":
 			config.Force = true
 		case arg == "--dry-run":

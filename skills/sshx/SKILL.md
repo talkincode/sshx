@@ -324,6 +324,9 @@ sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --dry-run --json \
 
 sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
     "UPDATE users SET active=0 WHERE id=42"
+
+sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --sudo --json \
+    "UPDATE users SET active=0 WHERE id=42"
 ```
 
 - Reads open `file:<path>?mode=ro`. DML does not use EXPLAIN row estimates:
@@ -337,6 +340,9 @@ sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
   already covers related tables, so that check is skipped.
 - `--db-user`, `--db-password-key`, `--docker`, and `--db-cred-from` are
   rejected. `--db=` may be used as an alias for the absolute file path.
+- `--sudo` runs the remote client via `sudo -S` (empty prompt). Use it when
+  the SSH user cannot read or write the database file. The host sudo key is
+  delivered on stdin ahead of the SQL — never in argv. JSON reports `sudo`.
 
 ## Guarded file apply
 
@@ -461,7 +467,8 @@ sshx --help      # full reference
    through `sshx run`: it classifies the statement, backs up affected data,
    and audits everything. Preview with `--dry-run --json` first. PostgreSQL
    adds `--docker=<container>` / `--db-cred-from=` for containerized DBs;
-   SQLite uses `--engine=sqlite --db-file=/abs/path.db`. Direct `psql` /
+   SQLite uses `--engine=sqlite --db-file=/abs/path.db`. Add `--sudo` when
+   the SSH user cannot open the database file. Direct `psql` /
    `sqlite3` invocations are blocked — rework as `sshx sql`, do not `--force`.
 7. For remote file edits use `sshx apply`, never `sed -i` or upload-then-`install`.
    Preview with `--dry-run --json`. Branch on `changed` and `error_kind`
