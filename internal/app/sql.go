@@ -49,6 +49,7 @@ type sqlJSONResult struct {
 	AuthMethod    string         `json:"auth_method,omitempty"`
 	CredSource    string         `json:"cred_source,omitempty"`
 	CredCache     string         `json:"cred_cache,omitempty"`
+	Sudo          bool           `json:"sudo,omitempty"`
 	ErrorKind     string         `json:"error_kind,omitempty"`
 	Error         string         `json:"error,omitempty"`
 }
@@ -114,6 +115,13 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 		if resolveErr := resolveHostFromSettings(config); resolveErr != nil {
 			logger.GetLogger().Info("Note: Could not find host '%s' in settings, using as hostname directly", config.Host)
 		}
+	}
+	if config.SQLUseSudo {
+		password, pwdErr := sshclient.GetSudoPassword(config.SudoKey)
+		if pwdErr != nil {
+			return run.fail("secret", fmt.Errorf("resolve sudo password key %q: %w", config.SudoKey, pwdErr))
+		}
+		config.SudoPassword = password
 	}
 	if config.SQLPasswordKey != "" && sqlsafe.NormalizeEngine(config.SQLEngine) != sqlsafe.EngineSQLite {
 		password, pwdErr := sshclient.GetSudoPassword(config.SQLPasswordKey)
@@ -274,13 +282,23 @@ func validateSQLiteConfig(config *sshclient.Config) error {
 }
 
 // runRemote executes one assembled remote command, prepending the database
-// password line to stdin when password delivery is enabled.
+// password line to stdin when password delivery is enabled. --sudo wraps the
+// whole command in sudo -S and prepends the sudo password so it never enters
+// argv; sudo consumes the first line and the client sees the rest.
 func (r *sqlRun) runRemote(rc sqlsafe.RemoteCommand) (sshclient.ExecResult, error) {
+	command := rc.Command
 	stdin := rc.Stdin
 	if r.exec != nil && r.exec.NeedsPasswordLine() {
 		stdin = r.password + "\n" + stdin
 	}
-	return r.client.RunCommandWithInput(rc.Command, []byte(stdin))
+	if r.config.SQLUseSudo {
+		if r.config.SudoPassword == "" {
+			return sshclient.ExecResult{ExitCode: -1}, fmt.Errorf("sql --sudo requires a resolved sudo password")
+		}
+		command = sqlsafe.WrapSudoStdin(command)
+		stdin = r.config.SudoPassword + "\n" + stdin
+	}
+	return r.client.RunCommandWithInput(command, []byte(stdin))
 }
 
 // applyCredentials fills connection fields that the operator did not set
@@ -318,7 +336,7 @@ func (r *sqlRun) resolveCredentials(source sqlsafe.CredSource) error {
 	if cmdErr != nil {
 		return r.fail("config", cmdErr)
 	}
-	res, execErr := r.client.RunCommandWithInput(cmd, nil)
+	res, execErr := r.runRemote(sqlsafe.RemoteCommand{Command: cmd})
 	if execErr != nil || res.ExitCode != 0 {
 		return r.fail("cred_source_failed", fmt.Errorf(
 			"failed to read credential source %s (remote status %d)",
@@ -546,6 +564,9 @@ func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr err
 	safeErr := failErr
 	if res.ExitCode >= 0 {
 		safeErr = fmt.Errorf("database operation failed during %s with status %d", r.phase, res.ExitCode)
+		if detail := firstNonEmptyLine(res.Stderr, res.Stdout); detail != "" {
+			safeErr = fmt.Errorf("%s: %s", safeErr.Error(), redactSensitiveText(detail))
+		}
 	}
 	r.recordAudit(res.ExitCode, kind, safeErr)
 	if r.config.JSONOutput {
@@ -553,6 +574,8 @@ func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr err
 		result.ExitCode = res.ExitCode
 		result.ErrorKind = kind
 		result.Error = redactError(safeErr)
+		result.Stdout = res.Stdout
+		result.Stderr = res.Stderr
 		emitSQLJSON(result)
 		return ErrReported
 	}
@@ -563,6 +586,17 @@ func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr err
 		return &ExitError{Code: res.ExitCode}
 	}
 	return failErr
+}
+
+func firstNonEmptyLine(chunks ...string) string {
+	for _, chunk := range chunks {
+		for _, line := range strings.Split(chunk, "\n") {
+			if s := strings.TrimSpace(line); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func (r *sqlRun) baseResult() sqlJSONResult {
@@ -582,6 +616,7 @@ func (r *sqlRun) baseResult() sqlJSONResult {
 	}
 	result.CredSource = r.credSource
 	result.CredCache = r.credCache
+	result.Sudo = r.config.SQLUseSudo
 	if r.cls != nil {
 		result.Class = string(r.cls.Class)
 		result.Verb = r.cls.Verb

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-21
+
+### Added
+
+- `sshx sql --sudo` runs the remote `sqlite3`/`psql` client via `sudo -S` so
+  service-owned database files (typical SQLite under `/var/...`) are reachable
+  when the SSH user cannot open them. The sudo password is delivered on stdin
+  ahead of SQL and never appears in argv. Dry-run, JSON (`sudo`), audit
+  `uses_sudo`, and MCP `sshx_sql` expose the flag.
+
+### Fixed
+
+- SQLite reads no longer pass `sqlite3 -readonly`, a flag missing from older
+  distro clients (sqlite 3.22 on Ubuntu 18.04 and similar). Reads still open
+  `file:<path>?mode=ro`, which those clients honor and which still rejects writes.
+- `sshx sql --json` failures now include remote `stdout`/`stderr` and append the
+  client error line to `error`, so agents can see why sqlite3/psql exited.
+
 ## [0.7.0] - 2026-08-16
 
 ### Added

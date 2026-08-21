@@ -151,8 +151,10 @@ func TestSQLiteCommands(t *testing.T) {
 
 	t.Run("read only uri", func(t *testing.T) {
 		rc := conn.ExecuteReadCommand("SELECT 1")
-		assert.Contains(t, rc.Command, "sqlite3 -batch -bail -readonly")
+		assert.Contains(t, rc.Command, "sqlite3 -batch -bail")
 		assert.Contains(t, rc.Command, "file:/var/lib/app/app.db?mode=ro")
+		assert.NotContains(t, rc.Command, "-readonly")
+		assert.NotContains(t, rc.Command, "-uri")
 		assert.Equal(t, "SELECT 1;\n", rc.Stdin)
 		assert.NotContains(t, rc.Command, "PGPASSWORD")
 	})
@@ -208,6 +210,15 @@ func TestParseChangesOutput(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestWrapSudoStdin(t *testing.T) {
+	wrapped := WrapSudoStdin("sqlite3 -batch -bail 'file:/var/lib/app.db?mode=ro'")
+	assert.True(t, strings.HasPrefix(wrapped, "sudo -S -p '' sh -c "))
+	assert.Contains(t, wrapped, "file:/var/lib/app.db?mode=ro")
+	assert.NotContains(t, wrapped, "password")
+	assert.Equal(t, "", WrapSudoStdin(""))
+	assert.Equal(t, "   ", WrapSudoStdin("   "))
+}
+
 func TestNormalizeEngine(t *testing.T) {
 	assert.Equal(t, EnginePostgres, NormalizeEngine(""))
 	assert.Equal(t, EnginePostgres, NormalizeEngine("PostgreSQL"))
@@ -251,4 +262,29 @@ func TestSQLiteBackupRoundTrip(t *testing.T) {
 	data, err := os.ReadFile(backup) // #nosec G304 -- isolated test backup path
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "old")
+}
+
+func TestSQLiteReadCommandRunsWithoutReadonlyFlag(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not installed")
+	}
+	dir := t.TempDir()
+	db := filepath.Join(dir, "app.db")
+	setup := exec.Command("sqlite3", db, "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);") // #nosec G204 -- fixed test fixture
+	require.NoError(t, setup.Run())
+
+	rc := SQLiteConn{Path: db}.ExecuteReadCommand("SELECT id FROM t")
+	require.NotContains(t, rc.Command, "-readonly")
+
+	cmd := exec.Command("sh", "-c", rc.Command) // #nosec G204 -- command is generated from validated fixture paths
+	cmd.Stdin = strings.NewReader(rc.Stdin)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	assert.Equal(t, "1\n", string(out))
+
+	write := exec.Command("sh", "-c", rc.Command) // #nosec G204 -- same generated read-only command
+	write.Stdin = strings.NewReader("INSERT INTO t VALUES (2);\n")
+	writeOut, writeErr := write.CombinedOutput()
+	require.Error(t, writeErr, string(writeOut))
+	assert.Contains(t, strings.ToLower(string(writeOut)), "readonly")
 }

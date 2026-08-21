@@ -413,6 +413,9 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	if config.Mode == "apply" {
 		r.event.UsesSudo = config.ApplyUseSudo
 	}
+	if config.Mode == "sql" {
+		r.event.UsesSudo = config.SQLUseSudo
+	}
 	if config.Mode == "inspect" {
 		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
 			if useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest); privilegeErr == nil {
@@ -548,7 +551,7 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 		}
 		return config.InspectUseSudo && config.SudoKey != ""
 	case "sql":
-		return config.SQLPasswordKey != "" || config.SQLCredFrom != ""
+		return config.SQLPasswordKey != "" || config.SQLCredFrom != "" || (config.SQLUseSudo && config.SudoKey != "")
 	case "apply":
 		return config.ApplyUseSudo && config.SudoKey != ""
 	default:

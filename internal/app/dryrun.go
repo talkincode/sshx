@@ -117,6 +117,7 @@ type sqlDryRunPlan struct {
 	BackupReason   string       `json:"backup_reason,omitempty"`
 	ExplainCommand string       `json:"explain_command,omitempty"`
 	ExecuteCommand string       `json:"execute_command,omitempty"`
+	UseSudo        bool         `json:"use_sudo,omitempty"`
 }
 
 func emitDryRunPlan(config *sshclient.Config) error {
@@ -358,6 +359,10 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 		plan.UsesSudo = config.ApplyUseSudo
 		plan.SudoKey = config.SudoKey
 	}
+	if config.Mode == "sql" {
+		plan.UsesSudo = config.SQLUseSudo
+		plan.SudoKey = config.SudoKey
+	}
 	if config.Mode == "host" && config.HostAction == "test" {
 		return
 	}
@@ -527,7 +532,7 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 	case "sql":
 		plan.WouldConnect = canProceed
 		plan.WouldExecute = canProceed && !config.SQLExplainOnly
-		plan.WouldReadSecret = canProceed && (config.SQLPasswordKey != "" || config.SQLCredFrom != "")
+		plan.WouldReadSecret = canProceed && (config.SQLPasswordKey != "" || config.SQLCredFrom != "" || (config.SQLUseSudo && config.SudoKey != ""))
 		plan.WouldWriteLocalState = canProceed && config.SQLCredFrom != "" && config.SQLCredCacheTTL > 0
 		mutates := plan.SQL != nil && plan.SQL.Class != "" && plan.SQL.Class != string(sqlsafe.ClassRead)
 		plan.WouldMutateRemote = plan.WouldExecute && mutates
@@ -561,6 +566,7 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 		Statement:     sqlsafe.RedactForAudit(config.SQLStatement),
 		StatementHash: sqlStatementDigest(config.SQLStatement),
 		Docker:        config.SQLDockerContainer,
+		UseSudo:       config.SQLUseSudo,
 	}
 	if config.SQLCredFrom != "" {
 		sqlPlan.CredSource = config.SQLCredFrom
@@ -645,6 +651,10 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 		default:
 			sqlPlan.ExecuteCommand = conn.ExecuteCommand(cls.Statement).Command
 		}
+	}
+	if config.SQLUseSudo {
+		sqlPlan.ExplainCommand = sqlsafe.WrapSudoStdin(sqlPlan.ExplainCommand)
+		sqlPlan.ExecuteCommand = sqlsafe.WrapSudoStdin(sqlPlan.ExecuteCommand)
 	}
 }
 

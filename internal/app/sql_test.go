@@ -1,11 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/talkincode/sshx/internal/sqlsafe"
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 func TestParseArgs_SQLBasic(t *testing.T) {
@@ -40,8 +42,11 @@ func TestParseArgs_SQLBasic(t *testing.T) {
 func TestParseArgs_SQLSQLite(t *testing.T) {
 	config := ParseArgs([]string{
 		"sshx", "sql", "-h=app1", "--engine=SQLite3", "--db-file=/var/lib/app/app.db",
-		"--json", "SELECT 1",
+		"--sudo", "--json", "SELECT 1",
 	})
+	if !config.SQLUseSudo {
+		t.Fatal("expected --sudo to set SQLUseSudo")
+	}
 	if config.SQLEngine != sqlsafe.EngineSQLite {
 		t.Fatalf("expected sqlite engine, got %s", config.SQLEngine)
 	}
@@ -279,6 +284,9 @@ func TestFillDryRunSQL(t *testing.T) {
 		if !strings.Contains(plan.SQL.ExecuteCommand, "sqlite3 -batch -bail /var/lib/app/app.db") {
 			t.Fatalf("execute preview must use sqlite3: %s", plan.SQL.ExecuteCommand)
 		}
+		if strings.Contains(plan.SQL.ExecuteCommand, "-readonly") {
+			t.Fatalf("sqlite DML must not use the non-portable -readonly flag: %s", plan.SQL.ExecuteCommand)
+		}
 		if strings.Contains(plan.SQL.ExecuteCommand, "psql") {
 			t.Fatal("sqlite plan must not assemble psql")
 		}
@@ -314,4 +322,70 @@ func TestFillDryRunSQL(t *testing.T) {
 			t.Fatalf("read must not mutate: %#v", plan)
 		}
 	})
+	t.Run("sqlite sudo wraps execute command", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/var/lib/app/app.db",
+			"--sudo", "--dry-run", "SELECT 1",
+		})
+		plan := buildDryRunPlan(config)
+		if !plan.UsesSudo || plan.SQL == nil || !plan.SQL.UseSudo {
+			t.Fatalf("expected sudo in sql plan: %#v", plan)
+		}
+		if !plan.WouldReadSecret {
+			t.Fatal("sql --sudo must report would_read_secret")
+		}
+		if !strings.HasPrefix(plan.SQL.ExecuteCommand, "sudo -S -p '' sh -c ") {
+			t.Fatalf("execute preview must wrap sudo -S: %s", plan.SQL.ExecuteCommand)
+		}
+		if strings.Contains(plan.SQL.ExecuteCommand, "PGPASSWORD=") {
+			t.Fatal("sudo wrap must not embed secrets in argv")
+		}
+	})
+	t.Run("sqlite read uses portable file uri", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/var/lib/app/app.db",
+			"--dry-run", "SELECT 1",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil || plan.SQL.Class != string(sqlsafe.ClassRead) {
+			t.Fatalf("expected sqlite read plan: %#v", plan.SQL)
+		}
+		if !strings.Contains(plan.SQL.ExecuteCommand, "file:/var/lib/app/app.db?mode=ro") {
+			t.Fatalf("sqlite read must open a mode=ro URI: %s", plan.SQL.ExecuteCommand)
+		}
+		if strings.Contains(plan.SQL.ExecuteCommand, "-readonly") {
+			t.Fatalf("sqlite read must not use the non-portable -readonly flag: %s", plan.SQL.ExecuteCommand)
+		}
+	})
+}
+
+func TestSQLJSONFailureIncludesRemoteStderr(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/tmp/x.db", "--json", "SELECT 1",
+	})
+	run := &sqlRun{config: config, start: time.Now(), phase: "execute"}
+
+	stdout := captureStdout(t, func() {
+		err := run.failWithExit("remote_exit", sshclient.ExecResult{
+			ExitCode: 1,
+			Stderr:   "sqlite3: Error: unknown option: -readonly\nUse -help for a list of options.\n",
+		}, nil)
+		if err != ErrReported {
+			t.Fatalf("expected ErrReported, got %v", err)
+		}
+	})
+
+	var result sqlJSONResult
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout, err)
+	}
+	if result.ErrorKind != "remote_exit" || result.ExitCode != 1 {
+		t.Fatalf("unexpected failure envelope: %#v", result)
+	}
+	if !strings.Contains(result.Error, "unknown option: -readonly") {
+		t.Fatalf("error should include remote stderr: %q", result.Error)
+	}
+	if !strings.Contains(result.Stderr, "unknown option: -readonly") {
+		t.Fatalf("JSON stderr missing remote client output: %q", result.Stderr)
+	}
 }
