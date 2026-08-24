@@ -19,10 +19,11 @@ The documentation starts in English by default. Use the language switch in the t
 - Preview local execution plans with `--dry-run` before connecting, reading secrets, mutating `known_hosts`, or writing host config.
 - Keep a local JSONL audit trail without recording plaintext passwords, private keys, stdout, or stderr.
 - Inspect system/network state in one call and create reusable application plugins under the sshx runtime root.
+- Open a human-only interactive login on a named host (`sshx login`, optional `--sudo`) without maintaining a second `~/.ssh/config`.
 
 ## Mental Model
 
-Think of `sshx` as a remote execution primitive in an agent's toolbox, not an interactive shell replacement and not a desired-state or workflow orchestration platform.
+Think of `sshx` as a remote execution primitive in an agent's toolbox, not a desired-state or workflow orchestration platform. `sshx login` is a narrow human escape hatch, not an OpenSSH replacement.
 
 ```text
 agent, automation, or human operator

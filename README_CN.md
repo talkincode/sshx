@@ -74,6 +74,7 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
    支持摘要信任和有有效期的观察快照。
 10. 受控单文件 apply：哈希前置条件、备份和原子替换。
 11. 内置 stdio MCP server（`sshx mcp`）：以 Model Context Protocol 工具形式暴露同一套执行契约、安全门禁与审计留痕。
+12. 人类专用的 `sshx login`：登录已配置主机，可选 `--sudo` 进入特权壳。不属于 Agent/MCP 契约。
 
 ## 安装
 

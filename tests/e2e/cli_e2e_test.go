@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -286,6 +287,50 @@ func TestCLIDryRunDescribesEffectsWithoutCrossingBoundaries(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(filepath.Join(home, ".sshx", "audit"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestCLILoginDryRunAndHumanGates(t *testing.T) {
+	home := t.TempDir()
+
+	planResult := runSSHX(t, home, []string{
+		"login", "--address=10.9.8.7", "-u=operator", "--sudo", "--dry-run", "--json",
+	}, nil)
+	require.Equal(t, 0, planResult.exitCode, planResult.stderr)
+	var plan struct {
+		DryRun            bool   `json:"dry_run"`
+		Valid             bool   `json:"valid"`
+		Mode              string `json:"mode"`
+		Action            string `json:"action"`
+		HostResolved      string `json:"host_resolved"`
+		UsesSudo          bool   `json:"uses_sudo"`
+		WouldConnect      bool   `json:"would_connect"`
+		WouldReadSecret   bool   `json:"would_read_secret"`
+		WouldMutateRemote bool   `json:"would_mutate_remote"`
+		Command           string `json:"command"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(planResult.stdout), &plan))
+	assert.True(t, plan.DryRun)
+	assert.True(t, plan.Valid)
+	assert.Equal(t, "login", plan.Mode)
+	assert.Equal(t, "login-sudo", plan.Action)
+	assert.Equal(t, "10.9.8.7", plan.HostResolved)
+	assert.True(t, plan.UsesSudo)
+	assert.True(t, plan.WouldConnect)
+	assert.True(t, plan.WouldReadSecret)
+	assert.True(t, plan.WouldMutateRemote)
+	assert.Contains(t, plan.Command, "sudo -S")
+
+	jsonOnly := runSSHX(t, home, []string{"login", "--target=prod-web", "--json"}, nil)
+	require.Equal(t, 255, jsonOnly.exitCode, jsonOnly.stderr)
+	assert.Contains(t, jsonOnly.stderr, "login --json requires --dry-run")
+
+	live := runSSHX(t, home, []string{"login", "--address=127.0.0.1", "--no-key"}, nil)
+	require.Equal(t, 255, live.exitCode, live.stderr)
+	if runtime.GOOS == "windows" {
+		assert.Contains(t, live.stderr, "not supported")
+	} else {
+		assert.Contains(t, live.stderr, "not a TTY")
+	}
 }
 
 func assertSSHXFailure(t *testing.T, result cliResult, kind string) {

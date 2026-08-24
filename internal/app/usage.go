@@ -33,6 +33,7 @@ Usage:
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
   sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
   sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
+  sshx login <name> [--sudo]                      # Human interactive login (TTY required)
   sshx mcp                                        # Serve the execution contract over stdio (MCP)
 
 SSH Options:
@@ -329,6 +330,33 @@ Guarded File Apply:
       --expect-sha256=<current> --sudo --json
   sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
       --dry-run --json
+
+Interactive Login:
+  sshx login <name> [--sudo]
+  sshx login -h=<host> [-u=<user>] [-i=<key>] [--sudo]
+  sshx login --address=<host> [--sudo]
+  sshx login <name> --dry-run --json
+
+  Human-only escape hatch onto a host already known to sshx. It opens one
+  interactive session and attaches the local TTY. This is not an Agent
+  contract: --json is only valid with --dry-run, multi-host selectors are
+  rejected, and login is not exposed over MCP.
+
+  <name> / -h=HOST          Named host or hostname (exactly one)
+  --target=NAME             Long alias of -h= / <name>
+  --address=HOST            Literal address; skip settings.json resolution
+  --sudo                    Land in a privileged login shell (sudo -i)
+                            using the host sudo keyring secret on stdin
+  --dry-run / --json        Local plan only; --json requires --dry-run
+
+  Requires a local TTY. POSIX only; Windows returns an explicit unsupported
+  error. There is no command timeout and no session transcript. Audit records
+  target, auth, sudo, duration, and exit code.
+
+  sshx login prod-web
+  sshx login prod-web --sudo
+  sshx login -h=prod-web --sudo
+  sshx login prod-web --dry-run --json
 
 Plugin Management:
   sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]

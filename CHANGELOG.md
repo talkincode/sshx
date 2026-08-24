@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-24
+
+### Added
+
+- `sshx login` opens a human-only interactive session on a named host or
+  literal address, reusing sshx host resolution, key/password auth, and
+  `known_hosts`. Preferred form is `sshx login <name>` or `-h=<name>`;
+  `--target=` remains a long alias. Optional `--sudo` lands in a privileged
+  login shell after feeding the host sudo keyring secret on stdin. `--json`
+  is only valid with `--dry-run`; multi-host selectors and MCP are rejected.
+  POSIX TTY only; Windows returns an explicit unsupported error. Audit
+  records metadata, not the session transcript.
+
 ## [0.8.0] - 2026-08-21
 
 ### Added

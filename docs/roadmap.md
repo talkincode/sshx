@@ -89,6 +89,10 @@ Agent / 自动化 / 人类运维者
 
 ## 当前能力清单
 
+- **人类交互登录**
+
+  `sshx login <name> [--sudo]` 把本地 TTY 接到已解析主机上的交互会话；`--sudo` 经 stdin 注入 keyring sudo 秘密后进入特权 login shell。`--json` 仅配合 `--dry-run`。不进入 MCP，不支持多主机。POSIX only。证据：`internal/app/login.go`、`internal/sshclient/login.go`。
+
 - **单次远程命令执行**
 
   支持 `sshx -h=<host> [options] <command>`，默认不启用 PTY，保持 stdout/stderr 分离，并透传远程命令退出码。支持 timeout、显式 PTY 和 sudo stdin 注入。证据：`internal/app/app.go`、`internal/app/config.go`、`internal/sshclient/client.go`、`internal/sshclient/runcommand_test.go`。

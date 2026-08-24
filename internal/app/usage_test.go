@@ -47,6 +47,7 @@ func TestPrintUsage(t *testing.T) {
 		"Inspection Capabilities:",
 		"Guarded SQL Execution:",
 		"Guarded File Apply:",
+		"Interactive Login:",
 		"Plugin Management:",
 		"Agent Skill Installation:",
 		"Environment Variables",
@@ -75,6 +76,7 @@ func TestPrintUsage(t *testing.T) {
 		"--bypass-reason",
 		"sshx inspect",
 		"sshx apply",
+		"sshx login",
 		"sshx plugin create",
 		"sshx skill install",
 		"SSHX_HOME",
@@ -183,6 +185,7 @@ func TestPrintUsage_Examples(t *testing.T) {
 		`sshx inspect -h=prod-web system.baseline --json`,
 		`sshx plugin create docker.environment --template=docker`,
 		`sshx skill install`,
+		`sshx login prod-web`,
 	}
 
 	for _, example := range examples {

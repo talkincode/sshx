@@ -7,7 +7,8 @@ description: Operate remote servers with the `sshx` CLI — inspect hosts with b
 
 `sshx` is a single-binary, cross-platform SSH/SFTP client with a built-in OS-keyring
 password manager and named-host config. Every invocation opens one connection, does
-its work, and exits — there is no daemon, shell, tunneling, or port forwarding.
+its work, and exits — there is no daemon, tunneling, or port forwarding.
+`sshx login` is a human-only TTY session; agents must not use it.
 
 > One command, multiple servers, zero password hassle.
 
@@ -66,6 +67,13 @@ remote user's `~/.sshx/observations/v1`; plugin code stays local and executes
 only through the SSH session's stdin. Branch on observation `status`
 (`complete|partial|unsupported|failed`) and cache `hit/stale` fields. Never
 interpret `partial` or permission errors as application absence.
+
+## Do not use `sshx login` from an agent
+
+`sshx login` attaches a human TTY to a remote shell (optional `--sudo` privileged
+login). It has no Agent JSON contract, is rejected without a TTY, and is not an
+MCP tool. For programmatic work keep using `sshx run` / `sshx inspect` /
+`sshx apply` / `sshx sql` with `--json`.
 
 ## Golden rule for agents: prefer `sshx run` + `--json`/`--jsonl`
 
