@@ -76,6 +76,19 @@ sshx -h=prod-web "uname -a"
 
 配置文件是 `~/.sshx/settings.json`，写入权限为 `0600`。
 
+## 打开交互登录
+
+人要登上已经写在 sshx 里的主机时，不必再抄一份到 `~/.ssh/config`：
+
+```bash
+sshx login prod-web
+sshx login prod-web --sudo
+sshx login -h=prod-web --sudo
+sshx login prod-web --dry-run --json
+```
+
+`--sudo` 会用 keyring 里的 sudo 秘密先提权，再进入特权 login shell。登录需要本地 TTY，目前只支持 POSIX，也不属于 Agent/MCP 契约。
+
 ## 保存 sudo 密码
 
 对于以 `sudo` 开头的命令，`sshx` 可以从 OS keyring 读取密码，并通过 stdin 传给 sudo。

@@ -211,6 +211,14 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Action = "apply"
 		plan.LocalPath = config.LocalPath
 		plan.RemotePath = config.RemotePath
+	case "login":
+		plan.Action = "login"
+		if config.LoginUseSudo {
+			plan.Action = "login-sudo"
+			plan.Command = sshclient.PrivilegedLoginCommand
+		} else {
+			plan.Command = "interactive-shell"
+		}
 	}
 }
 
@@ -224,7 +232,7 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.HostInput = config.Host
 	}
 
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "login" {
 		resolveDryRunSSHHost(config, plan)
 		return
 	}
@@ -244,7 +252,7 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Valid = false
 		return
 	}
-	if isIPAddress(config.Host) {
+	if isIPAddress(config.Host) || config.LoginLiteralHost {
 		plan.HostResolved = config.Host
 		plan.HostResolution = dryRunStatus{Status: "direct"}
 		return
@@ -361,6 +369,10 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 	}
 	if config.Mode == "sql" {
 		plan.UsesSudo = config.SQLUseSudo
+		plan.SudoKey = config.SudoKey
+	}
+	if config.Mode == "login" {
+		plan.UsesSudo = config.LoginUseSudo
 		plan.SudoKey = config.SudoKey
 	}
 	if config.Mode == "host" && config.HostAction == "test" {
@@ -491,6 +503,26 @@ func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
 			plan.Valid = false
 		}
 	}
+	if config.Mode == "login" {
+		fillDryRunLogin(config, plan)
+	}
+}
+
+func fillDryRunLogin(config *sshclient.Config, plan *dryRunPlan) {
+	plan.Notes = append(plan.Notes,
+		"login is a human-only interactive session; it is not an Agent contract",
+		"login has no command timeout",
+	)
+	if config.LoginUseSudo {
+		plan.Notes = append(plan.Notes, "would start a privileged login shell after sudo -S; the password is never placed in argv")
+	}
+	if !sshclient.InteractiveLoginSupported() {
+		plan.Notes = append(plan.Notes, "interactive login session is not supported on this platform; dry-run still previews the local plan")
+	}
+	if config.JSONOutput && !config.DryRun {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "login --json requires --dry-run"}
+		plan.Valid = false
+	}
 }
 
 func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
@@ -543,6 +575,11 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		plan.WouldReadSecret = canProceed && config.ApplyUseSudo && config.SudoKey != ""
 		plan.WouldMutateRemote = canProceed
 		plan.WouldWriteRemoteState = canProceed && !config.ApplyNoBackup
+	case "login":
+		plan.WouldConnect = canProceed
+		plan.WouldExecute = canProceed
+		plan.WouldReadSecret = canProceed && ((config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != "")
+		plan.WouldMutateRemote = canProceed
 	}
 	plan.MayMutateKnownHosts = plan.WouldConnect && config.AcceptUnknownHost
 }
@@ -706,7 +743,7 @@ func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
 }
 
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "login" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")

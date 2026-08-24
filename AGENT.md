@@ -79,6 +79,8 @@ the project's mission:
 - ❌ **GUI / TUI** — interaction is through flags and stdout/stderr only.
 - ❌ **Full OpenSSH replacement** — no interactive login shell multiplexing,
   port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
+  A single human `sshx login` session is in scope; it is not a multiplexer,
+  jump host, or Agent-driven interactive shell.
 - ❌ **Plaintext secret storage** — secrets only ever live in the OS keyring.
   Inline passwords are supported for convenience but warned against.
 - ❌ **Bespoke operator config formats** — host configuration remains
@@ -93,7 +95,9 @@ correctness. Read-only host inspection, local plugin lifecycle, explicit plugin
 trust, and bounded observation reuse are also in scope. Guarded SQL execution
 (`sshx sql`) and guarded file apply (`sshx apply`) are deliberate scope
 expansions: they absorb mutation risk (classify → precondition → backup →
-atomic change → structured result) without becoming a workflow engine. The
+atomic change → structured result) without becoming a workflow engine.
+`sshx login` is a human-only TTY escape hatch onto a named host (optional
+`--sudo` privileged login shell); it is not part of the Agent/MCP contract. The
 stdio MCP server (`sshx mcp`) is a thin adapter over the same contract: tools
 map 1:1 to CLI verbs, results are the CLI's versioned JSON, every call is a
 one-shot child invocation audited with `entry=mcp`, and password management is
@@ -125,6 +129,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   inspect.go              → one-shot capability execution + observation caching
   sql.go                  → sshx sql: guarded SQL pipeline (classify → gate → explain → backup → execute)
   apply.go                → sshx apply: guarded single-file mutation (hash → backup → atomic write)
+  login.go                → sshx login: human TTY session, optional sudo privileged shell
   mcp.go                  → sshx mcp: stdio MCP server; tools self-exec sshx as one-shot children
 internal/execution/       → versioned request/result model, selectors, executor
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins

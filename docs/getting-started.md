@@ -76,6 +76,22 @@ sshx -h=prod-web "uname -a"
 
 The settings file is `~/.sshx/settings.json` and is written with `0600` permissions.
 
+## Open An Interactive Login
+
+When you personally need a remote prompt on a host already stored in sshx, do
+not copy it into `~/.ssh/config`:
+
+```bash
+sshx login prod-web
+sshx login prod-web --sudo
+sshx login -h=prod-web --sudo
+sshx login prod-web --dry-run --json
+```
+
+`--sudo` starts a privileged login shell after feeding the host sudo secret
+from the OS keyring. Login requires a local TTY, is POSIX-only, and is not
+part of the Agent/MCP contract.
+
 ## Save A Sudo Password
 
 For commands that start with `sudo`, `sshx` can read a password from the OS keyring and feed it to sudo through stdin.

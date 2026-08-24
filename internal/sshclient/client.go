@@ -205,6 +205,10 @@ type Config struct {
 	ApplyNoBackup     bool
 	ApplyBackupDir    string
 	ApplyUseSudo      bool
+
+	// Interactive login fields (Mode == "login").
+	LoginUseSudo     bool
+	LoginLiteralHost bool
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.

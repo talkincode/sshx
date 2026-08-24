@@ -75,6 +75,8 @@ It remains a single binary with one-shot invocations and no resident component o
 10. Guarded single-file apply: hash precondition, backup, and atomic replace.
 11. Built-in stdio MCP server (`sshx mcp`): the same execution contract, safety
     gates, and audit trail exposed as Model Context Protocol tools.
+12. Human-only `sshx login` onto a named host, with optional `--sudo` privileged
+    shell. Not part of the Agent/MCP contract.
 
 ## Installation
 

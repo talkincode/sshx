@@ -425,6 +425,11 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 			r.event.UsesSudo = config.InspectUseSudo
 		}
 	}
+	if config.Mode == "login" {
+		r.event.UsesSudo = config.LoginUseSudo
+		r.event.Command = ""
+		r.event.UsePTY = true
+	}
 	r.event.SudoKey = config.SudoKey
 	if config.Timeout > 0 {
 		r.event.Timeout = config.Timeout.String()
@@ -524,6 +529,11 @@ func auditAction(config *sshclient.Config) string {
 		return "sql"
 	case "apply":
 		return "apply"
+	case "login":
+		if config.LoginUseSudo {
+			return "login-sudo"
+		}
+		return "login"
 	default:
 		return ""
 	}
@@ -554,6 +564,8 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 		return config.SQLPasswordKey != "" || config.SQLCredFrom != "" || (config.SQLUseSudo && config.SudoKey != "")
 	case "apply":
 		return config.ApplyUseSudo && config.SudoKey != ""
+	case "login":
+		return (config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != ""
 	default:
 		return false
 	}
@@ -591,6 +603,8 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 		// is known (reads do not mutate).
 		return true
 	case "apply":
+		return true
+	case "login":
 		return true
 	default:
 		return false

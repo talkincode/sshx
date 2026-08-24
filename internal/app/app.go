@@ -119,6 +119,10 @@ func Run(args []string) (err error) {
 		return HandleApply(config, audit)
 	}
 
+	if config.Mode == "login" {
+		return HandleLogin(config, audit)
+	}
+
 	// Handle password management mode
 	if config.Mode == "password" {
 		if pwdErr := HandlePasswordManagement(config); pwdErr != nil {

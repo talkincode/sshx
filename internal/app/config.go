@@ -120,6 +120,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "apply":
 			parseApplyArgs(config, args[2:])
 			return config
+		case "login":
+			parseLoginArgs(config, args[2:])
+			return config
 		}
 	}
 
