@@ -13,6 +13,7 @@ import (
 func withKeyringFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "nested", "keyring.json")
+	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	t.Setenv("SSHX_E2E_KEYRING_FILE", path)
 	return path
 }
@@ -62,6 +63,7 @@ func TestE2EBackendMissingEntry(t *testing.T) {
 }
 
 func TestE2EBackendRequiresEnv(t *testing.T) {
+	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	t.Setenv("SSHX_E2E_KEYRING_FILE", "")
 
 	if err := Set("svc", "acct", "v"); err == nil {

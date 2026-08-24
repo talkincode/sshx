@@ -75,6 +75,19 @@ Check that the password key exists:
 sshx --password-check=prod-web-sudo
 ```
 
+On a headless host, Secret Service is often missing. sshx will not silently
+write a file. Opt in:
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='…'
+sshx --password-set=prod-web-sudo
+sshx --password-check=prod-web-sudo
+```
+
+`--password-get` is refused for the local vault. Dry-run JSON should show
+`secret_backend: "local-vault"`.
+
 ## A Command Is Blocked
 
 Blocked commands are usually safety-check failures.

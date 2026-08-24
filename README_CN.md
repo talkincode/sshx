@@ -50,7 +50,7 @@ $$\   $$ |$$\   $$ |$$ |  $$ |$$  /\$$\
 
 ## 为什么你需要它？
 
-Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组合、能解释副作用的远程执行契约。`sshx` 用命名主机减少参数拼装，用 JSON、退出码和错误分类减少文本猜测，用 dry-run、安全护栏、系统密钥链、host-key 校验和本地审计降低误操作与凭据风险。
+Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组合、能解释副作用的远程执行契约。`sshx` 用命名主机减少参数拼装，用 JSON、退出码和错误分类减少文本猜测，用 dry-run、安全护栏、系统密钥链或显式本地保险库、host-key 校验和本地审计降低误操作与凭据风险。
 
 它保持单二进制、单次调用、无远端驻留组件：**让 Agent 通过 SSH，高效、安全、可审计地在远程主机上完成任务。** 人类运维者也使用同一套命令、预览与审计语义进行监督和排障。
 
@@ -67,7 +67,7 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 3. dry-run 执行计划预览，以及默认启用、自动脱敏的本地结构化审计。
 4. 命名主机管理（groups/tags）和 OpenSSH config 选择性导入。
 5. 严格 host-key 校验、危险命令护栏和显式安全绕过语义。
-6. 系统密钥链密码管理，SSH 登录与 sudo 凭据角色分离。
+6. 系统密钥链或显式本地保险库密码管理，SSH 登录与 sudo 凭据角色分离。
 7. 跨平台 SSH/SFTP 命令与文件动作。
 8. 服务器到服务器直接文件传输，数据经本机流式中转而不落地。
 9. 单次主机环境探测：内置系统/网络能力，应用级插件归 sshx 本地运行目录管理，
@@ -417,13 +417,14 @@ sshx inspect -h=prod-web docker.environment \
 
 ## 密码管理
 
-`sshx` 使用操作系统的原生凭据管理器提供安全的密码存储，无需重复输入密码或以明文形式存储密码。
+`sshx` 默认把秘密放进操作系统原生凭据管理器。无桌面、没有 Secret Service / Keychain 的服务器可显式设置 `SSHX_SECRET_BACKEND=local-vault`，改用加密本地保险库。保险库只写不读：Agent 用 `--password-check` 确认存在，sshx 在执行时经 stdin 注入，绝不把明文交给 Agent。
 
 ### 支持的平台
 
 - **macOS**: 使用 Keychain Access（钥匙串访问）
 - **Linux**: 使用 Secret Service（GNOME Keyring / KDE Wallet）
 - **Windows**: 使用 Credential Manager（凭据管理器）
+- **无桌面 Linux / CI**: 加密本地保险库（`SSHX_SECRET_BACKEND=local-vault`）
 
 ### 密码命令
 
@@ -486,6 +487,22 @@ sshx --password-get=master | pbcopy     # 复制到剪贴板（macOS）
 #     sshx --password-get=master | pbcopy
 #     sshx --password-get=master | cat
 ```
+
+`SSHX_SECRET_BACKEND=local-vault` 时 `--password-get` 会被拒绝。请用 `--password-check`，由 sshx 注入秘密。
+
+#### 本地保险库（无桌面）
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='足够长的口令'
+# 或：export SSHX_VAULT_KEY_FILE=/etc/sshx/vault.key   # 必须 0600
+
+sshx --password-set=prod-web          # 提示或 stdin；不会打印明文
+sshx --password-check=prod-web
+sshx -h=prod-web -pk=prod-web "sudo systemctl status nginx"
+```
+
+没有静默降级：钥匙链不可用时，除非显式选择 `local-vault`，否则失败。dry-run 与审计会记录 `secret_backend` / `secret_unlock`，不含秘密值。
 
 #### 删除密码
 
@@ -574,12 +591,13 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 
 ### 安全说明
 
-- ✅ 密码使用操作系统原生加密存储
+- ✅ 密码使用操作系统原生加密，或显式的加密本地保险库
 - ✅ 密码永远不会以明文形式存储
 - ✅ 密码 key 可按主机、用户或环境分别命名
 - ✅ 输入时密码被隐藏
-- ⚠️ 需要操作系统凭据管理器可用
-- ⚠️ 在 Linux 上，需要 Secret Service 守护进程运行（桌面环境通常自动运行）
+- ✅ 本地保险库不会向 Agent 展示秘密值
+- ⚠️ OS 钥匙链需要平台凭据管理器
+- ⚠️ Linux 桌面通常自动运行 Secret Service；无桌面主机应使用 `local-vault`
 
 ### 连接环境变量
 
@@ -592,6 +610,8 @@ export SSH_SUDO_KEY=prod-web
 export SSH_TIMEOUT=30s
 # 可选：为 Agent/CI 隔离全部 sshx 运行状态
 export SSHX_HOME="$PWD/.sshx-runtime"
+export SSHX_SECRET_BACKEND=local-vault   # 可选；没有钥匙链的无桌面主机
+export SSHX_VAULT_PASSPHRASE='…'         # 使用 local-vault 时需要，或改用 SSHX_VAULT_KEY_FILE
 
 # 然后减少重复输入的选项
 sshx -h=prod-web "sudo uptime"

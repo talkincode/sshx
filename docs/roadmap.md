@@ -52,7 +52,7 @@ Agent / 自动化 / 人类运维者
            v
         远程主机
 
-本地信任边界：settings.json / OS keyring / known_hosts / audit JSONL
+本地信任边界：settings.json / OS keyring 或显式 local vault / known_hosts / audit JSONL
 ```
 
 ## 项目画像（目标状态）
@@ -115,7 +115,7 @@ Agent / 自动化 / 人类运维者
 
 - **凭据与认证边界**
 
-  密码存放在系统 keyring；默认优先 SSH key，只有显式提供 SSH 登录密码时才回退密码认证；命名主机可独立选择 SSH key 和 sudo password key。证据：`internal/app/password.go`、`internal/sshclient/client.go`、`internal/sshclient/client_test.go`。
+  密码默认存放在系统 keyring；无桌面环境可显式启用加密本地保险库（`SSHX_SECRET_BACKEND=local-vault`，文件 `$SSHX_HOME/vault`）。保险库只写不读，执行时经 stdin 注入。默认优先 SSH key，只有显式提供 SSH 登录密码时才回退密码认证；命名主机可独立选择 SSH key 和 sudo password key。没有从钥匙链到文件的静默降级。证据：`internal/keyringstore/`、`internal/app/password.go`、`internal/sshclient/client.go`、`tests/e2e/keyring_e2e_test.go`、`tests/e2e/vault_e2e_test.go`。
 
 - **通道信任与动作护栏**
 
@@ -167,7 +167,7 @@ Agent / 自动化 / 人类运维者
 
 - **不成为 CMDB、企业 secret vault 或 SIEM。** sshx 可消费主机配置、使用本地 secret backend、生成审计证据，但不替代组织级资产、密钥和合规平台。
 
-- **不提供明文 secret 存储，也不静默放松 host-key 校验。** 便利性不能突破凭据与通道信任边界。
+- **不提供明文 secret 存储，也不静默放松 host-key 校验。** 便利性不能突破凭据与通道信任边界。本地保险库必须加密、显式选择，且不得从钥匙链失败自动掉进文件。
 
 - **不做 GUI/TUI。** 核心交互面保持为 flags、stdin、stdout、stderr、退出码和结构化文件；图形化体验属于外部工具。
 
@@ -209,7 +209,7 @@ Agent / 自动化 / 人类运维者
 
 - **保持 secret backend 可演进**
 
-  默认信任根仍是 OS keyring。未来若接入其他 secret backend，必须保持 secret 不落明文、不进入命令字符串、不静默降级、用途可区分，并让 Agent 只引用凭据而非读取凭据。
+  默认信任根仍是 OS keyring。无桌面主机的加密本地保险库已在范围内：secret 不落明文、不进入命令字符串、不静默降级、用途可区分，Agent 只引用凭据而非读取凭据。未来若再接入其他 backend，必须保持同一契约，且不得变成组织级 secret 平台。
 
 ## 完成的样子
 
@@ -247,6 +247,7 @@ Agent / 自动化 / 人类运维者
 | SFTP 上传/下载/目录操作 | 高 | 是 | 是，远端 | ✅ | ✅ 只读端拒绝写入 | ✅ operator/reader | ✅ 失败上传无目标残留 | `tests/e2e/sftp_e2e_test.go` |
 | 远端到远端传输 | 高 | 是，两端 | 是，两端 | ✅ | ✅ 目标端只读 | ✅ 可写/只读目标 | ✅ 失败无残留，改用可写端重试 | `tests/e2e/sftp_e2e_test.go` |
 | keyring 凭据管理与认证回退 | 高 | 是 | 是，本地 secret | ✅ | ✅ 缺失 secret/公钥被拒 | ✅ key/password-fallback、stored/missing | ✅ 删除后缺失；可重新设置 | `tests/e2e/keyring_e2e_test.go`、`tests/e2e/cli_e2e_test.go` |
+| 加密本地保险库 | 高 | 是 | 是，本地 secret | ✅ set/check/sudo 注入 | ✅ get 拒绝、错误口令、过宽权限 | ✅ 0600 可读 / 0644 拒绝 | ✅ 失败写入保留原 vault 字节 | `tests/e2e/vault_e2e_test.go`、`internal/keyringstore/vault_test.go` |
 | host-key 校验 | 高 | 是，信任状态 | 可能修改 `known_hosts` | ✅ 显式信任后严格复用 | ✅ 未知/变更 key | ✅ strict/accept-unknown | ✅ 首次写入后重新严格连接 | `tests/e2e/cli_e2e_test.go` |
 | 危险动作阻断与显式绕过 | 高 | 是 | 否，仅控制执行准入 | ✅ 显式 `--force` | ✅ 默认阻断且零连接 | ✅ 默认阻断/显式绕过 | 不适用：策略门本身不修改状态 | `tests/e2e/cli_e2e_test.go` |
 | 本地结构化审计 | 高 | 否 | 是，本地 | ✅ | ✅ 不可写目标可观测 | 不适用：本地调用者同权 | ✅ 修复目标后单事件写入 | `tests/e2e/host_audit_e2e_test.go` |

@@ -1,13 +1,14 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, apply a single remote file with hash/backup/atomic replace, manage named hosts, store SSH/sudo passwords in the OS keyring, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, safe config file changes, upload/download, service operations, host management, keyring-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
+description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, apply a single remote file with hash/backup/atomic replace, manage named hosts, store SSH/sudo passwords in the OS keyring or an explicit local vault, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, safe config file changes, upload/download, service operations, host management, keyring- or vault-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
 ---
 
 # sshx
 
-`sshx` is a single-binary, cross-platform SSH/SFTP client with a built-in OS-keyring
-password manager and named-host config. Every invocation opens one connection, does
-its work, and exits — there is no daemon, tunneling, or port forwarding.
+`sshx` is a single-binary, cross-platform SSH/SFTP client with a built-in
+OS-keyring (or explicit local-vault) password manager and named-host config.
+Every invocation opens one connection, does its work, and exits — there is no
+daemon, tunneling, or port forwarding.
 `sshx login` is a human-only TTY session; agents must not use it.
 
 > One command, multiple servers, zero password hassle.
@@ -20,7 +21,7 @@ its work, and exits — there is no daemon, tunneling, or port forwarding.
 - Upload/download a file or list/make/remove remote paths over SFTP.
 - Replace one remote regular file with `sshx apply` (hash precondition, backup, atomic write).
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
-- Store/fetch SSH or sudo passwords in the OS keyring (never plaintext).
+- Store SSH or sudo passwords in the OS keyring, or in an explicit write-only local vault on headless hosts.
 - Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized)
   or a remote SQLite file, with classification, backups, and a full audit trail.
 - Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
@@ -313,7 +314,7 @@ sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
 - `--db-cred-from=docker:<container>` or `env-file:<path>` resolves the DB user,
   password, and database name remotely; `--db` becomes optional when the source
   provides it. Mutually exclusive with `--db-password-key`.
-- Resolved secrets are cached only in the OS keyring with a TTL
+- Resolved secrets are cached only in the secret backend with a TTL
   (default 15m; `--cred-cache=off|<duration>`, `--cred-refresh` to force
   re-resolution). Expired entries are actively deleted. The JSON result reports
   `cred_source` and `cred_cache` (`hit`/`stored`/`resolved`).
@@ -405,18 +406,22 @@ sshx --host-remove=prod-web                                # remove (alias: --ho
 
 After a host is configured, just reference it by name: `sshx -h=prod-web "uptime"`.
 
-## Password / secret management (OS keyring)
+## Password / secret management
 
-Secrets live only in the OS keyring (macOS Keychain / Linux Secret Service /
-Windows Credential Manager) under service name `sshx`.
+Secrets live in the OS keyring by default (macOS Keychain / Linux Secret
+Service / Windows Credential Manager) under service name `sshx`. On headless
+hosts set `SSHX_SECRET_BACKEND=local-vault` plus `SSHX_VAULT_PASSPHRASE` or
+`SSHX_VAULT_KEY_FILE`. The local vault is write-only: never call
+`--password-get`; use `--password-check` and let sshx inject over stdin.
+There is no silent fallback from a missing keyring.
 
 ```bash
 sshx --password-set=master            # prompt (no echo) — preferred
 sshx --password-set=master:secret     # inline (convenient but warned against)
-sshx --password-get=master            # confirm exists on a TTY; pipe (e.g. `| pbcopy`) to emit the raw value
 sshx --password-check=server-A        # exists? (alias: --password-exists)
-sshx --password-list                  # common keys (alias: --password-ls)
+sshx --password-list                  # stored keys (vault) or common keys (keyring)
 sshx --password-delete=server-A       # delete (alias: --password-del)
+# OS keyring only, and only when piped: sshx --password-get=master
 ```
 
 ## Authentication & host-key behavior
@@ -434,7 +439,9 @@ sshx --password-delete=server-A       # delete (alias: --password-del)
 `SSH_PASSWORD`, `SSH_KEY_PATH`, `SSH_DISABLE_KEY`, `SSH_KNOWN_HOSTS`,
 `SSH_ACCEPT_UNKNOWN_HOST`, `SSH_INSECURE_HOST_KEY`, `SSH_SUDO_KEY`,
 `SSH_NO_SAFETY_CHECK`, `SSH_FORCE`, `SSH_TIMEOUT`, `SSHX_LOG_LEVEL`,
-`SSHX_HOME` (isolated settings/audit/plugins/trust runtime root).
+`SSHX_HOME` (isolated settings/audit/plugins/trust runtime root),
+`SSHX_SECRET_BACKEND` (`keyring` or `local-vault`), `SSHX_VAULT_PASSPHRASE`,
+`SSHX_VAULT_KEY_FILE`.
 
 ## Install or refresh this skill
 
@@ -466,9 +473,11 @@ sshx --help      # full reference
 
 1. Use `--json` and branch on `success` / `error_kind`, not on stdout text.
 2. Add `--timeout=` to anything that can hang (package installs, network ops).
-3. Prefer named hosts; store secrets in the keyring, never inline in shared scripts.
-   Don't assume the sudo key is `master` — named hosts resolve their own `password_key`;
-   for ad-hoc IPs pass `-pk=<key>`. Use `--host-list` to see each host's key.
+3. Prefer named hosts; store secrets in the keyring or the explicit local
+   vault, never inline in shared scripts. Don't assume the sudo key is
+   `master` — named hosts resolve their own `password_key`; for ad-hoc IPs
+   pass `-pk=<key>`. Use `--host-list` to see each host's key. Never run
+   `--password-get` against `local-vault`.
 4. Trust the safety check — only `--force` a blocked command when you are certain.
 5. Treat `exit_code` 1..254 as the remote program's status; `255` / `-1` is an sshx error.
 6. For database work use `sshx sql`, never raw `psql` or `sqlite3` strings

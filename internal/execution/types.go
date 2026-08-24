@@ -276,6 +276,8 @@ type DryRunPlan struct {
 	WouldWriteLocal     bool           `json:"would_write_local_state"`
 	WouldMutateRemote   bool           `json:"would_mutate_remote"`
 	MayMutateKnownHosts bool           `json:"may_mutate_known_hosts"`
+	SecretBackend       string         `json:"secret_backend,omitempty"`
+	SecretUnlock        string         `json:"secret_unlock,omitempty"`
 	Notes               []string       `json:"notes,omitempty"`
 	Error               *ErrorInfo     `json:"error,omitempty"`
 }

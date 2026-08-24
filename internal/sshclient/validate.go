@@ -171,14 +171,24 @@ func isCommandWhitespace(ch byte) bool {
 	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
 }
 
-// GetSudoPassword reads sudo password from system keyring (cross-platform support)
-// macOS: Keychain, Linux: Secret Service (gnome-keyring/kwallet), Windows: Credential Manager
+// GetSudoPassword reads a sudo password from the configured secret backend
+// (OS keyring by default, or the explicit local vault).
 func GetSudoPassword(key string) (string, error) {
 	serviceName := KeyringServiceName
+	backend, backendErr := keyringstore.Backend()
+	label := "system keyring"
+	if backend == keyringstore.BackendVault {
+		label = "local vault"
+	}
 
 	password, err := keyringstore.Get(serviceName, key)
 	if err != nil {
 		if errors.Is(err, keyringstore.ErrNotFound) {
+			if backend == keyringstore.BackendVault {
+				return "", fmt.Errorf("sudo password not found in local vault for key: %s\n"+
+					"Add it using:\n  SSHX_SECRET_BACKEND=local-vault sshx --password-set=%s",
+					key, key)
+			}
 			return "", fmt.Errorf("sudo password not found in keyring for key: %s\n"+
 				"Add it using one of:\n"+
 				"  macOS:   security add-generic-password -s %s -a %s -w <password>\n"+
@@ -186,13 +196,16 @@ func GetSudoPassword(key string) (string, error) {
 				"  Windows: Use 'Credential Manager' in Control Panel",
 				key, serviceName, key, serviceName, key)
 		}
-		return "", fmt.Errorf("failed to get sudo password from keyring: %w", err)
+		if backendErr != nil {
+			return "", fmt.Errorf("failed to get sudo password: %w", backendErr)
+		}
+		return "", fmt.Errorf("failed to get sudo password from %s: %w", label, err)
 	}
 
 	if password == "" {
-		return "", fmt.Errorf("empty sudo password in keyring for key: %s", key)
+		return "", fmt.Errorf("empty sudo password in %s for key: %s", label, key)
 	}
 
-	logger.GetLogger().Success("Sudo password loaded from system keyring for key: %s", key)
+	logger.GetLogger().Success("Sudo password loaded from %s for key: %s", label, key)
 	return password, nil
 }

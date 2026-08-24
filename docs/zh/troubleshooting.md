@@ -75,6 +75,17 @@ sshx -h=prod-web "sh -c 'sudo whoami'"
 sshx --password-check=prod-web-sudo
 ```
 
+无桌面主机常常没有 Secret Service。sshx 不会静默改写文件。需要显式启用：
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='…'
+sshx --password-set=prod-web-sudo
+sshx --password-check=prod-web-sudo
+```
+
+本地保险库拒绝 `--password-get`。dry-run JSON 应出现 `secret_backend: "local-vault"`。
+
 ## 命令被阻止
 
 通常是安全检查失败。

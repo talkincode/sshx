@@ -81,8 +81,11 @@ the project's mission:
   port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
   A single human `sshx login` session is in scope; it is not a multiplexer,
   jump host, or Agent-driven interactive shell.
-- ❌ **Plaintext secret storage** — secrets only ever live in the OS keyring.
-  Inline passwords are supported for convenience but warned against.
+- ❌ **Plaintext secret storage** — secrets live in the OS keyring by default,
+  or in an explicit encrypted local vault (`SSHX_SECRET_BACKEND=local-vault`).
+  The vault never displays values; sshx injects them over stdin. Inline
+  `--password-set=key:value` and `SSH_PASSWORD` are supported but warned against.
+  Do not add a plaintext file store or silently fall back from the keyring.
 - ❌ **Bespoke operator config formats** — host configuration remains
   `~/.sshx/settings.json`, environment variables, and CLI flags. Versioned
   plugin manifests, result schemas, trust locks, and observation envelopes are
@@ -119,7 +122,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   host_manager.go         → --host-* handlers (add/import/update/list/test/test-all/remove)
   sshconfig.go            → ~/.ssh/config parsing + selective import planning
   settings.go             → ~/.sshx/settings.json load/save (atomic, 0600)
-  password.go             → keyring-backed password get/set/list + secure input
+  password.go             → secret-backend password set/check/list + write-only get
   usage.go                → PrintUsage() help text (keep in sync with flags)
   dryrun.go               → --dry-run local execution plan preview
   audit.go                → local structured JSONL audit events + redaction
@@ -132,6 +135,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   login.go                → sshx login: human TTY session, optional sudo privileged shell
   mcp.go                  → sshx mcp: stdio MCP server; tools self-exec sshx as one-shot children
 internal/execution/       → versioned request/result model, selectors, executor
+internal/keyringstore/    → OS keyring facade + explicit encrypted local vault
 internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/skillinstall/    → conflict-safe, atomic Agent skill installation
@@ -167,8 +171,11 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 - **Host config:** `~/.sshx/settings.json`, written atomically (temp file →
   `chmod 0600` → `rename`) so a crash can never truncate it. A top-level `key`
   is the default SSH key; a per-host `key` overrides it.
-- **Secrets:** OS keyring under service name `sshx`
+- **Secrets:** OS keyring under service name `sshx` by default
   (macOS Keychain / Linux Secret Service / Windows Credential Manager).
+  An explicit encrypted local vault (`SSHX_SECRET_BACKEND=local-vault`,
+  `$SSHX_HOME/vault`) is the headless alternative. Unlock with
+  `SSHX_VAULT_PASSPHRASE` or `SSHX_VAULT_KEY_FILE`. No silent fallback.
 - **Trust store:** `~/.ssh/known_hosts` (or `--known-hosts` / `SSH_KNOWN_HOSTS`).
 - **Audit trail:** `~/.sshx/audit/sshx-YYYY-MM-DD.jsonl` by default; override
   with `--audit-output=<dir>` / `SSHX_AUDIT_OUTPUT`, or disable with
@@ -263,8 +270,10 @@ tests.
    connection (OpenSSH-like). Bypasses are opt-in and loud: `--accept-unknown-host`
    (records the key once), `--insecure-hostkey` (last resort), or the matching
    `SSH_*` env vars.
-2. **Secrets never in plaintext.** Passwords live only in the OS keyring. Inline
-   `--password-set=key:value` and `SSH_PASSWORD` are supported but warned about.
+2. **Secrets never in plaintext.** Passwords live in the OS keyring by default,
+   or in an explicit encrypted local vault. Inline `--password-set=key:value`
+   and `SSH_PASSWORD` are supported but warned about. Never silently degrade
+   the backend, and never emit vault secrets on `--password-get`.
 3. **Sudo password over stdin.** Never interpolate the password into the command
    string. `sudoStdinCommand` rewrites a leading `sudo` to `sudo -S -p ''` and the
    password is fed via `session.Stdin`. This avoids quote breakage and injection.
@@ -384,6 +393,8 @@ Items must respect the boundaries in §3.
   password input.
 - ✅ Built-in host inspection, sshx-owned local plugin lifecycle, digest trust,
   and freshness-bounded remote observations.
+- ✅ Explicit encrypted local vault secret backend for headless hosts
+  (`SSHX_SECRET_BACKEND=local-vault`), write-only to Agents.
 
 **Near-term**
 
@@ -401,7 +412,9 @@ Items must respect the boundaries in §3.
 
 **Long-term / under consideration**
 
-- ⬜ Pluggable secret backends behind the existing keyring abstraction.
+- ⬜ Additional secret backends (for example an operator-owned remote vault)
+  behind the same keyringstore facade, still without becoming an enterprise
+  secret platform.
 
 Anything implying a daemon, a resident protocol server (including HTTP/SSE
 MCP), tunneling, or a GUI is explicitly **rejected** unless the mission in

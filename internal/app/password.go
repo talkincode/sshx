@@ -51,17 +51,23 @@ func setPassword(serviceName, key, value string) error {
 		return fmt.Errorf("failed to set password: %w", err)
 	}
 
-	logger.GetLogger().Success("Password saved to system keyring")
+	backend := secretBackendLabel()
+	logger.GetLogger().Success("Password saved to %s", backend)
 	logger.GetLogger().Info("  Service: %s", serviceName)
 	logger.GetLogger().Info("  Key: %s", key)
 
 	fmt.Println("\nVerify with:")
-	if isWindows() {
-		fmt.Println("  Windows: Check Credential Manager -> Generic Credentials")
-	} else if isMacOS() {
-		fmt.Printf("  macOS: security find-generic-password -s %s -a %s -w\n", serviceName, key)
+	fmt.Printf("  sshx --password-check=%s\n", key)
+	if keyringstore.CanReveal() {
+		if isWindows() {
+			fmt.Println("  Windows: Check Credential Manager -> Generic Credentials")
+		} else if isMacOS() {
+			fmt.Printf("  macOS: security find-generic-password -s %s -a %s -w\n", serviceName, key)
+		} else {
+			fmt.Printf("  Linux: secret-tool lookup service %s username %s\n", serviceName, key)
+		}
 	} else {
-		fmt.Printf("  Linux: secret-tool lookup service %s username %s\n", serviceName, key)
+		fmt.Println("  Local vault is write-only; sshx injects the secret over stdin during execution.")
 	}
 
 	return nil
@@ -70,6 +76,9 @@ func setPassword(serviceName, key, value string) error {
 func getPassword(serviceName, key string) error {
 	if key == "" {
 		return fmt.Errorf("password key is required")
+	}
+	if !keyringstore.CanReveal() {
+		return fmt.Errorf("%w: use --password-check to confirm %q exists; sshx injects the secret over stdin during execution", keyringstore.ErrRevealDenied, key)
 	}
 
 	password, err := keyringstore.Get(serviceName, key)
@@ -117,7 +126,7 @@ func deletePassword(serviceName, key string) error {
 		return fmt.Errorf("failed to delete password: %w", err)
 	}
 
-	logger.GetLogger().Success("Password deleted from system keyring")
+	logger.GetLogger().Success("Password deleted from %s", secretBackendLabel())
 	logger.GetLogger().Info("  Service: %s", serviceName)
 	logger.GetLogger().Info("  Key: %s", key)
 
@@ -132,14 +141,14 @@ func checkPassword(serviceName, key string) error {
 	_, err := keyringstore.Get(serviceName, key)
 	if err == nil {
 		logger.GetLogger().Success("Password exists for key: %s", key)
-		fmt.Printf("\nKey '%s' is stored in system keyring\n", key)
+		fmt.Printf("\nKey '%s' is stored in %s\n", key, secretBackendLabel())
 		fmt.Printf("Service: %s\n", serviceName)
 		return nil
 	}
 
 	if errors.Is(err, keyringstore.ErrNotFound) {
 		logger.GetLogger().Warning("Password not found for key: %s", key)
-		fmt.Printf("\nKey '%s' is NOT stored in system keyring\n", key)
+		fmt.Printf("\nKey '%s' is NOT stored in %s\n", key, secretBackendLabel())
 		fmt.Printf("Use 'sshx --password-set=%s' to add it\n", key)
 		return nil
 	}
@@ -148,9 +157,25 @@ func checkPassword(serviceName, key string) error {
 }
 
 func listPasswords() error {
-	fmt.Println("Checking password keys in system keyring...")
+	fmt.Println("Checking password keys in", secretBackendLabel()+"...")
 	fmt.Println("Service:", sshclient.KeyringServiceName)
 	fmt.Println()
+
+	names, err := keyringstore.Accounts(sshclient.KeyringServiceName)
+	if err == nil {
+		if len(names) == 0 {
+			fmt.Println("  (no keys stored)")
+			return nil
+		}
+		fmt.Println("Stored keys:")
+		for _, name := range names {
+			fmt.Printf("  ✓ %s\n", name)
+		}
+		return nil
+	}
+	if !errors.Is(err, keyringstore.ErrListUnsupported) {
+		return fmt.Errorf("failed to list passwords: %w", err)
+	}
 
 	commonKeys := []string{
 		"master",
@@ -194,6 +219,17 @@ func listPasswords() error {
 	}
 
 	return nil
+}
+
+func secretBackendLabel() string {
+	switch keyringstore.Inspect().Backend {
+	case keyringstore.BackendVault:
+		return "local vault"
+	case "invalid":
+		return "invalid secret backend"
+	default:
+		return "system keyring"
+	}
 }
 
 func readPassword() (string, error) {

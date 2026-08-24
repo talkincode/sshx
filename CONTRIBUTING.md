@@ -13,8 +13,10 @@ reviewed against it.
   issue before writing code.
 - **Convergence test**: a new feature must remove an Agent judgment, not add a
   command an Agent has to learn.
-- **Security first**: never weaken host-key verification, keyring-only secret
-  storage, safety-check, or audit semantics for convenience.
+- **Security first**: never weaken host-key verification, secret-backend
+  isolation (OS keyring or explicit local vault), safety-check, or audit
+  semantics for convenience. Do not add plaintext secret files or silent
+  keyring fallbacks.
 
 ## Development Setup
 

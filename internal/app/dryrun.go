@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/talkincode/sshx/internal/keyringstore"
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
@@ -74,6 +75,9 @@ type dryRunPlan struct {
 	MayMutateKnownHosts   bool `json:"may_mutate_known_hosts"`
 	WouldPromptForSecret  bool `json:"would_prompt_for_secret"`
 	WouldLookupHostConfig bool `json:"would_lookup_host_config"`
+
+	SecretBackend string `json:"secret_backend,omitempty"`
+	SecretUnlock  string `json:"secret_unlock,omitempty"`
 
 	Notes []string `json:"notes,omitempty"`
 
@@ -149,7 +153,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 		ConfigCheck:          dryRunStatus{Status: "passed"},
 		SafetyCheck:          dryRunStatus{Status: "not_applicable"},
 		Notes: []string{
-			"dry-run does not connect, execute, read keyring secrets, mutate known_hosts, or write local/remote state",
+			"dry-run does not connect, execute, read secrets, mutate known_hosts, or write local/remote state",
 		},
 	}
 
@@ -159,6 +163,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	fillDryRunKeyDefault(config, &plan)
 	fillDryRunSudo(config, &plan)
 	fillDryRunValidation(config, &plan)
+	fillDryRunSecretBackend(config, &plan)
 	fillDryRunSQL(config, &plan)
 	fillDryRunApply(config, &plan)
 	fillDryRunEffects(config, &plan)
@@ -379,6 +384,30 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 		return
 	}
 	plan.SudoKey = config.SudoKey
+}
+
+func fillDryRunSecretBackend(config *sshclient.Config, plan *dryRunPlan) {
+	status := keyringstore.Inspect()
+	plan.SecretBackend = status.Backend
+	if status.Unlock != keyringstore.UnlockNone {
+		plan.SecretUnlock = status.Unlock
+	}
+	if !plan.Valid {
+		return
+	}
+	if _, err := keyringstore.Backend(); err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+	if config.Mode == "password" && config.PasswordAction == "get" && !keyringstore.CanReveal() {
+		plan.ConfigCheck = dryRunStatus{
+			Status:    "error",
+			ErrorKind: "config",
+			Message:   "local vault is write-only; --password-get cannot display secrets",
+		}
+		plan.Valid = false
+	}
 }
 
 func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
@@ -826,6 +855,13 @@ func printDryRunPlan(plan dryRunPlan) {
 	fmt.Printf("Would connect: %t\n", plan.WouldConnect)
 	fmt.Printf("Would execute: %t\n", plan.WouldExecute)
 	fmt.Printf("Would read secret: %t\n", plan.WouldReadSecret)
+	if plan.SecretBackend != "" {
+		fmt.Printf("Secret backend: %s", plan.SecretBackend)
+		if plan.SecretUnlock != "" {
+			fmt.Printf(" (unlock: %s)", plan.SecretUnlock)
+		}
+		fmt.Println()
+	}
 	fmt.Printf("Would write local state: %t\n", plan.WouldWriteLocalState)
 	fmt.Printf("Would mutate remote: %t\n", plan.WouldMutateRemote)
 	fmt.Printf("Would write remote state: %t\n", plan.WouldWriteRemoteState)

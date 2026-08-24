@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-25
+
+### Added
+
+- Headless hosts can store secrets in an encrypted **local vault** instead of
+  the OS keyring. Set `SSHX_SECRET_BACKEND=local-vault` plus
+  `SSHX_VAULT_PASSPHRASE` or `SSHX_VAULT_KEY_FILE` (0600). The vault file is
+  `$SSHX_HOME/vault` (owner-only, scrypt + secretbox). There is no silent
+  fallback to a file when the keyring is missing. The vault is write-only:
+  `--password-get` is refused, MCP still exposes no password tools, and sshx
+  injects secrets over stdin. Dry-run and audit record `secret_backend` and
+  `secret_unlock` without secret values.
+
 ## [0.9.0] - 2026-08-24
 
 ### Added
@@ -468,7 +481,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/talkincode/sshx/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/talkincode/sshx/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/talkincode/sshx/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/talkincode/sshx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/talkincode/sshx/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/talkincode/sshx/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/talkincode/sshx/compare/v0.4.0...v0.4.1

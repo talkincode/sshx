@@ -2,19 +2,35 @@
 
 package keyringstore
 
-import "github.com/zalando/go-keyring"
+import (
+	"errors"
 
-// ErrNotFound reports that a key has no value in the operating-system keyring.
-var ErrNotFound = keyring.ErrNotFound
+	"github.com/zalando/go-keyring"
+)
 
-func Set(service, account, password string) error {
+func keyringSet(service, account, password string) error {
 	return keyring.Set(service, account, password)
 }
 
-func Get(service, account string) (string, error) {
-	return keyring.Get(service, account)
+func keyringGet(service, account string) (string, error) {
+	password, err := keyring.Get(service, account)
+	if err != nil {
+		if errors.Is(err, keyring.ErrNotFound) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return password, nil
 }
 
-func Delete(service, account string) error {
-	return keyring.Delete(service, account)
+func keyringDelete(service, account string) error {
+	err := keyring.Delete(service, account)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func keyringAccounts(string) ([]string, error) {
+	return nil, ErrListUnsupported
 }

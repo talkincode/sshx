@@ -94,7 +94,8 @@ part of the Agent/MCP contract.
 
 ## Save A Sudo Password
 
-For commands that start with `sudo`, `sshx` can read a password from the OS keyring and feed it to sudo through stdin.
+For commands that start with `sudo`, `sshx` can read a password from the OS
+keyring (or the explicit local vault) and feed it to sudo through stdin.
 
 ```bash
 sshx --password-set=prod-web-sudo

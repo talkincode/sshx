@@ -17,10 +17,10 @@ Usage:
   sshx -h=<host> [options] --upload=<file>        # SFTP upload
   sshx -h=<host> [options] --download=<file>      # SFTP download
   sshx --transfer=<host>:<path> --to=<host>:<path> # Server-to-server transfer
-  sshx --password-set=<key>[:<password>]          # Set password in keyring
-  sshx --password-get=<key>                       # Get password from keyring
-  sshx --password-delete=<key>                    # Delete password from keyring
-  sshx --password-list                            # List common password keys
+  sshx --password-set=<key>[:<password>]          # Store a password (keyring or local vault)
+  sshx --password-get=<key>                       # Get password from OS keyring (denied for local vault)
+  sshx --password-delete=<key>                    # Delete a stored password
+  sshx --password-list                            # List stored or common password keys
   sshx --host-add                                 # Add host configuration
   sshx --host-update                              # Update host configuration
   sshx --host-list                                # List configured hosts
@@ -171,17 +171,20 @@ Server-to-Server Transfer:
   or IP addresses, each using its own SSH key/user/port from settings.
 
 Password Management (Cross-Platform):
-  --password-set=<key>[:<password>]   Set password in system keyring
+  --password-set=<key>[:<password>]   Store a password in the secret backend
                                       If password omitted, will prompt
-  --password-get=<key>                Output the password (raw value only when piped; on a terminal just confirms it exists)
+  --password-get=<key>                OS keyring: emit the value only when piped.
+                                      Local vault: always refused (write-only).
   --password-check=<key>              Check if password exists (alias: --password-exists)
-  --password-delete=<key>             Delete password from keyring (alias: --password-del)
-  --password-list                     List common password keys (alias: --password-ls)
+  --password-delete=<key>             Delete password (alias: --password-del)
+  --password-list                     List stored keys (vault) or common keys (keyring)
 
-  Platform Support:
-    macOS:   Uses Keychain
-    Linux:   Uses Secret Service (gnome-keyring/kwallet)
-    Windows: Uses Credential Manager
+  Default backend: OS keyring (macOS Keychain / Linux Secret Service /
+  Windows Credential Manager). Headless servers can opt into an encrypted
+  local vault with SSHX_SECRET_BACKEND=local-vault. There is no silent
+  fallback. The vault never displays secret values; sshx injects them over
+  stdin during execution. Unlock with SSHX_VAULT_PASSPHRASE or
+  SSHX_VAULT_KEY_FILE (0600). The vault file is $SSHX_HOME/vault.
 
 Host Management:
   --host-add                          Add new host (interactive or with options)
@@ -260,7 +263,7 @@ Guarded SQL Execution:
                             exclusive with --db-password-key; --db becomes optional
                             when the source provides the database name.
   --cred-cache=off|DURATION Temporary local cache for remotely resolved credentials
-                            (default: 15m). The secret lives only in the OS keyring;
+                            (default: 15m). The secret lives only in the secret backend;
                             ~/.sshx/sql-cred-cache.json records identity + expiry.
                             Expired entries are deleted from the keyring.
   --cred-refresh            Drop the cached entry and re-resolve from the source
@@ -398,6 +401,9 @@ Environment Variables (.env):
   SSHX_AUDIT_OUTPUT     Audit output directory (default: ~/.sshx/audit)
   SSHX_NO_AUDIT         Disable audit writing (true/false)
   SSHX_HOME             Override the local sshx runtime root (default: ~/.sshx)
+  SSHX_SECRET_BACKEND   Secret store: keyring (default) or local-vault
+  SSHX_VAULT_PASSPHRASE Unlock passphrase for local-vault (unattended)
+  SSHX_VAULT_KEY_FILE   0600 file containing the vault passphrase (wins over env)
 
 SSH Examples:
   # Execute simple command (default user: master)
@@ -511,8 +517,15 @@ Password Management Examples:
   sshx --password-set=root
   sshx --password-set=admin
 
-  # Get password from keyring
+  # Get password from OS keyring (refused when using local-vault)
   sshx --password-get=master
+
+  # Headless server: encrypted local vault (write-only; Agent never sees the value)
+  SSHX_SECRET_BACKEND=local-vault SSHX_VAULT_PASSPHRASE='…' \
+    sshx --password-set=prod-web
+  SSHX_SECRET_BACKEND=local-vault SSHX_VAULT_PASSPHRASE='…' \
+    sshx --password-check=prod-web
+
 
   # Check if password exists
   sshx --password-check=server-A

@@ -12,6 +12,7 @@ import (
 // TestSystemBackendRoundtrip exercises Set/Get/Delete against the in-memory
 // mock provider so the test never touches a real OS keyring.
 func TestSystemBackendRoundtrip(t *testing.T) {
+	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	keyring.MockInit()
 
 	const (
@@ -44,6 +45,7 @@ func TestSystemBackendRoundtrip(t *testing.T) {
 // TestSystemBackendMissingKey verifies the package-level ErrNotFound maps to
 // the provider's not-found error for keys that were never stored.
 func TestSystemBackendMissingKey(t *testing.T) {
+	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	keyring.MockInit()
 
 	if _, err := Get("sshx-test-service", "never-stored"); !errors.Is(err, ErrNotFound) {

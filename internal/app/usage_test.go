@@ -80,6 +80,8 @@ func TestPrintUsage(t *testing.T) {
 		"sshx plugin create",
 		"sshx skill install",
 		"SSHX_HOME",
+		"SSHX_SECRET_BACKEND",
+		"local vault",
 	}
 
 	for _, cmd := range importantCommands {
