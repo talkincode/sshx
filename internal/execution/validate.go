@@ -143,7 +143,7 @@ func BuildDryRunPlan(req *Request, hosts []HostRecord, defaults HostRecord, payl
 		Limits:        req.Limits,
 		Policy:        PublicPolicy(req.Policy),
 		Notes: []string{
-			"dry-run does not connect, execute, read keyring secrets, mutate known_hosts, or write local/remote state",
+			"dry-run does not connect, execute, read secrets, mutate known_hosts, or write local/remote state",
 		},
 	}
 

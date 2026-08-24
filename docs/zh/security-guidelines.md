@@ -5,7 +5,7 @@
 ## 不可妥协的规则
 
 1. 保持严格 host-key 校验。
-2. 密码保存到 OS keyring，不放进文件、shell history、工单或聊天记录。
+2. 密码保存到 OS keyring，或显式启用的加密本地保险库，不放进明文文件、shell history、工单或聊天记录。
 3. sudo 密码只通过 stdin 传入，绝不拼进命令字符串。
 4. `--force`、`--no-safety-check`、`--insecure-hostkey` 都是例外的 break-glass 选择。
 5. 对特权或破坏性操作先跑 `--dry-run`。
@@ -66,6 +66,16 @@ sshx --password-set=prod-web-sudo:plain-text-password
 内联值可能泄露到 shell history、终端滚屏、进程列表、日志或复制出去的命令里。
 
 Keyring password key 用于 sudo 自动填充。`SSH_PASSWORD` 是 SSH 登录密码，应视为高风险 fallback，而不是正常操作模式。
+
+无桌面、没有可用钥匙链的主机必须显式选择保险库：
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='…'
+sshx --password-set=prod-web-sudo
+```
+
+本地保险库不会展示秘密值（`--password-get` 被拒绝）。sshx 经 stdin 注入。不要静默把秘密写成 JSON 文件。
 
 ## Sudo 规则
 

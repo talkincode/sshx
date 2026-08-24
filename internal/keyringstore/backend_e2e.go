@@ -4,18 +4,15 @@ package keyringstore
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
-
-// ErrNotFound mirrors the public behavior of the OS keyring provider.
-var ErrNotFound = errors.New("secret not found in isolated E2E keyring")
 
 type fileState map[string]map[string]string
 
-func Set(service, account, password string) error {
+func keyringSet(service, account, password string) error {
 	state, path, err := load()
 	if err != nil {
 		return err
@@ -27,7 +24,7 @@ func Set(service, account, password string) error {
 	return save(path, state)
 }
 
-func Get(service, account string) (string, error) {
+func keyringGet(service, account string) (string, error) {
 	state, _, err := load()
 	if err != nil {
 		return "", err
@@ -39,7 +36,7 @@ func Get(service, account string) (string, error) {
 	return value, nil
 }
 
-func Delete(service, account string) error {
+func keyringDelete(service, account string) error {
 	state, path, err := load()
 	if err != nil {
 		return err
@@ -49,6 +46,19 @@ func Delete(service, account string) error {
 	}
 	delete(state[service], account)
 	return save(path, state)
+}
+
+func keyringAccounts(service string) ([]string, error) {
+	state, _, err := load()
+	if err != nil {
+		return nil, err
+	}
+	accounts := make([]string, 0, len(state[service]))
+	for name := range state[service] {
+		accounts = append(accounts, name)
+	}
+	sort.Strings(accounts)
+	return accounts, nil
 }
 
 func load() (fileState, string, error) {

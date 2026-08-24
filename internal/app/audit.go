@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/talkincode/sshx/internal/keyringstore"
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
@@ -89,11 +90,13 @@ type auditEvent struct {
 	AllowInsecureHostKey bool   `json:"allow_insecure_host_key"`
 	KnownHostsPath       string `json:"known_hosts_path,omitempty"`
 
-	WouldReadSecret       bool `json:"would_read_secret"`
-	WouldWriteLocalState  bool `json:"would_write_local_state"`
-	WouldMutateRemote     bool `json:"would_mutate_remote"`
-	WouldWriteRemoteState bool `json:"would_write_remote_state"`
-	MayMutateKnownHosts   bool `json:"may_mutate_known_hosts"`
+	WouldReadSecret       bool   `json:"would_read_secret"`
+	WouldWriteLocalState  bool   `json:"would_write_local_state"`
+	WouldMutateRemote     bool   `json:"would_mutate_remote"`
+	WouldWriteRemoteState bool   `json:"would_write_remote_state"`
+	MayMutateKnownHosts   bool   `json:"may_mutate_known_hosts"`
+	SecretBackend         string `json:"secret_backend,omitempty"`
+	SecretUnlock          string `json:"secret_unlock,omitempty"`
 
 	AuthMethod string         `json:"auth_method,omitempty"`
 	ExitCode   *int           `json:"exit_code,omitempty"`
@@ -446,6 +449,11 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.WouldMutateRemote = auditWouldMutateRemote(config)
 	r.event.WouldWriteRemoteState = config.Mode == "inspect" && config.InspectCacheMode == "remote-prefer"
 	r.event.MayMutateKnownHosts = modeUsesSSHConnection(config) && config.AcceptUnknownHost
+	status := keyringstore.Inspect()
+	r.event.SecretBackend = status.Backend
+	if status.Unlock != keyringstore.UnlockNone {
+		r.event.SecretUnlock = status.Unlock
+	}
 	if r.event.DurationMs == 0 {
 		r.event.DurationMs = time.Since(r.started).Milliseconds()
 	}

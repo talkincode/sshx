@@ -50,7 +50,7 @@ English | [简体中文](./README_CN.md)
 
 ## Why You Need It?
 
-Agents do not need another interactive SSH shell. They need a stable, composable remote execution contract with explicit side effects. `sshx` reduces argument assembly through named hosts, removes text guessing through JSON, exit codes, and error kinds, and lowers operational risk through dry-run plans, safety guardrails, the OS keyring, host-key verification, and local auditing.
+Agents do not need another interactive SSH shell. They need a stable, composable remote execution contract with explicit side effects. `sshx` reduces argument assembly through named hosts, removes text guessing through JSON, exit codes, and error kinds, and lowers operational risk through dry-run plans, safety guardrails, the OS keyring or explicit local vault, host-key verification, and local auditing.
 
 It remains a single binary with one-shot invocations and no resident component on remote hosts: **efficient, secure, and auditable remote execution for agents over SSH.** Human operators use the same command, preview, and audit semantics for supervision and troubleshooting.
 
@@ -67,7 +67,7 @@ It remains a single binary with one-shot invocations and no resident component o
 3. Dry-run execution plans and default-on local structured auditing with safe redaction.
 4. Named host management with groups/tags and selective OpenSSH config import.
 5. Strict host-key verification, destructive-command guardrails, and explicit bypass semantics.
-6. OS-keyring password management with distinct SSH-login and sudo credential roles.
+6. OS-keyring or explicit local-vault password management with distinct SSH-login and sudo credential roles.
 7. Cross-platform SSH/SFTP command and file actions.
 8. Direct server-to-server transfer, streamed through the local machine without touching local disk.
 9. One-shot host inspection with built-in system/network capabilities, local
@@ -429,7 +429,7 @@ sshx sql -h=prod --docker=pg-prod \
 ```
 
 Remotely resolved credentials are cached for 15 minutes by default. Secret
-values live only in the OS keyring; local metadata records identity and expiry.
+values live only in the secret backend; local metadata records identity and expiry.
 
 SQLite files live on the application host. Pass an absolute path; there is no
 database role or password:
@@ -577,13 +577,18 @@ Location: `~/.sshx/settings.json`
 
 ## Password Management
 
-`sshx` provides secure password storage using the operating system's native credential manager, eliminating the need to enter passwords repeatedly or store them in plaintext.
+`sshx` stores secrets in the operating system's native credential manager by
+default. On headless servers without Secret Service / Keychain, set
+`SSHX_SECRET_BACKEND=local-vault` to use an encrypted local vault instead.
+The vault is write-only: Agents confirm keys with `--password-check` and
+never read values; sshx injects them over stdin during execution.
 
 ### Supported Platforms
 
 - **macOS**: Uses Keychain Access
 - **Linux**: Uses Secret Service (GNOME Keyring / KDE Wallet)
 - **Windows**: Uses Credential Manager
+- **Headless Linux / CI**: Encrypted local vault (`SSHX_SECRET_BACKEND=local-vault`)
 
 ### Password Commands
 
@@ -646,6 +651,25 @@ sshx --password-get=master | pbcopy     # copy to clipboard (macOS)
 #     sshx --password-get=master | pbcopy
 #     sshx --password-get=master | cat
 ```
+
+`--password-get` is refused when `SSHX_SECRET_BACKEND=local-vault`. Use
+`--password-check` and let sshx inject the secret.
+
+#### Local vault (headless)
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='a long passphrase'
+# or: export SSHX_VAULT_KEY_FILE=/etc/sshx/vault.key   # must be 0600
+
+sshx --password-set=prod-web          # prompt or stdin; value is never printed
+sshx --password-check=prod-web
+sshx -h=prod-web -pk=prod-web "sudo systemctl status nginx"
+```
+
+There is no silent fallback: if the keyring is missing, sshx fails unless
+you explicitly select `local-vault`. Dry-run and audit report
+`secret_backend` and `secret_unlock` without secret values.
 
 #### Delete Password
 
@@ -747,12 +771,13 @@ sshx -h=192.168.1.101 -pk=server-B "sudo ls -la /root"
 
 ### Security Notes
 
-- ✅ Passwords are stored using OS-native encryption
+- ✅ Passwords are stored using OS-native encryption, or an explicit encrypted local vault
 - ✅ Passwords are never stored in plaintext
 - ✅ Password keys can be named per host, user, or environment
 - ✅ Password input is hidden during entry
-- ⚠️ Requires OS credential manager to be available
-- ⚠️ On Linux, requires Secret Service daemon running (usually automatic with desktop environments)
+- ✅ Local vault never displays secret values to Agents
+- ⚠️ OS keyring requires the platform credential manager
+- ⚠️ On Linux desktops, Secret Service usually runs automatically; headless hosts should use `local-vault`
 
 ### Connection Environment Variables
 
@@ -765,6 +790,8 @@ export SSH_SUDO_KEY=prod-web
 export SSH_TIMEOUT=30s
 # Optional: isolate all sshx runtime state for an Agent/CI run
 export SSHX_HOME="$PWD/.sshx-runtime"
+export SSHX_SECRET_BACKEND=local-vault   # optional; headless hosts without a keyring
+export SSHX_VAULT_PASSPHRASE='…'         # required with local-vault unless SSHX_VAULT_KEY_FILE is set
 
 # Then run with fewer repeated options
 sshx -h=prod-web "sudo uptime"

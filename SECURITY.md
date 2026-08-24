@@ -6,9 +6,9 @@ We take security seriously. The following versions of SSHX are currently support
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.10.x  | :white_check_mark: |
 | 0.9.x   | :white_check_mark: |
-| 0.8.x   | :white_check_mark: |
-| < 0.8.0 | :x:                |
+| < 0.9.0 | :x:                |
 
 Security updates are provided for the latest minor release and the previous
 minor release (N-1). Older lines do not receive patches; please upgrade.
@@ -89,10 +89,13 @@ SSHX includes built-in validation to prevent dangerous commands (e.g., `rm -rf /
 
 ### Credential Storage
 
-- Passwords are stored securely in the system keyring:
+- Passwords are stored securely in the system keyring by default:
   - **macOS**: Keychain Access
   - **Windows**: Credential Manager
   - **Linux**: Secret Service (GNOME Keyring / KDE Wallet)
+- Headless hosts may opt into an encrypted local vault with
+  `SSHX_SECRET_BACKEND=local-vault` (never a silent fallback, never displayed
+  via `--password-get`)
 - Use the `-pk` / `--password-key` parameter to specify different password keys for different servers
 - SSH private keys should have appropriate file permissions (600)
 - Never commit credentials to version control

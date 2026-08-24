@@ -487,6 +487,7 @@ func isolatedEnvironment(home string, extra map[string]string) []string {
 		"SSHX_NO_AUDIT": {}, "SSH_ACCEPT_UNKNOWN_HOST": {}, "SSH_INSECURE_HOST_KEY": {},
 		"SSH_NO_SAFETY_CHECK": {}, "SSH_FORCE": {}, "SSH_TIMEOUT": {}, "SSHX_LOG_LEVEL": {},
 		"SSHX_HOME": {}, "SSHX_SKILLS_DIR": {},
+		"SSHX_SECRET_BACKEND": {}, "SSHX_VAULT_PASSPHRASE": {}, "SSHX_VAULT_KEY_FILE": {},
 	}
 	env := make([]string, 0, len(os.Environ())+len(extra)+3)
 	for _, item := range os.Environ() {

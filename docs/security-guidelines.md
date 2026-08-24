@@ -5,7 +5,7 @@ Remote execution is high impact. These rules are strict because a small mistake 
 ## Non-Negotiable Rules
 
 1. Keep host-key verification strict.
-2. Store passwords in the OS keyring, not in files, shell history, tickets, or chat.
+2. Store passwords in the OS keyring or an explicit encrypted local vault, not in plaintext files, shell history, tickets, or chat.
 3. Send sudo passwords through stdin only; never place them in command strings.
 4. Treat `--force`, `--no-safety-check`, and `--insecure-hostkey` as exceptional break-glass choices.
 5. Use `--dry-run` before privileged or destructive operations.
@@ -66,6 +66,16 @@ sshx --password-set=prod-web-sudo:plain-text-password
 Inline values can leak through shell history, terminal scrollback, process listings, logs, or copied commands.
 
 Keyring password keys are for sudo auto-fill. `SSH_PASSWORD` is an SSH login password and should be treated as a high-risk fallback, not a normal operating mode.
+
+On headless hosts without a usable keyring, opt in explicitly:
+
+```bash
+export SSHX_SECRET_BACKEND=local-vault
+export SSHX_VAULT_PASSPHRASE='…'
+sshx --password-set=prod-web-sudo
+```
+
+The local vault never displays secret values (`--password-get` is refused). sshx injects them over stdin. Do not silently copy secrets into a JSON file.
 
 ## Sudo Rules
 

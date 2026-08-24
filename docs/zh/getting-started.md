@@ -91,7 +91,7 @@ sshx login prod-web --dry-run --json
 
 ## 保存 sudo 密码
 
-对于以 `sudo` 开头的命令，`sshx` 可以从 OS keyring 读取密码，并通过 stdin 传给 sudo。
+对于以 `sudo` 开头的命令，`sshx` 可以从 OS keyring（或显式本地保险库）读取密码，并通过 stdin 传给 sudo。
 
 ```bash
 sshx --password-set=prod-web-sudo

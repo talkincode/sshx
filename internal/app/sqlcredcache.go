@@ -33,7 +33,7 @@ var (
 )
 
 // credCacheEntry is the non-secret metadata for one cached credential. The
-// secret itself lives only in the OS keyring under Key; this file records
+// secret itself lives only in the secret backend under Key; this file records
 // identity and expiry so stale keyring entries are actively deleted.
 type credCacheEntry struct {
 	Key       string    `json:"key"`

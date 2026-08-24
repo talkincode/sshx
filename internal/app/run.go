@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/talkincode/sshx/internal/execution"
+	"github.com/talkincode/sshx/internal/keyringstore"
 	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/pkg/logger"
 )
@@ -38,6 +39,7 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 
 	if config.DryRun {
 		plan := execution.BuildDryRunPlan(req, hosts, defaults, payload)
+		attachRunSecretBackend(&plan)
 		return emitRunDryRun(config, plan)
 	}
 
@@ -139,12 +141,35 @@ func emitRunDryRun(config *sshclient.Config, plan execution.DryRunPlan) error {
 		fmt.Printf("  skip %s: %s\n", s.Alias, s.Reason)
 	}
 	fmt.Printf("Concurrency: %d failure_mode=%s\n", plan.Limits.Concurrency, plan.Policy.FailureMode)
+	if plan.SecretBackend != "" {
+		fmt.Printf("Secret backend: %s", plan.SecretBackend)
+		if plan.SecretUnlock != "" {
+			fmt.Printf(" unlock=%s", plan.SecretUnlock)
+		}
+		fmt.Println()
+	}
 	fmt.Printf("Would connect/execute/read_secret/mutate_remote: %t/%t/%t/%t\n",
 		plan.WouldConnect, plan.WouldExecute, plan.WouldReadSecret, plan.WouldMutateRemote)
 	if plan.Error != nil {
 		fmt.Printf("Error: kind=%s message=%s\n", plan.Error.Kind, plan.Error.Message)
 	}
 	return nil
+}
+
+func attachRunSecretBackend(plan *execution.DryRunPlan) {
+	status := keyringstore.Inspect()
+	plan.SecretBackend = status.Backend
+	if status.Unlock != keyringstore.UnlockNone {
+		plan.SecretUnlock = status.Unlock
+	}
+	if _, err := keyringstore.Backend(); err != nil && plan.Valid {
+		plan.Valid = false
+		plan.WouldConnect = false
+		plan.WouldExecute = false
+		plan.WouldReadSecret = false
+		plan.WouldMutateRemote = false
+		plan.Error = execution.BuildError(err, execution.ErrorKindConfig, plan.Action.Intent, execution.CompletionNotStarted)
+	}
 }
 
 func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err error) error {
