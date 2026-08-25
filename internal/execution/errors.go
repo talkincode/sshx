@@ -32,6 +32,8 @@ func Classify(err error) string {
 		return ErrorKindPrecondition
 	case errors.Is(err, sshclient.ErrApplyBlocked):
 		return ErrorKindBlocked
+	case errors.Is(err, sshclient.ErrInvalidBind):
+		return ErrorKindConfig
 	}
 	var blocked *sshclient.CommandBlockedError
 	if errors.As(err, &blocked) {

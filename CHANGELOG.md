@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-25
+
+### Added
+
+- Source address binding matching OpenSSH `-b` / `BindAddress` / `BindInterface`.
+  `--bind=<ip|iface>` overrides the current invocation; named hosts persist
+  `bind` in `settings.json`. Interface names pick a global unicast address
+  matching the destination family (link-local and loopback only when the
+  destination is that kind). Invalid bind is `error_kind: config` and does
+  not dial. Dry-run, audit, compatibility JSON, `sshx run`, transfer,
+  host-test, MCP tools, and `ssh_config` import (`BindAddress` /
+  `BindInterface`, first value wins) all expose the field. `--bind=` clears
+  a host bind for this invocation.
+
 ## [0.10.0] - 2026-08-25
 
 ### Added

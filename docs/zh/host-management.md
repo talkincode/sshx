@@ -21,7 +21,8 @@ sshx --host-add \
   -i=~/.ssh/prod-web.pem \
   -pk=prod-web-sudo \
   --host-desc="Production web node" \
-  --host-type=linux
+  --host-type=linux \
+  --bind=en0
 ```
 
 之后用别名执行命令：
@@ -60,7 +61,7 @@ sshx --host-import --ssh-config=~/work/ssh_config
 sshx --host-import=web1 --dry-run --json
 ```
 
-每个条目导入的字段：`HostName`（缺省时使用别名本身）、`Port`、`User`、`IdentityFile`（作为该主机的 `key`）。
+每个条目导入的字段：`HostName`（缺省时使用别名本身）、`Port`、`User`、`IdentityFile`（作为该主机的 `key`）、以及 `BindAddress` / `BindInterface`（作为 `bind`；先出现的值生效）。
 
 防污染规则——导入器始终跳过：
 
@@ -89,7 +90,8 @@ sshx --host-import=web1 --dry-run --json
       "user": "deploy",
       "key": "/Users/alice/.ssh/prod-web.pem",
       "password_key": "prod-web-sudo",
-      "type": "linux"
+      "type": "linux",
+      "bind": "en0"
     }
   ]
 }
@@ -111,6 +113,10 @@ sshx --host-test-all
 
 # 更新主机
 sshx --host-update --host-name=prod-web -u=deploy -i=~/.ssh/prod-web-2026.pem
+
+# 修改或清空持久化源地址绑定
+sshx --host-update --host-name=prod-web --bind=192.0.2.10
+sshx --host-update --host-name=prod-web --bind=
 
 # 删除主机
 sshx --host-remove=old-lab

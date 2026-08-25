@@ -95,3 +95,45 @@ func TestResolveTargets_MissingNameSkippedStillMatches(t *testing.T) {
 		t.Fatalf("expected missing-host skipped, got %#v", snap.Skipped)
 	}
 }
+
+func TestResolveTargets_BindInheritOverrideAndClear(t *testing.T) {
+	hosts := []HostRecord{
+		{Name: "prod-web-1", Address: "10.0.1.11", Port: "22", User: "deploy", Bind: "en0"},
+	}
+
+	snap, err := ResolveTargets(hosts, TargetSelector{Names: []string{"prod-web-1"}}, HostRecord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Targets[0].Bind != "en0" {
+		t.Fatalf("host bind = %q", snap.Targets[0].Bind)
+	}
+	hostDigest := snap.SelectorDigest
+
+	snap, err = ResolveTargets(hosts, TargetSelector{Names: []string{"prod-web-1"}}, HostRecord{Bind: "192.0.2.10", BindSet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Targets[0].Bind != "192.0.2.10" {
+		t.Fatalf("cli bind = %q", snap.Targets[0].Bind)
+	}
+	if snap.SelectorDigest == hostDigest {
+		t.Fatal("selector digest must change when bind changes")
+	}
+
+	snap, err = ResolveTargets(hosts, TargetSelector{Names: []string{"prod-web-1"}}, HostRecord{Bind: "", BindSet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Targets[0].Bind != "" {
+		t.Fatalf("empty BindSet must clear host bind, got %q", snap.Targets[0].Bind)
+	}
+
+	snap, err = ResolveTargets(hosts, TargetSelector{Address: "192.0.2.8"}, HostRecord{Bind: "en0", BindSet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.Targets[0].Literal || snap.Targets[0].Bind != "en0" {
+		t.Fatalf("literal target bind = %#v", snap.Targets[0])
+	}
+}

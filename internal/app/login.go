@@ -177,6 +177,7 @@ func parseLoginArgs(config *sshclient.Config, args []string) {
 		case arg == "--pty", arg == "--jsonl", arg == "--force", arg == "-f", arg == "--no-safety-check":
 			config.ArgumentError = fmt.Sprintf("login does not accept %s", arg)
 			return
+		case applyBindFlag(config, arg):
 		case stringsHasPrefixAny(arg, "--timeout="):
 			config.ArgumentError = "login does not accept --timeout (interactive sessions are unbounded)"
 			return

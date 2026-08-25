@@ -171,6 +171,9 @@ sshx -h=prod-web "df -h"
 # Custom user / port / private key.
 sshx -h=10.0.0.5 -u=root -p=2222 -i=~/.ssh/prod.pem "ps aux | grep nginx"
 
+# Bind the local source address (literal IP or interface name).
+sshx -h=prod-web --bind=en0 "uptime"
+
 # Bound the runtime; kills the command after the timeout (accepts 30s, 2m, or 30).
 sshx -h=prod-web --timeout=30s "apt-get update"
 
@@ -396,8 +399,10 @@ sshx -h=host --rm=/tmp/oldfile.txt                       # remove
 # Add (flags or interactive). Each host may carry its own key (-i) and password key (-pk).
 sshx --host-add --host-name=prod-web -h=192.168.1.100 -u=root -pk=prod-web --host-desc="Prod web"
 sshx --host-add --host-name=prod-db  -h=192.168.1.200 -u=admin -i=~/.ssh/prod-db.pem
+sshx --host-add --host-name=edge --bind=en0 -h=100.117.253.247 -p=18922
 
 sshx --host-update --host-name=prod-web -h=192.168.1.101   # change one or more fields
+sshx --host-update --host-name=edge --bind=               # clear a persisted source bind
 sshx --host-list                                           # list (alias: --host-ls)
 sshx --host-test=prod-web                                  # test one host
 sshx --host-test-all                                       # test all (fast 10s dial timeout)

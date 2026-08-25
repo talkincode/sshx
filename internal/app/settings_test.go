@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -499,5 +500,38 @@ func TestSaveSettings_RenameFailureCleansTempFile(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("expected settings path to remain a directory after failed rename")
+	}
+}
+
+func TestHostConfigBindJSONRoundTrip(t *testing.T) {
+	t.Setenv("SSHX_HOME", t.TempDir())
+
+	settings := &Settings{
+		Hosts: []HostConfig{{
+			Name: "edge",
+			Host: "192.0.2.1",
+			Port: "22",
+			User: "root",
+			Bind: "en0",
+		}},
+	}
+	if err := SaveSettings(settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	loaded, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if len(loaded.Hosts) != 1 || loaded.Hosts[0].Bind != "en0" {
+		t.Fatalf("bind round-trip = %#v", loaded.Hosts)
+	}
+
+	raw, err := json.Marshal(loaded.Hosts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"bind":"en0"`) {
+		t.Fatalf("JSON missing bind: %s", raw)
 	}
 }

@@ -249,6 +249,28 @@ func TestCurrentEntrySanitizes(t *testing.T) {
 	}
 }
 
+func TestBuildRunArgsBind(t *testing.T) {
+	args, _, err := buildRunArgs(mcpRunInput{Targets: []string{"web-1"}, Command: "uptime", Bind: "en0"})
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
+	assertArgs(t, args, []string{"run", "--json", "--target=web-1", "--bind=en0", "--", "uptime"})
+
+	args, _, err = buildRunArgs(mcpRunInput{Targets: []string{"web-1"}, Command: "uptime"})
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
+	assertArgs(t, args, []string{"run", "--json", "--target=web-1", "--", "uptime"})
+}
+
+func TestBuildInspectArgsBind(t *testing.T) {
+	args, err := buildInspectArgs(mcpInspectInput{Target: "prod", Capability: "system.baseline", Bind: "192.0.2.10"})
+	if err != nil {
+		t.Fatalf("buildInspectArgs: %v", err)
+	}
+	assertArgs(t, args, []string{"inspect", "--json", "-h=prod", "--bind=192.0.2.10", "system.baseline"})
+}
+
 func assertArgs(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

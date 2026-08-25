@@ -22,6 +22,8 @@ type HostRecord struct {
 	SudoPasswordKey string
 	Groups          []string
 	Tags            map[string]string
+	Bind            string
+	BindSet         bool
 }
 
 // ResolveTargets freezes a deterministic target snapshot from configured hosts.
@@ -68,6 +70,7 @@ func ResolveTargets(hosts []HostRecord, sel TargetSelector, defaults HostRecord)
 			SSHPasswordKey:  defaults.SSHPasswordKey,
 			SudoPasswordKey: defaults.SudoPasswordKey,
 			Literal:         true,
+			Bind:            resolvedBind(defaults.Bind, defaults.BindSet, ""),
 		}
 		snap := TargetSnapshot{
 			Targets: []ResolvedTarget{target},
@@ -167,6 +170,7 @@ func ResolveTargets(hosts []HostRecord, sel TargetSelector, defaults HostRecord)
 			SudoPasswordKey: firstNonEmpty(h.SudoPasswordKey, defaults.SudoPasswordKey),
 			Groups:          append([]string(nil), h.Groups...),
 			Tags:            copyTags(h.Tags),
+			Bind:            resolvedBind(defaults.Bind, defaults.BindSet, h.Bind),
 		})
 	}
 
@@ -226,6 +230,7 @@ func snapshotDigest(snap TargetSnapshot) string {
 		Address string `json:"address"`
 		Port    string `json:"port"`
 		User    string `json:"user"`
+		Bind    string `json:"bind,omitempty"`
 	}
 	type digSnap struct {
 		Targets []digTarget     `json:"targets"`
@@ -238,6 +243,7 @@ func snapshotDigest(snap TargetSnapshot) string {
 			Address: t.Address,
 			Port:    t.Port,
 			User:    t.User,
+			Bind:    t.Bind,
 		})
 	}
 	raw, err := json.Marshal(d)
@@ -258,6 +264,13 @@ func copyTags(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func resolvedBind(cliBind string, cliSet bool, hostBind string) string {
+	if cliSet {
+		return cliBind
+	}
+	return hostBind
 }
 
 func firstNonEmpty(values ...string) string {

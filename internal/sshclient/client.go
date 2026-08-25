@@ -209,6 +209,12 @@ type Config struct {
 	// Interactive login fields (Mode == "login").
 	LoginUseSudo     bool
 	LoginLiteralHost bool
+
+	// Bind is a local source address: a literal IP or a network interface name.
+	// BindSet distinguishes "flag not provided" from an explicit empty --bind=
+	// that must clear a named host's persisted bind.
+	Bind    string
+	BindSet bool
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.
@@ -442,6 +448,13 @@ func NewSSHClient(config *Config) (*SSHClient, error) {
 	return &SSHClient{config: config, authMethodUsed: AuthMethodUnknown}, nil
 }
 
+var dialTCP = defaultDialTCP
+
+func defaultDialTCP(addr string, localAddr net.Addr, timeout time.Duration) (net.Conn, error) {
+	d := net.Dialer{Timeout: timeout, LocalAddr: localAddr}
+	return d.Dial("tcp", addr)
+}
+
 // ConnectDirect establishes a direct SSH connection.
 func (c *SSHClient) ConnectDirect() error {
 	lg := logger.GetLogger()
@@ -499,7 +512,15 @@ func (c *SSHClient) ConnectDirect() error {
 		addr := net.JoinHostPort(c.config.Host, c.config.Port)
 		lg.Debug("Connecting to %s@%s...", c.config.User, addr)
 
-		conn, err := net.DialTimeout("tcp", addr, timeout)
+		localAddr, bindErr := ResolveBind(c.config.Bind, c.config.Host)
+		if bindErr != nil {
+			return nil, bindErr
+		}
+		if localAddr != nil {
+			lg.Debug("Binding source address %s", localAddr.String())
+		}
+
+		conn, err := dialTCP(addr, localAddr, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
 		}

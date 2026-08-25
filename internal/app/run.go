@@ -227,6 +227,8 @@ func loadHostRecords(config *sshclient.Config) ([]execution.HostRecord, executio
 		KeyPath:         firstNonEmptyStr(config.KeyPath, settings.Key),
 		SSHPasswordKey:  config.SSHPasswordKey,
 		SudoPasswordKey: config.SudoKey,
+		Bind:            config.Bind,
+		BindSet:         config.BindSet,
 	}
 	return hosts, defaults, nil
 }
@@ -242,6 +244,7 @@ func hostToRecord(h HostConfig) execution.HostRecord {
 		SudoPasswordKey: h.EffectiveSudoPasswordKey(),
 		Groups:          append([]string(nil), h.Groups...),
 		Tags:            cloneTags(h.Tags),
+		Bind:            h.Bind,
 	}
 }
 
@@ -306,6 +309,8 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 			SSHPasswordKey:       config.SSHPasswordKey,
 			SudoPasswordKey:      config.SudoKey,
 			SSHPassword:          config.Password,
+			Bind:                 config.Bind,
+			BindSet:              config.BindSet,
 		},
 		JSONOutput:   config.JSONOutput,
 		JSONLOutput:  config.JSONLOutput,

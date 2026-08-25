@@ -4,11 +4,11 @@
 
 We take security seriously. The following versions of SSHX are currently supported with security updates:
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.10.x  | :white_check_mark: |
-| 0.9.x   | :white_check_mark: |
-| < 0.9.0 | :x:                |
+| Version  | Supported          |
+| -------- | ------------------ |
+| 0.11.x   | :white_check_mark: |
+| 0.10.x   | :white_check_mark: |
+| < 0.10.0 | :x:                |
 
 Security updates are provided for the latest minor release and the previous
 minor release (N-1). Older lines do not receive patches; please upgrade.

@@ -44,6 +44,7 @@ SSH Options:
   -pk, --password-key=KEY  Sudo password keyring key name (default: master)
                            Used only when the remote command starts with sudo
   --ssh-password-key=KEY   SSH login password keyring key (never used for sudo)
+  --bind=ADDR              Local source IP or interface (e.g. 192.0.2.10 or en0)
   --dry-run                Print the local execution plan without side effects
   --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
   --no-audit               Disable local audit event writing for this invocation
@@ -206,6 +207,7 @@ Host Management:
     -i=<key>, --key=<key>            SSH private key path for this host (optional)
     -pk=<key>                         Password key name
     --host-type=<type>                System type (linux/windows/macos)
+    --bind=<ip|iface>                 Persist a source address for this host
 
   Configuration file: ~/.sshx/settings.json
 
@@ -419,6 +421,9 @@ SSH Examples:
   # Custom SSH port
   sshx -h=192.168.1.100 -p=2222 "ps aux | grep nginx"
 
+  # Bind the local source address (IP or interface name)
+  sshx -h=prod-web --bind=en0 "uptime"
+
   # Structured JSON output for scripts/agents (one object on stdout)
   sshx -h=192.168.1.100 --json "systemctl is-active nginx"
 
@@ -545,6 +550,9 @@ Host Management Examples:
 
   # Add host with its own SSH private key
   sshx --host-add --host-name=prod-db -h=192.168.1.200 -u=admin -i=~/.ssh/prod-db.pem
+
+  # Persist a source bind for a named host
+  sshx --host-add --host-name=edge --bind=en0 -h=100.117.253.247 -p=18922
 
   # Update host IP address
   sshx --host-update --host-name=prod-web -h=192.168.1.101

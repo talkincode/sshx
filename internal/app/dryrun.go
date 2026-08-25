@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/talkincode/sshx/internal/keyringstore"
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
@@ -30,6 +31,8 @@ type dryRunPlan struct {
 	HostResolution dryRunStatus `json:"host_resolution,omitempty"`
 	Port           string       `json:"port,omitempty"`
 	User           string       `json:"user,omitempty"`
+	Bind           string       `json:"bind,omitempty"`
+	BindResolved   string       `json:"bind_resolved,omitempty"`
 
 	Command    string `json:"command,omitempty"`
 	SftpAction string `json:"sftp_action,omitempty"`
@@ -160,6 +163,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	applyDryRunDefaults(config, &plan)
 	fillDryRunAction(config, &plan)
 	fillDryRunHost(config, &plan)
+	fillDryRunBind(config, &plan)
 	fillDryRunKeyDefault(config, &plan)
 	fillDryRunSudo(config, &plan)
 	fillDryRunValidation(config, &plan)
@@ -289,6 +293,9 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 			config.User = hostConfig.User
 		}
 	}
+	if !config.BindSet && hostConfig.Bind != "" {
+		config.Bind = hostConfig.Bind
+	}
 	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
 		config.SudoKey = sudoKey
 	}
@@ -310,6 +317,22 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	plan.User = config.User
 	plan.KeyPath = config.KeyPath
 	plan.HostResolution = dryRunStatus{Status: "resolved", Message: fmt.Sprintf("matched host %q in settings", originalHost)}
+}
+
+func fillDryRunBind(config *sshclient.Config, plan *dryRunPlan) {
+	plan.Bind = config.Bind
+	if strings.TrimSpace(config.Bind) == "" {
+		return
+	}
+	addr, err := sshclient.ResolveBind(config.Bind, firstNonEmpty(config.Host, plan.HostResolved))
+	if err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+	if addr != nil {
+		plan.BindResolved = addr.String()
+	}
 }
 
 func fillDryRunKeyDefault(config *sshclient.Config, plan *dryRunPlan) {
@@ -348,6 +371,9 @@ func resolveDryRunHostTest(config *sshclient.Config, plan *dryRunPlan) {
 	}
 	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" {
 		config.SudoKey = sudoKey
+	}
+	if !config.BindSet {
+		config.Bind = hostConfig.Bind
 	}
 
 	plan.HostResolved = config.Host
@@ -802,6 +828,13 @@ func printDryRunPlan(plan dryRunPlan) {
 	}
 	if plan.Mode != "transfer" && (plan.User != "" || plan.Port != "") {
 		fmt.Printf("Target: %s@%s:%s\n", firstNonEmpty(plan.User, "-"), firstNonEmpty(plan.HostResolved, "-"), firstNonEmpty(plan.Port, "-"))
+	}
+	if plan.Bind != "" {
+		fmt.Printf("Bind: %s", plan.Bind)
+		if plan.BindResolved != "" {
+			fmt.Printf(" -> %s", plan.BindResolved)
+		}
+		fmt.Println()
 	}
 	if plan.Command != "" {
 		fmt.Printf("Command: %s\n", plan.Command)

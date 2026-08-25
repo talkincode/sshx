@@ -61,6 +61,7 @@ func handleHostAdd(config *sshclient.Config) error {
 			Groups:          append([]string(nil), config.RunGroups...),
 			Tags:            cloneTags(config.RunTags),
 			Type:            config.HostType,
+			Bind:            config.Bind,
 		}
 	} else {
 		// Interactive mode
@@ -126,6 +127,11 @@ func handleHostAdd(config *sshclient.Config) error {
 					host.Groups = append(host.Groups, g)
 				}
 			}
+		}
+
+		fmt.Print("Source bind (IP or interface, optional): ")
+		if bind, err := reader.ReadString('\n'); err == nil {
+			host.Bind = strings.TrimSpace(bind)
 		}
 
 		// Type (optional, default: linux)
@@ -383,6 +389,12 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.Type = DefaultHostType
 	}
 
+	if config.BindSet {
+		host.Bind = config.Bind
+	} else {
+		host.Bind = existingHost.Bind
+	}
+
 	// Update host
 	if err := UpdateHost(settings, host); err != nil {
 		return fmt.Errorf("failed to update host: %w", err)
@@ -451,6 +463,9 @@ func handleHostList(config *sshclient.Config) error {
 		if host.Type != "" {
 			fmt.Printf("    Type:        %s\n", host.Type)
 		}
+		if host.Bind != "" {
+			fmt.Printf("    Bind:        %s\n", host.Bind)
+		}
 		fmt.Println()
 	}
 
@@ -475,6 +490,7 @@ type hostListJSONEntry struct {
 	Groups          []string          `json:"groups,omitempty"`
 	Tags            map[string]string `json:"tags,omitempty"`
 	Type            string            `json:"type,omitempty"`
+	Bind            string            `json:"bind,omitempty"`
 }
 
 func printHostListJSON(hosts []HostConfig) error {
@@ -492,6 +508,7 @@ func printHostListJSON(hosts []HostConfig) error {
 			Groups:          host.Groups,
 			Tags:            host.Tags,
 			Type:            host.Type,
+			Bind:            host.Bind,
 		})
 	}
 	doc := struct {
@@ -694,6 +711,11 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 		if baseConfig.DialTimeout > 0 {
 			testConfig.DialTimeout = baseConfig.DialTimeout
 		}
+	}
+	if baseConfig != nil && baseConfig.BindSet {
+		testConfig.Bind = baseConfig.Bind
+	} else {
+		testConfig.Bind = hostConfig.Bind
 	}
 
 	if testConfig.Port == "" {

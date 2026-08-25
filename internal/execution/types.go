@@ -131,6 +131,10 @@ type Policy struct {
 	// SSHPassword is an already-resolved login password (for example SSH_PASSWORD).
 	// It is never serialized into dry-run or audit payloads.
 	SSHPassword string `json:"-"`
+	// Bind is a local source address (literal IP or interface name).
+	Bind string `json:"bind,omitempty"`
+	// BindSet is true when the request explicitly set bind, including empty.
+	BindSet bool `json:"-"`
 }
 
 // Request is the versioned internal execution unit.
@@ -162,6 +166,7 @@ type ResolvedTarget struct {
 	Tags               map[string]string `json:"tags,omitempty"`
 	HostKeyFingerprint string            `json:"host_key_fingerprint,omitempty"`
 	Literal            bool              `json:"literal,omitempty"`
+	Bind               string            `json:"bind,omitempty"`
 }
 
 // SkippedTarget records a selector candidate that was not admitted.
@@ -296,6 +301,8 @@ type PolicyPublic struct {
 	SSHPasswordKey       string `json:"ssh_password_key,omitempty"`
 	SudoPasswordKey      string `json:"sudo_password_key,omitempty"`
 	SSHPasswordProvided  bool   `json:"ssh_password_provided"`
+	Bind                 string `json:"bind,omitempty"`
+	BindSet              bool   `json:"bind_set,omitempty"`
 }
 
 // PublicPolicy projects Policy without secret material.
@@ -313,5 +320,7 @@ func PublicPolicy(p Policy) PolicyPublic {
 		SSHPasswordKey:       p.SSHPasswordKey,
 		SudoPasswordKey:      p.SudoPasswordKey,
 		SSHPasswordProvided:  p.SSHPassword != "",
+		Bind:                 p.Bind,
+		BindSet:              p.BindSet,
 	}
 }
