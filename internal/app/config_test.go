@@ -745,3 +745,35 @@ func TestParseArgs_RemoteCommandPreservesFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseArgs_BindFlag(t *testing.T) {
+	config := ParseArgs([]string{"sshx", "-h=192.0.2.1", "--bind=en0", "uptime"})
+	if config.Bind != "en0" || !config.BindSet {
+		t.Fatalf("compat bind = %q set=%t", config.Bind, config.BindSet)
+	}
+
+	config = ParseArgs([]string{"sshx", "-h=192.0.2.1", "--bind=", "uptime"})
+	if config.Bind != "" || !config.BindSet {
+		t.Fatalf("empty --bind= must set BindSet; bind=%q set=%t", config.Bind, config.BindSet)
+	}
+
+	config = ParseArgs([]string{"sshx", "-h=192.0.2.1", "uptime"})
+	if config.BindSet || config.Bind != "" {
+		t.Fatalf("missing --bind must leave BindSet false; bind=%q set=%t", config.Bind, config.BindSet)
+	}
+
+	config = ParseArgs([]string{"sshx", "run", "--target=web", "--bind=192.0.2.10", "--", "uptime"})
+	if config.Bind != "192.0.2.10" || !config.BindSet {
+		t.Fatalf("run bind = %q set=%t", config.Bind, config.BindSet)
+	}
+
+	config = ParseArgs([]string{"sshx", "sql", "-h=db1", "--bind=en0", "--", "SELECT 1"})
+	if config.Bind != "en0" || !config.BindSet {
+		t.Fatalf("sql bind = %q set=%t", config.Bind, config.BindSet)
+	}
+
+	config = ParseArgs([]string{"sshx", "--host-add", "--host-name=edge", "--bind=en0", "-h=192.0.2.1"})
+	if config.Bind != "en0" || !config.BindSet || config.HostName != "edge" {
+		t.Fatalf("host-add bind = %#v", config)
+	}
+}

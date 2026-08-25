@@ -21,7 +21,8 @@ sshx --host-add \
   -i=~/.ssh/prod-web.pem \
   -pk=prod-web-sudo \
   --host-desc="Production web node" \
-  --host-type=linux
+  --host-type=linux \
+  --bind=en0
 ```
 
 Then run commands by alias:
@@ -60,7 +61,7 @@ Preview without writing anything:
 sshx --host-import=web1 --dry-run --json
 ```
 
-What is imported per entry: `HostName` (or the alias itself when absent), `Port`, `User`, and `IdentityFile` (as the per-host `key`).
+What is imported per entry: `HostName` (or the alias itself when absent), `Port`, `User`, `IdentityFile` (as the per-host `key`), and `BindAddress` / `BindInterface` (as `bind`; first value wins).
 
 Pollution guards — the importer always skips:
 
@@ -89,7 +90,8 @@ Host definitions live in `~/.sshx/settings.json`.
       "user": "deploy",
       "key": "/Users/alice/.ssh/prod-web.pem",
       "password_key": "prod-web-sudo",
-      "type": "linux"
+      "type": "linux",
+      "bind": "en0"
     }
   ]
 }
@@ -111,6 +113,10 @@ sshx --host-test-all
 
 # Update a host
 sshx --host-update --host-name=prod-web -u=deploy -i=~/.ssh/prod-web-2026.pem
+
+# Change or clear the persisted source bind
+sshx --host-update --host-name=prod-web --bind=192.0.2.10
+sshx --host-update --host-name=prod-web --bind=
 
 # Remove a host
 sshx --host-remove=old-lab

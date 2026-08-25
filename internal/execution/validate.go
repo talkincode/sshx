@@ -170,6 +170,14 @@ func BuildDryRunPlan(req *Request, hosts []HostRecord, defaults HostRecord, payl
 	}
 	plan.Snapshot = snap
 
+	for _, t := range snap.Targets {
+		if _, bindErr := sshclient.ResolveBind(t.Bind, t.Address); bindErr != nil {
+			plan.Valid = false
+			plan.Error = BuildError(bindErr, ErrorKindConfig, req.Action.Intent, CompletionNotStarted)
+			return plan
+		}
+	}
+
 	if err := SafetyCheck(req, payloadBytes(payload)); err != nil {
 		plan.Valid = false
 		plan.Error = BuildError(err, ErrorKindBlocked, req.Action.Intent, CompletionNotStarted)

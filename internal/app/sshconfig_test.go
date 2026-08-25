@@ -205,3 +205,31 @@ func TestParseArgs_HostImportFlags(t *testing.T) {
 	assert.Equal(t, "web1,db1", config.HostImportNames)
 	assert.Equal(t, "/tmp/config", config.SSHConfigPath)
 }
+
+func TestParseSSHConfig_BindFirstValueWins(t *testing.T) {
+	entries, _, err := parseSSHConfig(strings.NewReader(`
+Host edge
+    HostName 10.0.0.1
+    BindAddress 192.0.2.10
+    BindInterface en0
+`))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "192.0.2.10", entries[0].Bind)
+	assert.NotContains(t, entries[0].IgnoredOptions, "bindaddress")
+	assert.NotContains(t, entries[0].IgnoredOptions, "bindinterface")
+
+	entries, _, err = parseSSHConfig(strings.NewReader(`
+Host edge
+    HostName 10.0.0.1
+    BindInterface en0
+    BindAddress 192.0.2.10
+`))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "en0", entries[0].Bind)
+
+	plan := buildImportPlan(entries, &Settings{})
+	require.Len(t, plan.Candidates, 1)
+	assert.Equal(t, "en0", plan.Candidates[0].Host.Bind)
+}

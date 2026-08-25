@@ -39,6 +39,8 @@ type HostConfig struct {
 	// Tags are optional key/value inventory labels; selectors AND all predicates.
 	Tags map[string]string `json:"tags,omitempty"`
 	Type string            `json:"type,omitempty"` // System type (linux/windows/macos)
+	// Bind is a local source address: a literal IP or a network interface name.
+	Bind string `json:"bind,omitempty"`
 }
 
 // EffectiveSudoPasswordKey returns the sudo keyring reference, preferring the

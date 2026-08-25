@@ -77,6 +77,8 @@ It remains a single binary with one-shot invocations and no resident component o
     gates, and audit trail exposed as Model Context Protocol tools.
 12. Human-only `sshx login` onto a named host, with optional `--sudo` privileged
     shell. Not part of the Agent/MCP contract.
+13. Source address binding (`--bind=<ip|iface>`) matching OpenSSH `-b` /
+    `BindAddress` / `BindInterface`.
 
 ## Installation
 

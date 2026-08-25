@@ -70,6 +70,7 @@ func TestPrintUsage(t *testing.T) {
 		"--password-set=",
 		"--password-get=",
 		"--dry-run",
+		"--bind=",
 		"--audit-output",
 		"--force",
 		"--no-safety-check",

@@ -43,6 +43,17 @@ func splitHostPath(spec string) (host, path string) {
 	return spec, ""
 }
 
+// applyBindFlag records --bind=VALUE, including an explicit empty value that
+// must override a named host's persisted bind.
+func applyBindFlag(config *sshclient.Config, arg string) bool {
+	if !strings.HasPrefix(arg, "--bind=") {
+		return false
+	}
+	config.Bind = strings.SplitN(arg, "=", 2)[1]
+	config.BindSet = true
+	return true
+}
+
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
@@ -182,6 +193,7 @@ func ParseArgs(args []string) *sshclient.Config {
 			} else {
 				config.Timeout = -1
 			}
+		case applyBindFlag(config, arg):
 		case arg == "--sftp":
 			config.Mode = "sftp"
 		case strings.HasPrefix(arg, "--upload="):
@@ -481,6 +493,7 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 			} else {
 				config.Timeout = -1
 			}
+		case applyBindFlag(config, arg):
 		case strings.HasPrefix(arg, "--concurrency="):
 			raw := strings.SplitN(arg, "=", 2)[1]
 			n, err := strconv.Atoi(raw)
@@ -636,6 +649,7 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			} else {
 				config.Timeout = -1
 			}
+		case applyBindFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
@@ -726,6 +740,7 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 			} else {
 				config.Timeout = -1
 			}
+		case applyBindFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
@@ -805,6 +820,7 @@ func parseInspectArgs(config *sshclient.Config, args []string) {
 			} else {
 				config.Timeout = -1
 			}
+		case applyBindFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":

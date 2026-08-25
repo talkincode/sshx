@@ -19,6 +19,7 @@ type sshConfigEntry struct {
 	Port         string
 	User         string
 	IdentityFile string
+	Bind         string
 	// IgnoredOptions lists option keywords present in the block that sshx
 	// does not import (e.g. ProxyJump, ForwardAgent), so the user can see
 	// exactly what a selective import leaves behind.
@@ -62,10 +63,12 @@ func isWildcardAlias(alias string) bool {
 
 // importedConfigKeys are the ssh_config keywords sshx maps onto HostConfig.
 var importedConfigKeys = map[string]bool{
-	"hostname":     true,
-	"port":         true,
-	"user":         true,
-	"identityfile": true,
+	"hostname":      true,
+	"port":          true,
+	"user":          true,
+	"identityfile":  true,
+	"bindaddress":   true,
+	"bindinterface": true,
 }
 
 // parseSSHConfig parses an OpenSSH client config stream into per-alias
@@ -171,6 +174,10 @@ func applySSHConfigOption(entry *sshConfigEntry, key, value string) {
 		if entry.IdentityFile == "" {
 			entry.IdentityFile = value
 		}
+	case "bindaddress", "bindinterface":
+		if entry.Bind == "" {
+			entry.Bind = value
+		}
 	default:
 		if !importedConfigKeys[key] && !containsFold(entry.IgnoredOptions, key) {
 			entry.IgnoredOptions = append(entry.IgnoredOptions, key)
@@ -227,6 +234,7 @@ func buildImportPlan(entries []sshConfigEntry, settings *Settings) importPlan {
 			Port:        entry.Port,
 			User:        entry.User,
 			Type:        DefaultHostType,
+			Bind:        entry.Bind,
 		}
 		// "Host web1" with no HostName means the alias itself is the address.
 		if host.Host == "" {
@@ -303,6 +311,9 @@ func candidateSummary(c importCandidate) string {
 	summary := fmt.Sprintf("%-20s → %s", c.Host.Name, target)
 	if c.Host.Key != "" {
 		summary += "  key=" + c.Host.Key
+	}
+	if c.Host.Bind != "" {
+		summary += "  bind=" + c.Host.Bind
 	}
 	if len(c.Entry.IgnoredOptions) > 0 {
 		summary += "  (ignored: " + strings.Join(c.Entry.IgnoredOptions, ", ") + ")"

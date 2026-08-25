@@ -153,6 +153,7 @@ type mcpRunInput struct {
 	Force         bool     `json:"force,omitempty" jsonschema:"Bypass safety checks; requires bypass_reason and is recorded in results and audit."`
 	NoSafetyCheck bool     `json:"no_safety_check,omitempty" jsonschema:"Disable safety checks entirely; requires bypass_reason."`
 	BypassReason  string   `json:"bypass_reason,omitempty" jsonschema:"Mandatory justification when force or no_safety_check is set."`
+	Bind          string   `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpSQLInput struct {
@@ -178,6 +179,7 @@ type mcpSQLInput struct {
 	Force          bool   `json:"force,omitempty" jsonschema:"Confirms DDL; destructive DDL also requires no_backup."`
 	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"Preview the guarded SQL plan without connecting."`
 	TimeoutSecs    int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind           string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpApplyInput struct {
@@ -193,6 +195,7 @@ type mcpApplyInput struct {
 	BypassReason string `json:"bypass_reason,omitempty" jsonschema:"Required with force when overwriting critical identity files."`
 	DryRun       bool   `json:"dry_run,omitempty" jsonschema:"Preview the apply plan without connecting."`
 	TimeoutSecs  int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind         string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpInspectInput struct {
@@ -204,6 +207,7 @@ type mcpInspectInput struct {
 	AllowStale  bool   `json:"allow_stale,omitempty" jsonschema:"Explicitly allow an expired observation."`
 	Sudo        bool   `json:"sudo,omitempty" jsonschema:"Use sudo for an optional-privilege plugin."`
 	TimeoutSecs int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind        string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpSFTPInput struct {
@@ -213,6 +217,7 @@ type mcpSFTPInput struct {
 	RemotePath  string `json:"remote_path" jsonschema:"Remote path the action operates on."`
 	DryRun      bool   `json:"dry_run,omitempty" jsonschema:"Preview the SFTP plan without connecting."`
 	TimeoutSecs int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind        string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpTransferInput struct {
@@ -222,6 +227,7 @@ type mcpTransferInput struct {
 	DestPath    string `json:"dest_path" jsonschema:"Destination path."`
 	DryRun      bool   `json:"dry_run,omitempty" jsonschema:"Preview the transfer plan without connecting."`
 	TimeoutSecs int    `json:"timeout_seconds,omitempty" jsonschema:"Timeout in seconds for the streamed transfer."`
+	Bind        string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpHostListInput struct{}
@@ -274,6 +280,7 @@ func buildRunArgs(in mcpRunInput) ([]string, string, error) {
 	if in.BypassReason != "" {
 		args = append(args, "--bypass-reason="+in.BypassReason)
 	}
+	args = appendBindArg(args, in.Bind)
 	stdin := ""
 	if hasScript {
 		args = append(args, "--script-stdin")
@@ -352,6 +359,7 @@ func buildSQLArgs(in mcpSQLInput) ([]string, error) {
 	if in.TimeoutSecs > 0 {
 		args = append(args, "--timeout="+strconv.Itoa(in.TimeoutSecs)+"s")
 	}
+	args = appendBindArg(args, in.Bind)
 	args = append(args, "--", in.Statement)
 	return args, nil
 }
@@ -388,6 +396,7 @@ func buildApplyArgs(in mcpApplyInput, fromPath string) ([]string, error) {
 	if in.TimeoutSecs > 0 {
 		args = append(args, "--timeout="+strconv.Itoa(in.TimeoutSecs)+"s")
 	}
+	args = appendBindArg(args, in.Bind)
 	return args, nil
 }
 
@@ -417,6 +426,7 @@ func buildInspectArgs(in mcpInspectInput) ([]string, error) {
 	if in.TimeoutSecs > 0 {
 		args = append(args, "--timeout="+strconv.Itoa(in.TimeoutSecs)+"s")
 	}
+	args = appendBindArg(args, in.Bind)
 	args = append(args, in.Capability)
 	return args, nil
 }
@@ -455,6 +465,7 @@ func buildSFTPArgs(in mcpSFTPInput) ([]string, error) {
 	if in.TimeoutSecs > 0 {
 		args = append(args, "--timeout="+strconv.Itoa(in.TimeoutSecs)+"s")
 	}
+	args = appendBindArg(args, in.Bind)
 	return args, nil
 }
 
@@ -477,7 +488,15 @@ func buildTransferArgs(in mcpTransferInput) ([]string, error) {
 	if in.TimeoutSecs > 0 {
 		args = append(args, "--timeout="+strconv.Itoa(in.TimeoutSecs)+"s")
 	}
+	args = appendBindArg(args, in.Bind)
 	return args, nil
+}
+
+func appendBindArg(args []string, bind string) []string {
+	if strings.TrimSpace(bind) == "" {
+		return args
+	}
+	return append(args, "--bind="+bind)
 }
 
 // --- registration -----------------------------------------------------------

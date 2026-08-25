@@ -70,6 +70,8 @@ func connectTransferEndpoint(base *sshclient.Config, host, role string) (*sshcli
 		AcceptUnknownHost:    base.AcceptUnknownHost,
 		AllowInsecureHostKey: base.AllowInsecureHostKey,
 		KnownHostsPath:       base.KnownHostsPath,
+		Bind:                 base.Bind,
+		BindSet:              base.BindSet,
 	}
 
 	if !isIPAddress(endpoint.Host) {

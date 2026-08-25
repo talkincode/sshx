@@ -71,3 +71,22 @@ func TestBuildHostTestConfig_DisableKeyAuth(t *testing.T) {
 		t.Fatalf("expected dial timeout override to persist (want %s, got %s)", base.DialTimeout, cfg.DialTimeout)
 	}
 }
+
+func TestBuildHostTestConfig_BindInheritAndOverride(t *testing.T) {
+	host := &HostConfig{Host: "demo", Bind: "en0"}
+
+	cfg := buildHostTestConfig(host, nil, &sshclient.Config{UseKeyAuth: true})
+	if cfg.Bind != "en0" {
+		t.Fatalf("inherited bind = %q", cfg.Bind)
+	}
+
+	cfg = buildHostTestConfig(host, nil, &sshclient.Config{UseKeyAuth: true, Bind: "192.0.2.10", BindSet: true})
+	if cfg.Bind != "192.0.2.10" {
+		t.Fatalf("cli bind = %q", cfg.Bind)
+	}
+
+	cfg = buildHostTestConfig(host, nil, &sshclient.Config{UseKeyAuth: true, Bind: "", BindSet: true})
+	if cfg.Bind != "" {
+		t.Fatalf("empty --bind= must clear host bind, got %q", cfg.Bind)
+	}
+}

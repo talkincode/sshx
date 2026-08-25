@@ -523,6 +523,7 @@ func buildSSHConfig(req *Request, target ResolvedTarget) *sshclient.Config {
 		SudoKey:              firstNonEmpty(target.SudoPasswordKey, req.Policy.SudoPasswordKey),
 		Command:              req.Action.Command,
 		Mode:                 "ssh",
+		Bind:                 target.Bind,
 	}
 	if cfg.Port == "" {
 		cfg.Port = "22"

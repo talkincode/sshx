@@ -46,6 +46,7 @@ type commandJSONResult struct {
 	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 	DurationMs      int64  `json:"duration_ms"`
 	AuthMethod      string `json:"auth_method"`
+	Bind            string `json:"bind,omitempty"`
 	ErrorKind       string `json:"error_kind,omitempty"`
 	Error           string `json:"error,omitempty"`
 }
@@ -291,6 +292,7 @@ func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, 
 		StderrTruncated: res.StderrTruncated,
 		DurationMs:      dur.Milliseconds(),
 		AuthMethod:      string(authMethod),
+		Bind:            config.Bind,
 		ErrorKind:       errKind,
 	}
 	if execErr != nil {
@@ -405,6 +407,10 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 			config.SSHPasswordKey = sshKey
 			logger.GetLogger().Success("Using SSH password key: %s", sshKey)
 		}
+	}
+
+	if !config.BindSet && hostConfig.Bind != "" {
+		config.Bind = hostConfig.Bind
 	}
 
 	// Use per-host SSH key if available, otherwise fall back to the default key

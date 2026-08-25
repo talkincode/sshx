@@ -58,6 +58,7 @@ type auditEvent struct {
 	HostType       string `json:"host_type,omitempty"`
 	HostDescSet    bool   `json:"host_description_set"`
 	HostResolvedBy string `json:"host_resolved_by,omitempty"`
+	Bind           string `json:"bind,omitempty"`
 
 	Command    string `json:"command,omitempty"`
 	SftpAction string `json:"sftp_action,omitempty"`
@@ -375,6 +376,7 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.HostResolved = config.Host
 	r.event.Port = config.Port
 	r.event.User = config.User
+	r.event.Bind = config.Bind
 	r.event.HostName = config.HostName
 	r.event.HostType = config.HostType
 	r.event.HostDescSet = config.HostDescription != ""
