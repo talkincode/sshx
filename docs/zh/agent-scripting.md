@@ -14,6 +14,7 @@ sshx run --target=prod-web --script-file=./check.sh --dry-run --json
 
 - 选择器只解析已配置主机；字面地址用 `--address=`，不能进入 group/tag 扩散。
 - 脚本经 SSH stdin 原样传输，不经本地 `strings.Join` 拼装。
+- 脚本的 `#!` 行决定解释器，`#!/usr/bin/env bash` 会真正用 bash 执行（`set -o pipefail`、数组、`[[ ]]` 都可用）。可用 `--shell=NAME` 覆盖。支持 `sh`、`bash`、`zsh`、`dash`、`ksh`、`ash`；其他解释器在本地就以 `error_kind: config` 拒绝，不建立连接。最终解释器体现在 `action.script_runner`。
 - dry-run/结果暴露 payload SHA-256 与字节数，默认不回传脚本全文。
 - 多主机 `--jsonl` 输出 `run_started` / `target_*` / `run_finished`。
 - 多主机退出码：`0` 全成功，`1` 部分失败/跳过/不确定，`255` 请求级失败。

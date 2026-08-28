@@ -2,6 +2,7 @@ package runtimepath
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,6 +30,9 @@ func TestRootDefaultsBelowUserHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, "")
 	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
 
 	root, err := Root()
 	if err != nil {

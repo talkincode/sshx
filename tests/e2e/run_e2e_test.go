@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,6 +74,75 @@ func TestRunScriptByteFidelity(t *testing.T) {
 	action2, ok := payload["action"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, digest, action2["payload_sha256"])
+}
+
+// A bash script must run under bash. Before shebang support the payload was
+// always piped to `sh -s --`, so `set -o pipefail` aborted with
+// "Illegal option -o pipefail" on dash/ash-provided /bin/sh.
+func TestRunScriptHonorsShebangAndShellOverride(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash is not available on this machine")
+	}
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+
+	script := "#!/usr/bin/env bash\nset -o pipefail\nprintf 'shell=%s\\n' \"${BASH_VERSION:+bash}\"\n"
+	scriptPath := filepath.Join(home, "payload.bash")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o600))
+
+	base := []string{
+		"run",
+		"--address=" + server.host,
+		"-p=" + server.port,
+		"-u=operator",
+		"--no-key",
+		"--script-file=" + scriptPath,
+	}
+
+	// The dry-run plan reports the interpreter before connecting.
+	dry := runSSHX(t, home, append(append([]string{}, base...), "--dry-run", "--json"), nil)
+	require.Equal(t, 0, dry.exitCode, dry.stderr)
+	var plan map[string]any
+	require.NoError(t, json.Unmarshal([]byte(dry.stdout), &plan))
+	action, ok := plan["action"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "bash", action["script_runner"], "shebang must select the interpreter")
+
+	result := runSSHX(t, home, append(append([]string{}, base...), "--accept-unknown-host", "--json"),
+		map[string]string{"SSH_PASSWORD": operatorPassword})
+	require.Equal(t, 0, result.exitCode, "stderr=%s stdout=%s", result.stderr, result.stdout)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result.stdout), &payload))
+	assert.Equal(t, true, payload["success"])
+	stdout, ok := payload["stdout"].(string)
+	require.True(t, ok)
+	assert.Contains(t, stdout, "shell=bash", "pipefail script must run under bash")
+
+	// An explicit --shell wins over the shebang.
+	shOverride := runSSHX(t, home, append(append([]string{}, base...), "--shell=sh", "--dry-run", "--json"), nil)
+	require.Equal(t, 0, shOverride.exitCode, shOverride.stderr)
+	var overridePlan map[string]any
+	require.NoError(t, json.Unmarshal([]byte(shOverride.stdout), &overridePlan))
+	overrideAction, ok := overridePlan["action"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "sh", overrideAction["script_runner"])
+
+	// A non-shell interpreter is rejected locally instead of being run by sh.
+	pyPath := filepath.Join(home, "payload.py")
+	require.NoError(t, os.WriteFile(pyPath, []byte("#!/usr/bin/env python3\nprint(1)\n"), 0o600))
+	before := server.connections.Load()
+	py := runSSHX(t, home, []string{
+		"run",
+		"--address=" + server.host,
+		"-p=" + server.port,
+		"-u=operator",
+		"--no-key",
+		"--script-file=" + pyPath,
+		"--json",
+	}, map[string]string{"SSH_PASSWORD": operatorPassword})
+	require.Equal(t, 255, py.exitCode, py.stdout+py.stderr)
+	assert.Contains(t, py.stdout+py.stderr, "unsupported script runner")
+	assert.Equal(t, before, server.connections.Load(), "must not connect for an unsupported runner")
 }
 
 func TestRunMultiHostJSONLAndSelectors(t *testing.T) {

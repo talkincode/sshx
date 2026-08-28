@@ -17,6 +17,8 @@ daemon, tunneling, or port forwarding.
 
 - Run a one-shot command on a remote host (optionally with `sudo`).
 - Execute complex scripts byte-for-byte with `sshx run --script-file` / `--script-stdin`.
+  The script's `#!` line picks the interpreter (`#!/usr/bin/env bash` runs under
+  bash, so `set -o pipefail` works); `--shell=sh|bash|zsh|dash|ksh|ash` overrides it.
 - Fan out one action to a bounded host set with `--group` / `--tag` / `--targets`.
 - Upload/download a file or list/make/remove remote paths over SFTP.
 - Replace one remote regular file with `sshx apply` (hash precondition, backup, atomic write).
@@ -155,8 +157,9 @@ In `--json` mode an sshx-level failure has `exit_code: -1` and a non-empty
 `error_kind` values: `timeout`, `auth`, `host_key`, `connect`, `blocked`,
 `exit_missing`, `config`, `error`. SQL mode adds `explain_failed`,
 `impact_check_failed`, `remote_exit`, and
-`cred_source_failed`. Apply mode adds `precondition` when `--expect-sha256`
-does not match the current remote file.
+`cred_source_failed`. A missing remote `psql`/`sqlite3` client reports
+`config` (not `remote_exit` 127). Apply mode adds `precondition` when
+`--expect-sha256` does not match the current remote file.
 
 ## Command execution
 
@@ -302,8 +305,12 @@ When PostgreSQL runs in a container and its credentials live in the production
 environment (container env or a deploy `.env`) rather than any local keyring:
 
 ```bash
-# psql runs inside the container; credentials are read from the container env
-# (POSTGRES_*/PG*/DB_*/DATABASE_URL) and cached locally for 15 minutes.
+# psql runs inside the container. The container environment
+# (POSTGRES_*/PG*/DB_*/DATABASE_URL) supplies the role and database, so no
+# --db-user is needed even when the image has no "postgres" superuser.
+sshx sql -h=prod --docker=pg-prod --json "SELECT count(*) FROM orders"
+
+# Explicit form; also caches the resolved password locally for 15 minutes.
 sshx sql -h=prod --docker=pg-prod --db-cred-from=docker:pg-prod --json \
     "UPDATE users SET active=false WHERE id=42"
 
@@ -314,9 +321,14 @@ sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
 
 - `--docker=<container>` executes psql via `docker exec -i` and defaults
   to the container-local socket; backups still stream to the **host**.
+- `--docker` alone also reads that container's environment for the role and
+  database name, so `--db` and `--db-user` are optional. This discovery is
+  best-effort: if the container cannot be inspected it falls back to the client
+  defaults. Passing `--db-user` or `--db-password-key` disables it.
 - `--db-cred-from=docker:<container>` or `env-file:<path>` resolves the DB user,
-  password, and database name remotely; `--db` becomes optional when the source
-  provides it. Mutually exclusive with `--db-password-key`.
+  password, and database name remotely and *requires* a password; `--db`
+  becomes optional when the source provides it. Mutually exclusive with
+  `--db-password-key`.
 - Resolved secrets are cached only in the secret backend with a TTL
   (default 15m; `--cred-cache=off|<duration>`, `--cred-refresh` to force
   re-resolution). Expired entries are actively deleted. The JSON result reports

@@ -79,11 +79,16 @@ jobs:
         run: go mod download
 
       - name: Run unit tests (cross-platform packages)
-        # Full-suite Windows enablement is tracked in issue #50: several
-        # pre-existing app/plugin/skillinstall/sshclient tests assume POSIX
-        # permission and symlink semantics. Packages listed here must stay
-        # green; grow this list as tests are ported.
-        run: go test -short ./cmd/... ./internal/execution/... ./internal/keyringstore/... ./internal/sqlsafe/... ./pkg/...
+        # Windows is a first-class target, so the CLI surface (internal/app),
+        # the SSH core (internal/sshclient), and the runtime-root resolver run
+        # here too. Tests resolve the home directory through setTestHome so
+        # USERPROFILE is honored, and POSIX permission assertions are guarded
+        # by runtime.GOOS.
+        #
+        # Still excluded (tracked in issue #50): internal/plugin and
+        # internal/skillinstall assert symlink and permission semantics that
+        # need Windows equivalents, and tests/e2e has not been ported.
+        run: go test -short ./cmd/... ./internal/app/... ./internal/execution/... ./internal/keyringstore/... ./internal/runtimepath/... ./internal/sqlsafe/... ./internal/sshclient/... ./pkg/...
 
       - name: Vet
         run: go vet ./...

@@ -421,6 +421,10 @@ For PostgreSQL running in a production container, execute the database clients
 inside the container and resolve credentials from its environment:
 
 ```bash
+# --docker alone reads the container environment for the role and database,
+# so images whose POSTGRES_USER is not "postgres" work without --db-user.
+sshx sql -h=prod --docker=pg-prod --json "SELECT count(*) FROM orders"
+
 sshx sql -h=prod --docker=pg-prod \
   --db-cred-from=docker:pg-prod --json \
   "UPDATE users SET active=false WHERE id=42"

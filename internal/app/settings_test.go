@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -11,15 +12,7 @@ import (
 func TestLoadSettings_NotExist(t *testing.T) {
 	// Create a temporary directory
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		if err := os.Setenv("HOME", oldHome); err != nil {
-			t.Logf("Warning: failed to restore HOME: %v", err)
-		}
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
+	setTestHome(t, tmpDir)
 
 	settings, err := LoadSettings()
 	if err != nil {
@@ -42,15 +35,7 @@ func TestLoadSettings_NotExist(t *testing.T) {
 func TestSaveAndLoadSettings(t *testing.T) {
 	// Create a temporary directory
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		if err := os.Setenv("HOME", oldHome); err != nil {
-			t.Logf("Warning: failed to restore HOME: %v", err)
-		}
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
+	setTestHome(t, tmpDir)
 
 	// Create settings
 	settings := &Settings{
@@ -84,7 +69,7 @@ func TestSaveAndLoadSettings(t *testing.T) {
 	}
 	if info, statErr := os.Stat(settingsDir); statErr != nil {
 		t.Fatalf("Stat settings dir error = %v", statErr)
-	} else if perm := info.Mode().Perm(); perm != 0700 {
+	} else if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0700 {
 		t.Errorf("settings dir perm = %o, want 700", perm)
 	}
 
@@ -376,15 +361,7 @@ func TestJSONMarshaling(t *testing.T) {
 
 func TestSettingsPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		if err := os.Setenv("HOME", oldHome); err != nil {
-			t.Logf("Warning: failed to restore HOME: %v", err)
-		}
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
+	setTestHome(t, tmpDir)
 
 	settingsPath, err := GetSettingsPath()
 	if err != nil {
@@ -409,15 +386,7 @@ func TestSettingsPath(t *testing.T) {
 
 func TestSaveSettings_AtomicOverwrite(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		if err := os.Setenv("HOME", oldHome); err != nil {
-			t.Logf("Warning: failed to restore HOME: %v", err)
-		}
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
+	setTestHome(t, tmpDir)
 
 	first := &Settings{Hosts: []HostConfig{{Name: "a", Host: "10.0.0.1"}}}
 	if err := SaveSettings(first); err != nil {
@@ -456,22 +425,14 @@ func TestSaveSettings_AtomicOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat settings file error = %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0600 {
 		t.Errorf("settings file perm = %o, want 600", perm)
 	}
 }
 
 func TestSaveSettings_RenameFailureCleansTempFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		if err := os.Setenv("HOME", oldHome); err != nil {
-			t.Logf("Warning: failed to restore HOME: %v", err)
-		}
-	})
-	if err := os.Setenv("HOME", tmpDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
+	setTestHome(t, tmpDir)
 
 	settingsDir, err := GetSettingsDir()
 	if err != nil {

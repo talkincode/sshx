@@ -97,8 +97,9 @@ func NormalizeRequest(req *Request) error {
 		if req.Action.ScriptRunner == "" {
 			req.Action.ScriptRunner = ScriptRunnerSH
 		}
-		if req.Action.ScriptRunner != ScriptRunnerSH {
-			return fmt.Errorf("%w: unsupported script runner %q (required: sh)", ErrConfig, req.Action.ScriptRunner)
+		if !SupportedScriptRunner(req.Action.ScriptRunner) {
+			return fmt.Errorf("%w: unsupported script runner %q (supported: sh, bash, zsh, dash, ksh, ash)",
+				ErrConfig, req.Action.ScriptRunner)
 		}
 	}
 

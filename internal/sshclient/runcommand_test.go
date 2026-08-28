@@ -170,7 +170,7 @@ func sendExitStatus(ch ssh.Channel, status uint32) {
 
 func dialTestClient(t *testing.T, host, port string) *SSHClient {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	client, err := NewSSHClient(&Config{
 		Host:              host,

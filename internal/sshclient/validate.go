@@ -25,107 +25,30 @@ func (e *CommandBlockedError) Error() string {
 }
 
 // ValidateCommand performs a best-effort safety check against a small set of
-// well-known destructive commands (for example "rm -rf /" or a fork bomb).
+// well-known destructive operations (for example "rm -rf /" or a fork bomb).
+//
+// Matching happens on the token in *command position* after shell segmentation,
+// not on the raw command string. That distinction matters: `last reboot -F`,
+// `journalctl | grep -iE 'fail|halt'`, and `iptables-save | grep -F ...` are
+// read-only and must not be blocked just because they contain a dangerous word.
 //
 // It is a guardrail to catch accidental mistakes, NOT a security boundary: the
-// substring/keyword matching is trivially bypassed (casing, quoting, shell
-// variables, alternate paths), so it must never be relied upon to sandbox
-// untrusted input.
+// matching is trivially bypassed (obfuscation, indirection, generated command
+// strings), so it must never be relied upon to sandbox untrusted input.
 func ValidateCommand(command string) error {
 	cmd := strings.TrimSpace(command)
-	cmdLower := strings.ToLower(cmd)
-
-	dangerousExactPatterns := []struct {
-		pattern string
-		reason  string
-	}{
-		{" rm -rf / ", "Delete root directory"},
-		{" rm -rf /$", "Delete root directory"},
-		{" rm -rf /;", "Delete root directory"},
-		{" rm -rf /&", "Delete root directory"},
-		{" rm -rf /|", "Delete root directory"},
-		{"rm -rf / ", "Delete root directory"},
-		{"rm -rf /$", "Delete root directory"},
-		{"rm -rf /;", "Delete root directory"},
-		{"rm -rf /*", "Delete all files in root directory"},
-		{"rm -rf ~", "Delete user home directory"},
-		{"rm -rf ~/", "Delete user home directory"},
-		{"rm -rf $home", "Delete $HOME directory"},
-		{":(){:|:&};:", "Fork bomb"},
-		{"> /etc/passwd", "Overwrite system password file"},
-		{"> /etc/shadow", "Overwrite system shadow file"},
-		{"dd if=/dev/zero", "Dangerous dd operation"},
-		{"dd if=/dev/urandom", "Dangerous dd operation"},
+	if cmd == "" {
+		return nil
 	}
 
-	for _, pattern := range dangerousExactPatterns {
-		cmdWithSpaces := " " + cmdLower + " "
-		patternLower := strings.ToLower(pattern.pattern)
-
-		if strings.HasSuffix(pattern.pattern, "$") {
-			patternLower = strings.TrimSuffix(patternLower, "$")
-			if strings.HasSuffix(cmdLower, patternLower) {
-				return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
-			}
-		} else if strings.Contains(cmdWithSpaces, patternLower) {
-			return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
-		}
+	// Fork bombs survive no useful tokenization, so match the literal shape
+	// after stripping whitespace.
+	if isForkBomb(cmd) {
+		return &CommandBlockedError{Command: cmd, Reason: "Fork bomb"}
 	}
 
-	dangerousPatterns := []struct {
-		keywords []string
-		reason   string
-	}{
-		{[]string{"mkfs."}, "Format filesystem"},
-		{[]string{"mkfs", "ext4"}, "Format filesystem"},
-		{[]string{"mkfs", "ext3"}, "Format filesystem"},
-		{[]string{"mkfs", "xfs"}, "Format filesystem"},
-		{[]string{"fdisk", "/dev/"}, "Disk partition operation"},
-		{[]string{"parted", "/dev/"}, "Disk partition operation"},
-		{[]string{"mkswap", "/dev/"}, "Create swap partition"},
-		{[]string{"shutdown"}, "System shutdown operation"},
-		{[]string{"halt"}, "System halt operation"},
-		{[]string{"poweroff"}, "System poweroff operation"},
-		{[]string{"reboot"}, "System reboot operation"},
-		{[]string{"init 0"}, "System shutdown (init 0)"},
-		{[]string{"init 6"}, "System reboot (init 6)"},
-		{[]string{"systemctl", "halt"}, "System halt operation"},
-		{[]string{"systemctl", "poweroff"}, "System poweroff operation"},
-		{[]string{"systemctl", "reboot"}, "System reboot operation"},
-		{[]string{"curl", "| sh"}, "Download and execute script from network"},
-		{[]string{"curl", "| bash"}, "Download and execute script from network"},
-		{[]string{"curl", "|sh"}, "Download and execute script from network"},
-		{[]string{"curl", "|bash"}, "Download and execute script from network"},
-		{[]string{"wget", "| sh"}, "Download and execute script from network"},
-		{[]string{"wget", "| bash"}, "Download and execute script from network"},
-		{[]string{"wget", "|sh"}, "Download and execute script from network"},
-		{[]string{"wget", "|bash"}, "Download and execute script from network"},
-		{[]string{"chmod", "777", "/ "}, "Set root directory permissions to 777"},
-		{[]string{"chmod", "777", "/$"}, "Set root directory permissions to 777"},
-		{[]string{"chmod", "-r", "777", "/ "}, "Recursively set root directory permissions to 777"},
-		{[]string{"chmod", "-r", "777", "/$"}, "Recursively set root directory permissions to 777"},
-		{[]string{"iptables", "-f"}, "Flush firewall rules"},
-		{[]string{"iptables", "-x"}, "Delete firewall chain"},
-	}
-
-	for _, pattern := range dangerousPatterns {
-		allMatch := true
-		for _, keyword := range pattern.keywords {
-			keywordLower := strings.ToLower(keyword)
-			if strings.HasSuffix(keyword, "$") {
-				keywordLower = strings.TrimSuffix(keywordLower, "$")
-				if !strings.HasSuffix(cmdLower, keywordLower) {
-					allMatch = false
-					break
-				}
-			} else if !strings.Contains(cmdLower, keywordLower) {
-				allMatch = false
-				break
-			}
-		}
-		if allMatch {
-			return &CommandBlockedError{Command: cmd, Reason: pattern.reason}
-		}
+	if reason, found := detectDestructiveCommand(cmd, 0); found {
+		return &CommandBlockedError{Command: cmd, Reason: reason}
 	}
 
 	if engine, client, found := detectGuardedDBClient(cmd, 0); found {
@@ -141,6 +64,18 @@ func ValidateCommand(command string) error {
 	}
 
 	return nil
+}
+
+// isForkBomb matches the classic `:(){:|:&};:` shape regardless of spacing.
+func isForkBomb(cmd string) bool {
+	var b strings.Builder
+	for _, r := range cmd {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.Contains(b.String(), ":(){:|:&};:")
 }
 
 // CommandUsesSudo reports whether sshx can safely treat the command as a sudo

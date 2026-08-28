@@ -304,7 +304,7 @@ func TestRemotePathJoinUsesSFTPSlashSeparator(t *testing.T) {
 
 func TestGetHostKeyCallbackAcceptsUnknownHost(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	cfg := &Config{AcceptUnknownHost: true}
 	callback, err := getHostKeyCallback(cfg)
 	require.NoError(t, err)
@@ -322,7 +322,7 @@ func TestGetHostKeyCallbackAcceptsUnknownHost(t *testing.T) {
 
 func TestGetHostKeyCallbackStrictModeRejectsUnknownHost(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	cfg := &Config{}
 	callback, err := getHostKeyCallback(cfg)
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func TestGetHostKeyCallbackStrictModeRejectsUnknownHost(t *testing.T) {
 
 func TestGetHostKeyCallbackRejectsChangedKnownHostKey(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 	hostWithPort := net.JoinHostPort("changed-host", "22")
 	remote := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}
@@ -362,7 +362,7 @@ func TestGetHostKeyCallbackRejectsChangedKnownHostKey(t *testing.T) {
 
 func TestGetHostKeyCallbackInsecureFallbackRequiresExplicitOptIn(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	knownHostsPath := filepath.Join(home, ".ssh")
 	require.NoError(t, os.MkdirAll(knownHostsPath, 0o700))
 

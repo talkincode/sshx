@@ -130,7 +130,7 @@ func TestClassifyError(t *testing.T) {
 // before any network work, so it reports error_kind "blocked" (not "connect")
 // even though the host is never reachable.
 func TestRun_BlockedCommandShortCircuits(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	// 192.0.2.1 is RFC 5737 TEST-NET-1: if validation did not short-circuit,
 	// the dial would block instead of returning instantly.
 	result := runReportedJSON(t, []string{"sshx", "-h=192.0.2.1", "--json", "rm -rf /"})
@@ -146,7 +146,7 @@ func TestRun_BlockedCommandShortCircuits(t *testing.T) {
 }
 
 func TestRun_BlockedCommandJSONRedactsSecretLikeArguments(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	secretFragments := []string{"alpha", "bravo", "charlie", "delta"}
 	result := runReportedJSON(t, []string{
 		"sshx",
@@ -202,7 +202,7 @@ func TestRun_JSONConfigFailuresDoNotConnect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			setTestHome(t, t.TempDir())
 			result := runReportedJSON(t, tt.args)
 			if result["error_kind"] != "config" {
 				t.Fatalf("expected error_kind=config, got %v", result["error_kind"])
@@ -305,7 +305,7 @@ func TestEmitCommandJSONContracts(t *testing.T) {
 }
 
 func TestRun_DryRunJSONDoesNotConnect(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	result := runDryRunJSON(t, []string{"sshx", "-h=192.0.2.1", "--dry-run", "--json", "uptime"})
 
 	if result["dry_run"] != true {
@@ -329,7 +329,7 @@ func TestRun_DryRunJSONDoesNotConnect(t *testing.T) {
 }
 
 func TestRun_DryRunReportsBlockedCommand(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	result := runDryRunJSON(t, []string{"sshx", "-h=192.0.2.1", "--dry-run", "--json", "sudo rm -rf /"})
 
 	if result["valid"] != false {
@@ -357,7 +357,7 @@ func TestRun_DryRunReportsBlockedCommand(t *testing.T) {
 }
 
 func TestRun_DryRunMissingHostDoesNotPlanConnection(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	result := runDryRunJSON(t, []string{"sshx", "--dry-run", "--json", "uptime"})
 
 	if result["valid"] != false {
@@ -380,7 +380,7 @@ func TestRun_DryRunMissingHostDoesNotPlanConnection(t *testing.T) {
 
 func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	passwordKeyName := "prod-web-sudo" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	err := SaveSettings(&Settings{
 		Key: "/keys/default.pem",
@@ -429,7 +429,7 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 
 func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	sudoKeyName := "prod-web-sudo" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	sshKeyName := "prod-web-login" //nolint:gosec // G101: keyring key name used in a test, not secret material.
 	err := SaveSettings(&Settings{

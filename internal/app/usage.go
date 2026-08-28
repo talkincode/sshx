@@ -67,6 +67,12 @@ Run Contract (preferred for Agents):
     --all-hosts              all configured hosts before tag filters
     --address=HOST           explicit single literal address (not for fan-out)
 
+  Script payloads:
+    --script-file=PATH       byte-preserving script from a local file
+    --script-stdin           byte-preserving script from stdin
+    --shell=NAME             interpreter override: sh, bash, zsh, dash, ksh, ash
+                             (default: the script's #! line, else sh)
+
   Limits / policy:
     --concurrency=N          default 4, hard max 32
     --failure-mode=continue|fail_fast   default continue

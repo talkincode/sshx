@@ -135,7 +135,9 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	// connecting; a hit avoids re-reading the production environment.
 	var credSource sqlsafe.CredSource
 	needExtract := false
-	if config.SQLCredFrom != "" {
+	credBestEffort := false
+	switch {
+	case config.SQLCredFrom != "":
 		parsed, srcErr := sqlsafe.ParseCredSource(config.SQLCredFrom)
 		if srcErr != nil {
 			return run.fail("config", srcErr)
@@ -146,6 +148,21 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 			dropCredCache(config.Host, run.credSource)
 			needExtract = true
 		} else if creds, ok := lookupCredCache(config.Host, run.credSource); config.SQLCredCacheTTL > 0 && ok {
+			run.applyCredentials(*creds)
+			run.credCache = "hit"
+		} else {
+			needExtract = true
+		}
+	case config.SQLDockerContainer != "" && config.SQLUser == "" && config.SQLPasswordKey == "":
+		// `--docker` already names the database container, so read its
+		// environment for the role and database instead of assuming a
+		// "postgres" superuser that many images never create. This is
+		// best-effort: if the container cannot be inspected or exposes no
+		// credentials, the client defaults still apply.
+		credSource = sqlsafe.CredSource{Kind: "docker", Container: config.SQLDockerContainer}
+		credBestEffort = true
+		run.credSource = credSource.String()
+		if creds, ok := lookupCredCache(config.Host, run.credSource); config.SQLCredCacheTTL > 0 && ok && !config.SQLCredRefresh {
 			run.applyCredentials(*creds)
 			run.credCache = "hit"
 		} else {
@@ -164,7 +181,7 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	run.client = client
 
 	if needExtract {
-		if credErr := run.resolveCredentials(credSource); credErr != nil {
+		if credErr := run.resolveCredentials(credSource, credBestEffort); credErr != nil {
 			return credErr
 		}
 	}
@@ -226,7 +243,9 @@ func validateSQLConfig(config *sshclient.Config) error {
 	if config.SQLFile != "" {
 		return fmt.Errorf("--db-file is only valid with --engine=sqlite")
 	}
-	if config.SQLDatabase == "" && config.SQLCredFrom == "" {
+	// --docker names the database container, whose environment can supply the
+	// database name, so --db becomes optional in that form too.
+	if config.SQLDatabase == "" && config.SQLCredFrom == "" && config.SQLDockerContainer == "" {
 		return fmt.Errorf("--db=<database> is required")
 	}
 	if config.SQLDatabase != "" {
@@ -330,21 +349,39 @@ func (r *sqlRun) applyCredentials(creds sqlsafe.Credentials) {
 // resolveCredentials reads the credential source on the remote host. The
 // extraction command carries no secret; its output does and is therefore
 // never logged, audited, or embedded in error messages.
-func (r *sqlRun) resolveCredentials(source sqlsafe.CredSource) error {
+// resolveCredentials reads the credential source on the remote host. When
+// bestEffort is set the source was inferred from --docker rather than
+// requested explicitly, so a container that cannot be inspected or exposes no
+// password must not fail the run: the client defaults still apply.
+func (r *sqlRun) resolveCredentials(source sqlsafe.CredSource, bestEffort bool) error {
 	r.phase = "credentials"
 	cmd, cmdErr := source.ExtractionCommand()
 	if cmdErr != nil {
+		if bestEffort {
+			return nil
+		}
 		return r.fail("config", cmdErr)
 	}
 	res, execErr := r.runRemote(sqlsafe.RemoteCommand{Command: cmd})
 	if execErr != nil || res.ExitCode != 0 {
+		if bestEffort {
+			logger.GetLogger().Info(
+				"Note: could not read %s for the database role; using client defaults", r.credSource)
+			return nil
+		}
 		return r.fail("cred_source_failed", fmt.Errorf(
 			"failed to read credential source %s (remote status %d)",
 			r.credSource, res.ExitCode))
 	}
-	creds, parseErr := sqlsafe.ParseCredOutput(res.Stdout)
-	if parseErr != nil {
-		return r.fail("cred_source_failed", fmt.Errorf("credential source %s: %w", r.credSource, parseErr))
+	var creds sqlsafe.Credentials
+	if bestEffort {
+		creds = sqlsafe.ParseCredIdentity(res.Stdout)
+	} else {
+		parsed, parseErr := sqlsafe.ParseCredOutput(res.Stdout)
+		if parseErr != nil {
+			return r.fail("cred_source_failed", fmt.Errorf("credential source %s: %w", r.credSource, parseErr))
+		}
+		creds = parsed
 	}
 	r.applyCredentials(creds)
 	if r.config.SQLDatabase != "" {
@@ -353,7 +390,9 @@ func (r *sqlRun) resolveCredentials(source sqlsafe.CredSource) error {
 		}
 	}
 	r.credCache = "resolved"
-	if r.config.SQLCredCacheTTL > 0 {
+	// Only an explicit source writes the cache: a best-effort result may lack
+	// a password and must not shadow a later --db-cred-from resolution.
+	if !bestEffort && r.config.SQLCredCacheTTL > 0 {
 		if storeErr := storeCredCache(r.config.Host, r.credSource, creds, r.config.SQLCredCacheTTL); storeErr != nil {
 			logger.GetLogger().Info("Note: credential cache not updated: %v", storeErr)
 		} else {
@@ -568,6 +607,15 @@ func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr err
 			safeErr = fmt.Errorf("%s: %s", safeErr.Error(), redactSensitiveText(detail))
 		}
 	}
+	// A missing client is a host configuration problem, not a statement
+	// failure. Reporting it as remote_exit 127 forces the caller to decode a
+	// shell convention to learn that psql/sqlite3 simply is not installed.
+	if missing, ok := missingDatabaseClient(res); ok {
+		kind = "config"
+		safeErr = fmt.Errorf(
+			"%s is not available on the remote host%s: install the client, or use --docker=<container> to run it inside the database container",
+			missing, r.clientLocationHint())
+	}
 	r.recordAudit(res.ExitCode, kind, safeErr)
 	if r.config.JSONOutput {
 		result := r.baseResult()
@@ -595,6 +643,36 @@ func firstNonEmptyLine(chunks ...string) string {
 				return s
 			}
 		}
+	}
+	return ""
+}
+
+// databaseClientNames are the remote binaries sshx drives for each engine.
+var databaseClientNames = []string{"psql", "sqlite3"}
+
+// missingDatabaseClient reports the client binary the remote shell could not
+// find. Shells exit 127 for "command not found", so the exit code alone is
+// ambiguous; the message is required to confirm it.
+func missingDatabaseClient(res sshclient.ExecResult) (string, bool) {
+	if res.ExitCode != 127 {
+		return "", false
+	}
+	text := strings.ToLower(res.Stderr + "\n" + res.Stdout)
+	if !strings.Contains(text, "not found") && !strings.Contains(text, "no such file") {
+		return "", false
+	}
+	for _, name := range databaseClientNames {
+		if strings.Contains(text, name) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// clientLocationHint names where sshx looked for the client.
+func (r *sqlRun) clientLocationHint() string {
+	if r.config != nil && r.config.SQLDockerContainer != "" {
+		return " or in container " + r.config.SQLDockerContainer
 	}
 	return ""
 }

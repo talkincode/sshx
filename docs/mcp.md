@@ -33,7 +33,7 @@ Claude Desktop / generic MCP client entry:
 
 | Tool | Maps to | Notes |
 | --- | --- | --- |
-| `sshx_run` | `sshx run --json` | Selectors, command or byte-preserving script, bounded fan-out, dry-run, force + bypass_reason |
+| `sshx_run` | `sshx run --json` | Selectors, command or byte-preserving script (shebang or `shell` selects the interpreter), bounded fan-out, dry-run, force + bypass_reason |
 | `sshx_sql` | `sshx sql --json` | Guarded single-statement SQL via remote psql/sqlite3 |
 | `sshx_apply` | `sshx apply --json` | Guarded single-file replace; accepts `from_path` or inline `content` |
 | `sshx_inspect` | `sshx inspect --json` | Built-in capabilities and trusted local plugins |
