@@ -136,20 +136,24 @@ type Config struct {
 	ReportedError      string
 
 	// Run-mode execution contract fields (Mode == "run").
-	RequestID       string
-	RunTargets      []string
-	RunGroups       []string
-	RunTags         map[string]string
-	RunAllHosts     bool
-	RunAddress      string
-	RunActionKind   string
-	RunIntent       string
-	RunUseSudo      bool
-	RunConcurrency  int
-	FailureMode     string
-	BypassReason    string
-	ScriptFile      string
-	ScriptStdin     bool
+	RequestID      string
+	RunTargets     []string
+	RunGroups      []string
+	RunTags        map[string]string
+	RunAllHosts    bool
+	RunAddress     string
+	RunActionKind  string
+	RunIntent      string
+	RunUseSudo     bool
+	RunConcurrency int
+	FailureMode    string
+	BypassReason   string
+	ScriptFile     string
+	ScriptStdin    bool
+	// ScriptShell overrides the interpreter used for --script-file /
+	// --script-stdin payloads. Empty means: follow the payload's shebang, or
+	// fall back to sh.
+	ScriptShell     string
 	JSONLOutput     bool
 	MaxOutputBytes  int
 	MaxPayloadBytes int
@@ -679,12 +683,26 @@ func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
 	return result, fmt.Errorf("command failed: %w", runErr)
 }
 
-// RunScript streams a trusted local collector to a fresh SSH session. The
-// payload is never installed on the target. When useSudo is true, the password
-// and script share stdin in that order: sudo consumes one line and sh consumes
-// the remaining bytes.
+// RunScript streams a trusted local collector to a fresh SSH session using the
+// POSIX shell. The payload is never installed on the target.
 func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) {
+	return c.RunScriptWithShell(payload, "sh", useSudo)
+}
+
+// RunScriptWithShell streams a trusted local script to a fresh SSH session and
+// executes it with the named POSIX-shell-family interpreter. The payload is
+// never installed on the target. When useSudo is true, the password and script
+// share stdin in that order: sudo consumes one line and the shell consumes the
+// remaining bytes.
+func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo bool) (ExecResult, error) {
 	var result ExecResult
+	if shell == "" {
+		shell = "sh"
+	}
+	if !shellNames[shell] {
+		result.ExitCode = -1
+		return result, fmt.Errorf("unsupported script shell %q", shell)
+	}
 	if len(payload) == 0 {
 		result.ExitCode = -1
 		return result, fmt.Errorf("collector payload is empty")
@@ -705,10 +723,10 @@ func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) 
 	}
 	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
 
-	command := "sh -s --"
+	command := shell + " -s --"
 	stdin := bytes.NewReader(payload)
 	if useSudo {
-		command = "sudo -S -p '' sh -s --"
+		command = "sudo -S -p '' " + shell + " -s --"
 		stdin = bytes.NewReader(append(append([]byte(c.config.SudoPassword+"\n"), payload...), '\n'))
 	}
 	session.Stdin = stdin

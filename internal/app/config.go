@@ -514,6 +514,8 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 		case arg == "--script-stdin":
 			config.ScriptStdin = true
 			config.RunActionKind = "script"
+		case strings.HasPrefix(arg, "--shell="):
+			config.ScriptShell = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--sudo":
 			config.RunUseSudo = true
 		case strings.HasPrefix(arg, "--max-output-bytes="):

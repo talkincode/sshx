@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-28
+
+### Changed
+
+- Windows CI now runs the CLI surface (`internal/app`), the SSH core
+  (`internal/sshclient`), and `internal/runtimepath` in addition to the
+  previously covered packages, taking the Windows matrix from 91 to roughly 320
+  tests. Tests resolve the home directory through a portable helper so
+  `USERPROFILE` is honored, and POSIX permission assertions are guarded by
+  `runtime.GOOS`. `internal/plugin`, `internal/skillinstall`, and `tests/e2e`
+  remain excluded pending Windows symlink/permission equivalents (issue #50).
+
+### Added
+
+- `sshx_run` over MCP accepts `shell` for parity with the CLI `--shell`, and
+  script payloads sent over MCP follow their shebang like CLI payloads do.
+- `sshx sql --docker=<container>` now reads that container's environment for the
+  database role and name, so a TimescaleDB/Postgres image whose `POSTGRES_USER`
+  is not `postgres` no longer fails with `role "postgres" does not exist`.
+  `--db` and `--db-user` become optional in this form. Discovery is best-effort:
+  a container that cannot be inspected or exposes no credentials falls back to
+  the client defaults, and passing `--db-user` or `--db-password-key` disables
+  it. `--db-cred-from` keeps its stricter contract and still requires a password.
+- `sshx run` script payloads now honor the script's shebang. A
+  `#!/usr/bin/env bash` payload runs under `bash -s --` instead of being piped
+  to `sh`, so bash-only constructs (`set -o pipefail`, arrays, `[[ ]]`) work
+  instead of failing remotely with `Illegal option -o pipefail`. `--shell=NAME`
+  overrides the shebang; supported interpreters are `sh`, `bash`, `zsh`,
+  `dash`, `ksh`, and `ash`. A payload declaring any other interpreter (for
+  example `python3`) is now rejected locally as `error_kind: config` with no
+  connection, instead of being silently executed by `sh`. The selected
+  interpreter appears as `action.script_runner` in dry-run plans and results.
+- Safety-check recall now covers recursive removal of critical system
+  directories (`/etc`, `/usr`, `/var`, …), `rm --no-preserve-root`,
+  `wipefs -a`, `chown -R ... /`, LVM `pvremove`/`vgremove`/`lvremove`,
+  `zpool|zfs destroy`, `dd of=/dev/<disk>`, `systemctl kexec`, and destructive
+  commands nested inside `docker exec` / `docker compose exec`.
+
+### Fixed
+
+- A missing remote database client is now reported as `error_kind: config`
+  naming the binary, instead of the opaque
+  `database operation failed during execute with status 127` that required
+  decoding a shell convention to understand.
+- Command safety checks no longer match dangerous keywords anywhere in the raw
+  command string. The command line is split into shell segments and only the
+  token in **command position** is judged, following `sudo`/`env`/`timeout`
+  wrappers, `sh -c` payloads, and `docker exec` into the command that actually
+  runs. Read-only diagnostics such as `last reboot -F`,
+  `journalctl | grep -iE 'fail|halt'`, `iptables-save | grep -F ...`,
+  `curl ... | sha256sum`, `fdisk -l /dev/sda`, `parted /dev/sdb print`, and
+  bare `wipefs /dev/sdb` are no longer blocked. Replaying 49 commands that a
+  real workload had blocked shows 48 were false positives; only `rm -rf /`
+  remains blocked, alongside the unchanged guarded-SQL client redirects.
+  `iptables` flag matching is now case-sensitive so `-F`/`-X` (flush / delete
+  chain) are distinguished from `-f`/`-x` (fragment / exact).
+
 ## [0.11.0] - 2026-08-25
 
 ### Added

@@ -243,9 +243,18 @@ Notes:
 
 ### CI (`.github/workflows/`)
 
-- `ci.yml`: **Test** (ubuntu + macOS, Go 1.25.13, `-race -cover`), **Lint**
-  (golangci-lint), **Security Scan** (`gosec` plus `govulncheck`), **Analyze**
-  (CodeQL, Go).
+- `ci.yml`: **Test** (ubuntu + macOS, Go 1.25.13, `-race -cover`),
+  **Test (windows-latest)** (`-short`, build + vet), **Lint** (golangci-lint),
+  **Security Scan** (`gosec` plus `govulncheck`), **Analyze** (CodeQL, Go),
+  and **E2E** (ubuntu + macOS).
+- Windows is a first-class target, so its job covers `cmd`, `internal/app`,
+  `internal/execution`, `internal/keyringstore`, `internal/runtimepath`,
+  `internal/sqlsafe`, `internal/sshclient`, and `pkg`. When adding a test that
+  touches the home directory, use the package's `setTestHome` helper rather
+  than `t.Setenv("HOME", …)`: Go reads `USERPROFILE` on Windows. Guard POSIX
+  permission assertions with `runtime.GOOS != "windows"`. `internal/plugin`,
+  `internal/skillinstall`, and `tests/e2e` are still excluded pending Windows
+  symlink/permission equivalents (issue #50).
 - `release.yml`: builds release artifacts with Go 1.25.13 and bundles the matching
   Agent skill in every archive.
 
@@ -281,10 +290,15 @@ tests.
    true only when the remote command starts with `sudo`, matching the exact
    form `sudoStdinCommand` can safely rewrite. Non-leading sudo inside shell
    wrappers or pipelines is left untouched.
-5. **Command safety checks.** Destructive patterns (`rm -rf /`, `mkfs`, `dd`,
+5. **Command safety checks.** Destructive operations (`rm -rf /`, `mkfs`, `dd`,
    fork bombs, `curl | sh`, critical file edits, shutdown/reboot) are blocked
-   unless `--force`/`-f` or `--no-safety-check` is given. Direct database
-   client execution (`psql`/`pgcli` in command position, including
+   unless `--force`/`-f` or `--no-safety-check` is given. Matching happens on
+   the token in **command position** after shell segmentation, never on the raw
+   command string: `last reboot -F`, `journalctl | grep -iE 'fail|halt'`, and
+   `iptables-save | grep -F ...` are reads and must stay allowed. A guardrail
+   that fires on reads trains the caller to pass `--force` reflexively, which
+   defeats its purpose — treat a new false positive as a bug. Direct database
+   client execution (`psql`/`pgcli`/`sqlite3` in command position, including
    `docker exec`, `sudo -u`, `sh -c`, `kubectl exec`, and pipe wrappers) is
    also blocked and redirected to `sshx sql`; availability probes such as
    `which psql` and `psql --version` stay allowed. The validator is a

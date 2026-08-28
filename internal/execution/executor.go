@@ -458,7 +458,7 @@ func executeOne(ctx context.Context, opts RunOptions, target ResolvedTarget) Tar
 			execErr = fmt.Errorf("%w: missing script payload", ErrConfig)
 		} else {
 			useSudo := req.Action.UseSudo
-			execRes, execErr = client.RunScript(opts.Payload.Bytes, useSudo)
+			execRes, execErr = client.RunScriptWithShell(opts.Payload.Bytes, req.Action.ScriptRunner, useSudo)
 		}
 	default:
 		execErr = fmt.Errorf("%w: action kind %q not executable by run executor", ErrConfig, req.Action.Kind)

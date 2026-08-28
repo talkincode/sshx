@@ -96,7 +96,18 @@ This boundary keeps password lookup, stdin injection, and audit metadata aligned
 
 ## Safety Checks Are Guardrails
 
-`sshx` blocks common destructive patterns such as root deletion, disk formatting, shutdown or reboot commands, critical system file edits, fork bombs, and `curl | sh` style pipelines.
+`sshx` blocks common destructive operations such as root deletion, disk formatting, shutdown or reboot commands, critical system file edits, fork bombs, and `curl | sh` style pipelines.
+
+Matching applies to the command actually being executed, not to any occurrence of a dangerous word. The command line is split into shell segments and only the token in command position is judged, so read-only diagnostics stay allowed:
+
+```bash
+sshx -h=prod-web "last reboot -F | head -10"                  # allowed: reboot is an argument
+sshx -h=prod-web "journalctl -u app | grep -iE 'fail|halt'"   # allowed: halt is a grep pattern
+sshx -h=prod-web "sudo iptables-save | grep -F 10.0.0.0/24"   # allowed: a different binary
+sshx -h=prod-web "sudo iptables -F"                           # blocked: flushes the ruleset
+```
+
+Wrappers are followed: `sudo`, `env`, `nohup`, `timeout`, `sh -c '...'`, and `docker exec <container> ...` are all resolved to the command they ultimately run.
 
 That does not make untrusted commands safe. A command validator cannot understand every script, shell expansion, application-specific migration, or data-destruction path.
 

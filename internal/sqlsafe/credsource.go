@@ -102,7 +102,22 @@ var (
 // ParseCredOutput extracts credentials from KEY=VALUE lines (docker inspect
 // env output or an env file). Discrete keys win over a connection URL. The
 // error never embeds raw output, which may contain unrelated secrets.
+// ParseCredOutput parses KEY=VALUE lines into credentials and requires a
+// password: an explicit --db-cred-from asked sshx to obtain one.
 func ParseCredOutput(output string) (Credentials, error) {
+	creds := ParseCredIdentity(output)
+	if creds.Password == "" {
+		return Credentials{}, fmt.Errorf(
+			"no database password found in credential source (looked for %s and a connection URL)",
+			strings.Join(credPasswordKeys, ", "))
+	}
+	return creds, nil
+}
+
+// ParseCredIdentity parses the same KEY=VALUE lines but tolerates a missing
+// password. It backs best-effort discovery, where sshx only needs the role and
+// database name and the server may well use trust or peer authentication.
+func ParseCredIdentity(output string) Credentials {
 	env := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
@@ -128,19 +143,12 @@ func ParseCredOutput(output string) (Credentials, error) {
 		Host:     firstEnv(env, credHostKeys),
 		Port:     firstEnv(env, credPortKeys),
 	}
-	if creds.Password == "" {
-		if u := firstEnv(env, credURLKeys); u != "" {
-			if fromURL, err := parseDatabaseURL(u); err == nil {
-				merge(&creds, fromURL)
-			}
+	if u := firstEnv(env, credURLKeys); u != "" {
+		if fromURL, err := parseDatabaseURL(u); err == nil {
+			merge(&creds, fromURL)
 		}
 	}
-	if creds.Password == "" {
-		return Credentials{}, fmt.Errorf(
-			"no database password found in credential source (looked for %s and a connection URL)",
-			strings.Join(credPasswordKeys, ", "))
-	}
-	return creds, nil
+	return creds
 }
 
 func firstEnv(env map[string]string, keys []string) string {

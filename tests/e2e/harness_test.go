@@ -279,11 +279,11 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 
 		exitCode := uint32(0)
 		switch {
-		case payload.Command == "sh -s --":
-			handleCollectorSession(channel, server, role, false)
+		case isCollectorCommand(payload.Command) != "":
+			handleCollectorSession(channel, server, role, false, isCollectorCommand(payload.Command))
 			return
-		case payload.Command == "sudo -S -p '' sh -s --":
-			handleCollectorSession(channel, server, role, true)
+		case isSudoCollectorCommand(payload.Command) != "":
+			handleCollectorSession(channel, server, role, true, isSudoCollectorCommand(payload.Command))
 			return
 		case payload.Command == "probe" || strings.HasPrefix(payload.Command, "probe "):
 			_, _ = io.WriteString(channel, "probe-ok\n") //nolint:errcheck // fixture response
@@ -370,7 +370,32 @@ func handleSQLiteSession(channel ssh.Channel, server *testSSHServer, cmdline str
 	sendExitStatus(channel, 126)
 }
 
-func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role string, useSudo bool) {
+// collectorShells mirrors the shell family sshx may select from a script
+// shebang or an explicit --shell.
+var collectorShells = []string{"sh", "bash", "zsh", "dash", "ksh", "ash"}
+
+// isCollectorCommand returns the shell name when cmd is a streamed-script
+// invocation such as `bash -s --`, or "" when it is an ordinary command.
+func isCollectorCommand(cmd string) string {
+	for _, shell := range collectorShells {
+		if cmd == shell+" -s --" {
+			return shell
+		}
+	}
+	return ""
+}
+
+// isSudoCollectorCommand is the privileged form, `sudo -S -p ” bash -s --`.
+func isSudoCollectorCommand(cmd string) string {
+	const prefix = "sudo -S -p '' "
+	rest, ok := strings.CutPrefix(cmd, prefix)
+	if !ok {
+		return ""
+	}
+	return isCollectorCommand(rest)
+}
+
+func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role string, useSudo bool, shell string) {
 	reader := bufio.NewReader(channel)
 	if useSudo {
 		password, err := reader.ReadString('\n')
@@ -392,7 +417,10 @@ func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role str
 		return
 	}
 	server.collectorRuns.Add(1)
-	command := exec.Command("sh") // #nosec G204 -- fixed shell executes only isolated test-created collector fixtures.
+	if shell == "" {
+		shell = "sh"
+	}
+	command := exec.Command(shell) // #nosec G204 -- shell name comes from a fixed allowlist and executes only isolated test-created collector fixtures.
 	command.Dir = server.root
 	command.Env = append(os.Environ(), "HOME="+server.root, "SSHX_E2E_ROLE="+role)
 	command.Stdin = bytes.NewReader(payload)

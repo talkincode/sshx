@@ -15,6 +15,7 @@ cat ./check.sh | sshx run --target=prod-web --script-stdin --json
 
 - Selectors resolve configured hosts only. Use `--address=` for one literal address.
 - Script payloads are streamed on SSH stdin and are not reconstructed through shell joining.
+- The script's `#!` line selects the interpreter, so a `#!/usr/bin/env bash` payload keeps bash semantics (`set -o pipefail`, arrays, `[[ ]]`). Use `--shell=NAME` to override it. Supported: `sh`, `bash`, `zsh`, `dash`, `ksh`, `ash`; any other interpreter is rejected as `error_kind: config` without connecting. The choice appears as `action.script_runner`.
 - Dry-run and results expose payload SHA-256 and byte length, not raw script contents.
 - Multi-target `--jsonl` streams `run_started`, per-target events, and `run_finished`.
 - Multi-target exit codes: `0` all succeeded, `1` partial/failed/skipped/uncertain, `255` request-level failure.

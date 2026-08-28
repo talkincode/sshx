@@ -355,7 +355,6 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 
 	var payload *execution.Payload
 	if req.Action.Kind == execution.ActionScript {
-		var err error
 		if req.Action.ScriptFromStdin {
 			p, loadErr := execution.LoadScriptStdin(os.Stdin, req.Limits.MaxPayloadBytes)
 			if loadErr != nil {
@@ -371,10 +370,28 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 		}
 		req.Action.PayloadSHA256 = payload.SHA256
 		req.Action.PayloadBytes = payload.Size
-		_ = err
+		// An explicit --shell wins; otherwise a shebang selects the interpreter
+		// so a bash script keeps bash semantics (set -o pipefail, arrays, …)
+		// instead of being silently run by sh.
+		if runner := runnerFromConfig(config, payload); runner != "" {
+			req.Action.ScriptRunner = runner
+		}
 	}
 
 	return req, payload, nil
+}
+
+// runnerFromConfig resolves the script interpreter: an explicit --shell first,
+// then the payload's shebang when it names a supported shell. An unsupported
+// shebang is reported rather than silently downgraded to sh.
+func runnerFromConfig(config *sshclient.Config, payload *execution.Payload) string {
+	if s := strings.TrimSpace(config.ScriptShell); s != "" {
+		return s
+	}
+	if payload != nil && payload.Shebang != "" {
+		return payload.Shebang
+	}
+	return ""
 }
 
 func recordRunAudit(audit *auditRecorder, config *sshclient.Config, req *execution.Request, snap execution.TargetSnapshot, outcome execution.RunOutcome) {

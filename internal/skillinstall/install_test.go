@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -204,6 +205,9 @@ func TestInstallRejectsSymlinkedTargetDirectoryAndFile(t *testing.T) {
 func TestResolveDirDefaultAndHomeExpansion(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
 
 	defaultDir, err := ResolveDir("")
 	if err != nil {

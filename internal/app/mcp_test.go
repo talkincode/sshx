@@ -54,6 +54,29 @@ func TestBuildRunArgsScriptStdin(t *testing.T) {
 	assertArgs(t, args, []string{"run", "--json", "--target=web-1", "--script-stdin"})
 }
 
+func TestBuildRunArgsScriptShell(t *testing.T) {
+	script := "#!/usr/bin/env bash\nset -o pipefail\n"
+	args, stdin, err := buildRunArgs(mcpRunInput{
+		Targets: []string{"web-1"},
+		Script:  script,
+		Shell:   "bash",
+	})
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
+	if stdin != script {
+		t.Fatalf("stdin = %q, want the byte-preserved script", stdin)
+	}
+	assertArgs(t, args, []string{"run", "--json", "--target=web-1", "--script-stdin", "--shell=bash"})
+}
+
+func TestBuildRunArgsRejectsShellWithoutScript(t *testing.T) {
+	_, _, err := buildRunArgs(mcpRunInput{Targets: []string{"web-1"}, Command: "uptime", Shell: "bash"})
+	if err == nil {
+		t.Fatal("expected an error when shell is combined with a command payload")
+	}
+}
+
 func TestBuildRunArgsRequiresExactlyOnePayload(t *testing.T) {
 	if _, _, err := buildRunArgs(mcpRunInput{Targets: []string{"a"}}); err == nil {
 		t.Fatal("expected error when neither command nor script is set")

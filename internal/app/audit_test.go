@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestRun_BlockedCommandWritesRedactedAuditEvent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	auditDir := t.TempDir()
 	command := "sudo rm -rf / password=orange --token purple" //nolint:gosec // test verifies redaction of credential-like arguments.
 
@@ -193,7 +194,7 @@ func TestSQLAuditUsesRedactedStatementAndDigest(t *testing.T) {
 }
 
 func TestRun_DryRunDoesNotWriteAuditEvent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	auditDir := filepath.Join(t.TempDir(), "audit")
 	result := runDryRunJSON(t, []string{"sshx", "-h=192.0.2.1", "--audit-output=" + auditDir, "--dry-run", "--json", "uptime"})
 
@@ -206,7 +207,7 @@ func TestRun_DryRunDoesNotWriteAuditEvent(t *testing.T) {
 }
 
 func TestAuditRecorderRefreshRecordsExecutionContract(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	config := &sshclient.Config{
 		AuditEnabled:      true,
 		Host:              "prod-web",
@@ -336,7 +337,7 @@ func TestAuditEffectFlagsByModeAndAction(t *testing.T) {
 
 func TestWriteAuditEventUsesJSONLWithPrivatePermissions(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	config := &sshclient.Config{AuditEnabled: true}
 	event := auditEvent{
 		SchemaVersion: auditSchemaVersion,
@@ -357,7 +358,8 @@ func TestWriteAuditEventUsesJSONLWithPrivatePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected audit file at %s: %v", auditPath, err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows has no POSIX permission bits; Go reports 0666/0777 there.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("expected audit file mode 0600, got %v", info.Mode().Perm())
 	}
 

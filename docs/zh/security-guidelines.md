@@ -96,7 +96,18 @@ sshx -h=prod-web "echo sudo"
 
 ## 安全检查只是护栏
 
-`sshx` 会拦截常见破坏性模式，例如删除根目录、格式化磁盘、关机重启、修改关键系统文件、fork bomb 和 `curl | sh` 这类管道。
+`sshx` 会拦截常见破坏性操作，例如删除根目录、格式化磁盘、关机重启、修改关键系统文件、fork bomb 和 `curl | sh` 这类管道。
+
+判定对象是**真正要执行的命令**，而不是命令串里出现的危险词。sshx 先做 shell 分段，只判断处于命令位的 token，因此只读诊断不会被误拦：
+
+```bash
+sshx -h=prod-web "last reboot -F | head -10"                  # 放行：reboot 是参数
+sshx -h=prod-web "journalctl -u app | grep -iE 'fail|halt'"   # 放行：halt 是 grep 模式
+sshx -h=prod-web "sudo iptables-save | grep -F 10.0.0.0/24"   # 放行：是另一个程序
+sshx -h=prod-web "sudo iptables -F"                           # 拦截：清空规则链
+```
+
+包装器会被穿透解析：`sudo`、`env`、`nohup`、`timeout`、`sh -c '...'` 以及 `docker exec <容器> ...` 都会一路解析到最终执行的命令。
 
 这并不代表不可信命令就安全了。命令校验器不可能理解所有脚本、shell 展开、应用迁移和业务数据删除路径。
 

@@ -145,6 +145,7 @@ type mcpRunInput struct {
 	Address       string   `json:"address,omitempty" jsonschema:"Explicit single literal address (not for fan-out)."`
 	Command       string   `json:"command,omitempty" jsonschema:"Remote command line. Exactly one of command or script is required."`
 	Script        string   `json:"script,omitempty" jsonschema:"Byte-preserving script payload delivered over stdin. Exactly one of command or script is required."`
+	Shell         string   `json:"shell,omitempty" jsonschema:"Script interpreter override: sh, bash, zsh, dash, ksh, or ash. Defaults to the script's shebang, then sh."`
 	TimeoutSecs   int      `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds (default 60)."`
 	Concurrency   int      `json:"concurrency,omitempty" jsonschema:"Bounded fan-out (default 4, hard max 32)."`
 	FailureMode   string   `json:"failure_mode,omitempty" jsonschema:"continue or fail_fast (default continue)."`
@@ -284,8 +285,14 @@ func buildRunArgs(in mcpRunInput) ([]string, string, error) {
 	stdin := ""
 	if hasScript {
 		args = append(args, "--script-stdin")
+		if in.Shell != "" {
+			args = append(args, "--shell="+in.Shell)
+		}
 		stdin = in.Script
 	} else {
+		if in.Shell != "" {
+			return nil, "", fmt.Errorf("shell only applies to a script payload")
+		}
 		args = append(args, "--", in.Command)
 	}
 	return args, stdin, nil
