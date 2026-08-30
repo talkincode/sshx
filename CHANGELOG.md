@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-30
+
+### Fixed
+
+- `sshx login` requested a PTY with only `ECHO`/`ECHOCTL` set, so remote zsh
+  (and plugins such as zsh-autosuggestions) could mis-measure UTF-8 prompt
+  width and reprint each typed character. Login now sends OpenSSH-like cooked
+  UTF-8 tty modes and forwards `LANG`/`LC_*`/`COLORTERM` when the server
+  allows it.
+
 ## [0.12.0] - 2026-08-28
 
 ### Changed

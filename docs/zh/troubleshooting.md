@@ -96,6 +96,31 @@ sshx -h=prod-web --dry-run --json "sudo rm -rf /"
 
 如果特权或破坏性命令确实是预期操作，先审阅、记录原因，再只对这一次使用 `--force`。
 
+## Login 后输入一个字母出现好几个
+
+症状：`sshx login` 之后每按一个键，屏幕上会出现多个相同字符；多出来的往往是暗色、灰色或粉色。Tab 补全或 zsh-autosuggestions 也会错乱。
+
+先升级 sshx。旧版本申请 PTY 时只设置了 echo，远端 zsh 可能把提示符宽度算错，从而把刚输入的字符又画一遍。
+
+若升级后在 Cursor / VS Code 集成终端里仍复现，多半是终端的 **local echo**（预显示）。它会给 `vim`/`tmux` 自动关掉，但不会给 `sshx` 关，于是和 zsh-autosuggestions 叠在一起：
+
+```json
+{
+  "terminal.integrated.localEchoExcludePrograms": [
+    "vim",
+    "vi",
+    "nano",
+    "tmux",
+    "ssh",
+    "sshx"
+  ]
+}
+```
+
+彻底关掉该功能：`"terminal.integrated.localEchoEnabled": false`。
+
+在**同一个**终端里对比 `ssh`：如果 OpenSSH 也花屏，问题在终端模拟器，不在 sshx。
+
 ## 脚本卡住
 
 设置 timeout：
