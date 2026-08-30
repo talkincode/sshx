@@ -28,24 +28,10 @@ func (c *SSHClient) loginSession() error {
 
 	fd := int(os.Stdin.Fd())
 	width, height := terminalSize(fd)
-	termName := os.Getenv("TERM")
-	if termName == "" {
-		termName = "xterm-256color"
-	}
-
-	echo := uint32(1)
-	if c.config.LoginUseSudo {
-		echo = 0
-	}
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          echo,
-		ssh.ECHOCTL:       0,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-	if ptyErr := session.RequestPty(termName, height, width, modes); ptyErr != nil {
+	if ptyErr := session.RequestPty(loginTermName(), height, width, loginPtyModes(c.config.LoginUseSudo)); ptyErr != nil {
 		return fmt.Errorf("failed to request login PTY: %w", ptyErr)
 	}
+	forwardLoginEnv(session)
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
@@ -84,6 +70,12 @@ func (c *SSHClient) loginSession() error {
 	waitErr := session.Wait()
 	close(done)
 	return waitErr
+}
+
+func forwardLoginEnv(session *ssh.Session) {
+	for _, kv := range loginEnvVars() {
+		_ = session.Setenv(kv[0], kv[1]) //nolint:errcheck // sshd may reject env; the session must still start
+	}
 }
 
 func terminalSize(fd int) (width, height int) {

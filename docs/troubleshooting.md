@@ -98,6 +98,38 @@ sshx -h=prod-web --dry-run --json "sudo rm -rf /"
 
 If a privileged or destructive command is genuinely intended, review it, record the reason, and use `--force` only for that invocation.
 
+## Login Types Extra Characters
+
+Symptoms: after `sshx login`, each keystroke appears more than once. Extra
+copies are often dim, gray, or pink. Tab completion or zsh-autosuggestions
+look garbled.
+
+Update sshx first. Older builds sent a sparse PTY mode list (echo only), which
+can make remote zsh reprint typed characters.
+
+If it still happens in the Cursor or VS Code integrated terminal, that
+emulator's **local echo** (type-ahead) draws predicted keystrokes in a dim
+color. It turns itself off for `vim`/`tmux`, but not for `sshx`, and it
+fights zsh-autosuggestions:
+
+```json
+{
+  "terminal.integrated.localEchoExcludePrograms": [
+    "vim",
+    "vi",
+    "nano",
+    "tmux",
+    "ssh",
+    "sshx"
+  ]
+}
+```
+
+To disable the feature entirely: `"terminal.integrated.localEchoEnabled": false`.
+
+Compare with `ssh` in the **same** terminal. If OpenSSH glitches too, this is
+the emulator, not sshx.
+
 ## Script Hangs
 
 Set a timeout:
