@@ -140,6 +140,26 @@ verify_checksum() {
     fi
 
     print_success "Checksum verified"
+
+    if command -v cosign >/dev/null 2>&1; then
+        local bundle="${filename}.cosign.bundle"
+        local bundle_url="https://github.com/${REPO}/releases/download/${version}/${bundle}"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL -o "$bundle" "$bundle_url" || true
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q -O "$bundle" "$bundle_url" || true
+        fi
+        if [ -f "$bundle" ]; then
+            cosign verify-blob \
+                --bundle "$bundle" \
+                --certificate-identity-regexp 'https://github.com/talkincode/sshx/.*' \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                "$filename"
+            print_success "cosign signature verified"
+        else
+            print_warning "cosign bundle not found; skipping signature verification"
+        fi
+    fi
 }
 
 install_agent_skill() {

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -102,6 +104,31 @@ jobs:
           cd dist
           sha256sum -- * > checksums.txt
           cat checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Sign artifacts and generate SBOMs
+        run: |
+          set -euo pipefail
+          cd dist
+          for artifact in sshx-*.tar.gz sshx-*.zip; do
+            [ -f "$artifact" ] || continue
+            syft "$artifact" -o spdx-json="${artifact}.spdx.json"
+            cosign sign-blob --yes \
+              --bundle "${artifact}.cosign.bundle" \
+              "$artifact"
+          done
+          sha256sum -- * > checksums.txt
+          cat checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/sshx-*
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

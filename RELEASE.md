@@ -66,11 +66,16 @@ After pushing the tag, GitHub Actions will automatically:
 
 3. ✅ Generate SHA256 checksums file (`checksums.txt`)
 
-4. ✅ Automatically create GitHub Release
+4. ✅ Sign each archive with cosign keyless (GitHub OIDC) and attach a
+   `.cosign.bundle` plus an SPDX SBOM (`.spdx.json`)
 
-5. ✅ Upload all binaries to the Release
+5. ✅ Publish GitHub build provenance (`actions/attest-build-provenance`)
 
-6. ✅ Publish/update the Homebrew tap formula (if `HOMEBREW_TAP_TOKEN` is configured; see below)
+6. ✅ Automatically create GitHub Release
+
+7. ✅ Upload all binaries, signatures, SBOMs, and checksums to the Release
+
+8. ✅ Publish/update the Homebrew tap formula (if `HOMEBREW_TAP_TOKEN` is configured; see below). The tap still consumes only the platform archives + `checksums.txt`.
 
 ### 5. Verify Release
 
@@ -78,6 +83,21 @@ Visit the GitHub Releases page to verify:
 
 ```
 https://github.com/talkincode/sshx/releases
+```
+
+Verify checksums, then (when `cosign` is installed) the keyless signature:
+
+```bash
+sha256sum -c checksums.txt
+cosign verify-blob \
+  --bundle sshx-linux-amd64.tar.gz.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/talkincode/sshx/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  sshx-linux-amd64.tar.gz
+```
+
+`install.sh` runs the checksum check always and the cosign check when `cosign`
+is on `PATH`. Homebrew installs are unchanged.
 ```
 
 Check:

@@ -12,6 +12,78 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCLIHostAddJSONOmitsDefaultSudoKey(t *testing.T) {
+	home := t.TempDir()
+	added := runSSHX(t, home, []string{
+		"--host-add", "--host-name=lab", "--host=127.0.0.1", "-u=probe", "--json", "--no-audit",
+	}, nil)
+	require.Equal(t, 0, added.exitCode, added.stderr)
+	assert.NotContains(t, added.stdout, "added successfully")
+	var addDoc struct {
+		SchemaVersion string `json:"schema_version"`
+		Success       bool   `json:"success"`
+		Action        string `json:"action"`
+		Host          struct {
+			Name            string `json:"name"`
+			SudoPasswordKey string `json:"sudo_password_key"`
+		} `json:"host"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(added.stdout), &addDoc))
+	assert.Equal(t, "sshx.hosts.v1", addDoc.SchemaVersion)
+	assert.True(t, addDoc.Success)
+	assert.Equal(t, "add", addDoc.Action)
+	assert.Empty(t, addDoc.Host.SudoPasswordKey)
+
+	listed := runSSHX(t, home, []string{"--host-list", "--json", "--no-audit"}, nil)
+	require.Equal(t, 0, listed.exitCode, listed.stderr)
+	assert.NotContains(t, listed.stdout, `"sudo_password_key": "master"`)
+}
+
+func TestCLIAuditQueryByRunID(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	auditDir := filepath.Join(home, "audit")
+	ran := runSSHX(t, home, []string{
+		"run", "--address=" + server.host, "-p=" + server.port, "-u=operator",
+		"--no-key", "--accept-unknown-host", "--json", "--audit-output=" + auditDir,
+		"--", "probe",
+	}, map[string]string{"SSH_PASSWORD": operatorPassword, "SSHX_NO_AUDIT": "false"})
+	require.Equal(t, 0, ran.exitCode, "stderr=%s stdout=%s", ran.stderr, ran.stdout)
+	var runDoc struct {
+		RunID   string `json:"run_id"`
+		Success bool   `json:"success"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(ran.stdout), &runDoc))
+	require.NotEmpty(t, runDoc.RunID)
+
+	queried := runSSHX(t, home, []string{
+		"audit", "query", "--run-id=" + runDoc.RunID, "--json", "--audit-output=" + auditDir,
+	}, nil)
+	require.Equal(t, 0, queried.exitCode, queried.stderr)
+	var queryDoc struct {
+		Success bool             `json:"success"`
+		Count   int              `json:"count"`
+		Events  []map[string]any `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(queried.stdout), &queryDoc))
+	assert.True(t, queryDoc.Success)
+	require.GreaterOrEqual(t, queryDoc.Count, 1)
+	assert.Equal(t, runDoc.RunID, queryDoc.Events[0]["run_id"])
+
+	empty := runSSHX(t, home, []string{
+		"audit", "query", "--run-id=missing-run", "--json", "--audit-output=" + auditDir,
+	}, nil)
+	require.Equal(t, 0, empty.exitCode, empty.stderr)
+	var emptyDoc struct {
+		Success bool             `json:"success"`
+		Count   int              `json:"count"`
+		Events  []map[string]any `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(empty.stdout), &emptyDoc))
+	assert.True(t, emptyDoc.Success)
+	assert.Equal(t, 0, emptyDoc.Count)
+}
+
 func TestCLIHostImportIsUsableAndFailedSelectionIsAllOrNothing(t *testing.T) {
 	server := startSSHServer(t, serverOptions{})
 	home := t.TempDir()

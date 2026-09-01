@@ -104,7 +104,9 @@ atomic change → structured result) without becoming a workflow engine.
 stdio MCP server (`sshx mcp`) is a thin adapter over the same contract: tools
 map 1:1 to CLI verbs, results are the CLI's versioned JSON, every call is a
 one-shot child invocation audited with `entry=mcp`, and password management is
-never exposed as a tool.
+never exposed as a tool. The frozen v1 schemas, exit codes, `error_kind`
+values, and compatibility policy are documented in
+[docs/contract.md](docs/contract.md).
 
 **Convergence test:** every new sshx feature must remove an Agent judgment, not
 add a command the Agent has to learn. Absorb remote tax (host, credential,

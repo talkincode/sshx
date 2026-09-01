@@ -47,6 +47,16 @@ and retry guidance keep exactly the semantics documented for the CLI. A
 non-zero child exit marks the MCP result as a tool error while preserving the
 structured payload.
 
+When the MCP client supplies a `progressToken` on `sshx_run`, the server runs
+the child with `--jsonl` and forwards each `target_finished` event as an MCP
+`notifications/progress` notification. Progress `total` is the selected target
+count. The final tool document stays the CLI result: a single-target call still
+returns `sshx.result.v1`; multi-target calls still return the JSONL stream.
+
+`--pty` is permanently out of scope for MCP. A PTY merges stderr into stdout
+and is incompatible with `--json`. Agents should keep using `sshx_run` /
+`sshx_sql` / `sshx_apply` rather than an interactive terminal.
+
 ## Security Model
 
 - **Same gates, same evidence.** Safety checks, host-key verification, keyring

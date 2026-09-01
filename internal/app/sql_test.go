@@ -178,7 +178,7 @@ func TestValidateSQLConfig(t *testing.T) {
 		{"missing host", []string{"sshx", "sql", "--db=app", "SELECT 1"}, "host is required"},
 		{"missing db", []string{"sshx", "sql", "-h=db1", "SELECT 1"}, "--db="},
 		{"missing statement", []string{"sshx", "sql", "-h=db1", "--db=app"}, "SQL statement is required"},
-		{"bad engine", []string{"sshx", "sql", "-h=db1", "--db=app", "--engine=mysql", "SELECT 1"}, "unsupported --engine"},
+		{"bad engine", []string{"sshx", "sql", "-h=db1", "--db=app", "--engine=oracle", "SELECT 1"}, "unsupported --engine"},
 		{"sqlite missing path", []string{"sshx", "sql", "-h=db1", "--engine=sqlite", "SELECT 1"}, "absolute-path"},
 		{"sqlite postgres flags", []string{"sshx", "sql", "-h=db1", "--engine=sqlite", "--db-file=/tmp/app.db", "--db-user=app", "SELECT 1"}, "does not use"},
 		{"db-file on postgres", []string{"sshx", "sql", "-h=db1", "--db=app", "--db-file=/tmp/app.db", "SELECT 1"}, "--db-file"},

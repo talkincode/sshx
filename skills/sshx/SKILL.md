@@ -24,8 +24,8 @@ daemon, tunneling, or port forwarding.
 - Replace one remote regular file with `sshx apply` (hash precondition, backup, atomic write).
 - Manage frequently used hosts by short name (`~/.sshx/settings.json`).
 - Store SSH or sudo passwords in the OS keyring, or in an explicit write-only local vault on headless hosts.
-- Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized)
-  or a remote SQLite file, with classification, backups, and a full audit trail.
+- Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized),
+  MySQL/MariaDB, or a remote SQLite file, with classification, backups, and a full audit trail.
 - Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
 
 ## Inspect before repeating discovery commands

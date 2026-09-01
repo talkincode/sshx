@@ -124,9 +124,16 @@ func Run(args []string) (err error) {
 		return HandleLogin(config, audit)
 	}
 
+	if config.Mode == "audit" {
+		return HandleAudit(config)
+	}
+
 	// Handle password management mode
 	if config.Mode == "password" {
 		if pwdErr := HandlePasswordManagement(config); pwdErr != nil {
+			if errors.Is(pwdErr, ErrReported) {
+				return pwdErr
+			}
 			return fmt.Errorf("password management failed: %w", pwdErr)
 		}
 		return nil
@@ -135,6 +142,9 @@ func Run(args []string) (err error) {
 	// Handle host management mode
 	if config.Mode == "host" {
 		if hostErr := HandleHostManagement(config); hostErr != nil {
+			if errors.Is(hostErr, ErrReported) {
+				return hostErr
+			}
 			return fmt.Errorf("host management failed: %w", hostErr)
 		}
 		return nil

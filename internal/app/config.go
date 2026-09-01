@@ -54,6 +54,19 @@ func applyBindFlag(config *sshclient.Config, arg string) bool {
 	return true
 }
 
+// applySudoKeyFlag records -pk/--password-key/--sudo-password-key, including
+// an explicit empty value that must not be confused with the runtime default.
+func applySudoKeyFlag(config *sshclient.Config, arg string) bool {
+	switch {
+	case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="), strings.HasPrefix(arg, "--sudo-password-key="):
+		config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		config.SudoKeySet = true
+		return true
+	default:
+		return false
+	}
+}
+
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
@@ -131,6 +144,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "apply":
 			parseApplyArgs(config, args[2:])
 			return config
+		case "audit":
+			parseAuditArgs(config, args[2:])
+			return config
 		case "login":
 			parseLoginArgs(config, args[2:])
 			return config
@@ -155,8 +171,7 @@ func ParseArgs(args []string) *sshclient.Config {
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
-		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
-			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case applySudoKeyFlag(config, arg):
 		case arg == "--no-key", arg == "--password-only":
 			config.UseKeyAuth = false
 			config.KeyPath = ""
@@ -452,8 +467,7 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
-		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="), strings.HasPrefix(arg, "--sudo-password-key="):
-			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case applySudoKeyFlag(config, arg):
 		case strings.HasPrefix(arg, "--ssh-password-key="):
 			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-key", arg == "--password-only":
@@ -574,8 +588,7 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
-		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
-			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case applySudoKeyFlag(config, arg):
 		case strings.HasPrefix(arg, "--ssh-password-key="):
 			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-key", arg == "--password-only":
@@ -698,8 +711,7 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
-		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
-			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case applySudoKeyFlag(config, arg):
 		case strings.HasPrefix(arg, "--ssh-password-key="):
 			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-key", arg == "--password-only":
@@ -781,8 +793,7 @@ func parseInspectArgs(config *sshclient.Config, args []string) {
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
-		case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="):
-			config.SudoKey = strings.SplitN(arg, "=", 2)[1]
+		case applySudoKeyFlag(config, arg):
 		case arg == "--no-key", arg == "--password-only":
 			config.UseKeyAuth = false
 			config.KeyPath = ""
@@ -833,6 +844,46 @@ func parseInspectArgs(config *sshclient.Config, args []string) {
 			config.ArgumentError = fmt.Sprintf("unexpected inspection argument %q", arg)
 		default:
 			config.ArgumentError = fmt.Sprintf("unknown inspection option %q", arg)
+		}
+	}
+}
+
+func parseAuditArgs(config *sshclient.Config, args []string) {
+	config.Mode = "audit"
+	config.AuditEnabled = false
+	if len(args) == 0 {
+		config.ArgumentError = "audit action is required: query or export"
+		return
+	}
+	config.AuditAction = args[0]
+	for _, arg := range args[1:] {
+		switch {
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--bypass-only":
+			config.AuditBypassOnly = true
+		case strings.HasPrefix(arg, "--since="):
+			config.AuditSince = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--until="):
+			config.AuditUntil = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--target="):
+			config.AuditFilterHost = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--action="):
+			config.AuditFilterAct = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--run-id="):
+			config.AuditRunID = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--error-kind="):
+			config.AuditErrorKind = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--to="):
+			config.AuditExportPath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case !strings.HasPrefix(arg, "-"):
+			config.ArgumentError = fmt.Sprintf("unexpected audit argument %q", arg)
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown audit option %q", arg)
 		}
 	}
 }

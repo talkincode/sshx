@@ -107,8 +107,9 @@ func TestClassifyForEngine(t *testing.T) {
 	cls, err := ClassifyFor("postgres", "SHOW server_version")
 	require.NoError(t, err)
 	assert.Equal(t, "SHOW", cls.Verb)
-	_, err = ClassifyFor("mysql", "SELECT 1")
-	require.Error(t, err)
+	cls, err = ClassifyFor("mysql", "SELECT 1")
+	require.NoError(t, err)
+	assert.Equal(t, ClassRead, cls.Class)
 }
 
 func TestValidateSQLitePath(t *testing.T) {
@@ -223,6 +224,7 @@ func TestNormalizeEngine(t *testing.T) {
 	assert.Equal(t, EnginePostgres, NormalizeEngine(""))
 	assert.Equal(t, EnginePostgres, NormalizeEngine("PostgreSQL"))
 	assert.Equal(t, EngineSQLite, NormalizeEngine("SQLite3"))
+	assert.Equal(t, EngineMySQL, NormalizeEngine("MariaDB"))
 	assert.Equal(t, "mysql", NormalizeEngine("MySQL"))
 }
 

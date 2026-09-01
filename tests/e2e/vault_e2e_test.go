@@ -42,9 +42,29 @@ func TestLocalVaultWriteOnlySetCheckAndSudoInjection(t *testing.T) {
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
 
-	check := runSSHX(t, home, []string{"--password-check=" + key, "--no-audit"}, env)
+	missing := runSSHX(t, home, []string{"--password-check=missing-key", "--json", "--no-audit"}, env)
+	assert.NotEqual(t, 0, missing.exitCode)
+	var missingDoc struct {
+		Success bool   `json:"success"`
+		Exists  *bool  `json:"exists"`
+		Action  string `json:"action"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(missing.stdout), &missingDoc))
+	assert.False(t, missingDoc.Success)
+	require.NotNil(t, missingDoc.Exists)
+	assert.False(t, *missingDoc.Exists)
+
+	check := runSSHX(t, home, []string{"--password-check=" + key, "--json", "--no-audit"}, env)
 	require.Equal(t, 0, check.exitCode, check.stderr)
 	assert.NotContains(t, check.stdout, operatorPassword)
+	var checkDoc struct {
+		Success bool  `json:"success"`
+		Exists  *bool `json:"exists"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(check.stdout), &checkDoc))
+	assert.True(t, checkDoc.Success)
+	require.NotNil(t, checkDoc.Exists)
+	assert.True(t, *checkDoc.Exists)
 
 	get := runSSHX(t, home, []string{"--password-get=" + key, "--no-audit"}, env)
 	assert.NotEqual(t, 0, get.exitCode)

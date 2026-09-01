@@ -8,6 +8,8 @@
   - [Agent and Script Mode](agent-scripting.md)
   - [Inspection Capabilities and Local Plugins](inspection-plugins.md)
   - [MCP Server (stdio)](mcp.md)
+  - [Audit Query and Export](audit.md)
+  - [Contract Freeze Policy](contract.md)
   - [Usage Scenarios](usage-scenarios.md)
   - [Security Guidelines](security-guidelines.md)
   - [Troubleshooting](troubleshooting.md)

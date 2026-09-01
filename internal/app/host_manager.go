@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -17,24 +18,45 @@ const hostTestDialTimeout = 10 * time.Second
 
 // HandleHostManagement handles host management commands
 func HandleHostManagement(config *sshclient.Config) error {
+	var err error
 	switch config.HostAction {
 	case "add":
-		return handleHostAdd(config)
+		err = handleHostAdd(config)
 	case "import":
-		return handleHostImport(config)
+		err = handleHostImport(config)
 	case "update":
-		return handleHostUpdate(config)
+		err = handleHostUpdate(config)
 	case "list":
-		return handleHostList(config)
+		err = handleHostList(config)
 	case "test":
-		return handleHostTest(config)
+		err = handleHostTest(config)
 	case "test-all":
-		return handleHostTestAll(config)
+		err = handleHostTestAll(config)
 	case "remove":
-		return handleHostRemove(config)
+		err = handleHostRemove(config)
 	default:
-		return fmt.Errorf("unknown host action: %s", config.HostAction)
+		err = fmt.Errorf("unknown host action: %s", config.HostAction)
 	}
+	if err != nil && config.JSONOutput && !errors.Is(err, ErrReported) {
+		kind := classifyError(err)
+		if kind == "error" {
+			kind = "config"
+		}
+		doc := hostActionJSON{
+			Success:   false,
+			Action:    config.HostAction,
+			ErrorKind: kind,
+			Error:     redactError(err),
+		}
+		if config.HostName != "" {
+			doc.Host = &hostListJSONEntry{Name: config.HostName}
+		}
+		if emitErr := emitHostActionJSON(doc); emitErr != nil {
+			return emitErr
+		}
+		return ErrReported
+	}
+	return err
 }
 
 // handleHostAdd adds a new host to settings
@@ -50,18 +72,20 @@ func handleHostAdd(config *sshclient.Config) error {
 	// If host configuration is provided via command line
 	if config.HostName != "" {
 		host = HostConfig{
-			Name:            config.HostName,
-			Description:     config.HostDescription,
-			Host:            config.Host,
-			Port:            config.Port,
-			User:            config.User,
-			Key:             config.KeyPath,
-			SudoPasswordKey: config.SudoKey,
-			SSHPasswordKey:  config.SSHPasswordKey,
-			Groups:          append([]string(nil), config.RunGroups...),
-			Tags:            cloneTags(config.RunTags),
-			Type:            config.HostType,
-			Bind:            config.Bind,
+			Name:           config.HostName,
+			Description:    config.HostDescription,
+			Host:           config.Host,
+			Port:           config.Port,
+			User:           config.User,
+			Key:            config.KeyPath,
+			SSHPasswordKey: config.SSHPasswordKey,
+			Groups:         append([]string(nil), config.RunGroups...),
+			Tags:           cloneTags(config.RunTags),
+			Type:           config.HostType,
+			Bind:           config.Bind,
+		}
+		if config.SudoKeySet {
+			host.SudoPasswordKey = config.SudoKey
 		}
 	} else {
 		// Interactive mode
@@ -154,6 +178,13 @@ func handleHostAdd(config *sshclient.Config) error {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
+	if config.JSONOutput {
+		return emitHostActionJSON(hostActionJSON{
+			Success: true,
+			Action:  "add",
+			Host:    hostJSONEntry(host),
+		})
+	}
 	logger.GetLogger().Success("Host '%s' added successfully", host.Name)
 	return nil
 }
@@ -354,7 +385,7 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.User = sshclient.DefaultSSHUser
 	}
 
-	if config.SudoKey != "" && config.SudoKey != sshclient.DefaultSudoKey {
+	if config.SudoKeySet {
 		host.SudoPasswordKey = config.SudoKey
 	} else if existingHost.EffectiveSudoPasswordKey() != "" {
 		host.SudoPasswordKey = existingHost.EffectiveSudoPasswordKey()
@@ -405,6 +436,13 @@ func handleHostUpdate(config *sshclient.Config) error {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
+	if config.JSONOutput {
+		return emitHostActionJSON(hostActionJSON{
+			Success: true,
+			Action:  "update",
+			Host:    hostJSONEntry(host),
+		})
+	}
 	logger.GetLogger().Success("Host '%s' updated successfully", host.Name)
 	return nil
 }
@@ -493,23 +531,137 @@ type hostListJSONEntry struct {
 	Bind            string            `json:"bind,omitempty"`
 }
 
+func hostJSONEntry(host HostConfig) *hostListJSONEntry {
+	entry := hostListJSONEntry{
+		Name:            host.Name,
+		Host:            host.Host,
+		Port:            host.Port,
+		User:            host.User,
+		Description:     host.Description,
+		KeyPath:         host.Key,
+		SSHPasswordKey:  host.EffectiveSSHPasswordKey(),
+		SudoPasswordKey: host.EffectiveSudoPasswordKey(),
+		Groups:          host.Groups,
+		Tags:            host.Tags,
+		Type:            host.Type,
+		Bind:            host.Bind,
+	}
+	return &entry
+}
+
+type hostActionJSON struct {
+	SchemaVersion     string              `json:"schema_version"`
+	Success           bool                `json:"success"`
+	Action            string              `json:"action"`
+	Host              *hostListJSONEntry  `json:"host,omitempty"`
+	ConnectionSuccess bool                `json:"connection_success,omitempty"`
+	CommandSuccess    bool                `json:"command_success,omitempty"`
+	AuthMethod        string              `json:"auth_method,omitempty"`
+	Output            string              `json:"output,omitempty"`
+	Count             int                 `json:"count,omitempty"`
+	Succeeded         int                 `json:"succeeded,omitempty"`
+	Results           []hostTestJSONEntry `json:"results,omitempty"`
+	ErrorKind         string              `json:"error_kind,omitempty"`
+	Error             string              `json:"error,omitempty"`
+}
+
+type hostTestJSONEntry struct {
+	Name              string `json:"name"`
+	Host              string `json:"host"`
+	Success           bool   `json:"success"`
+	ConnectionSuccess bool   `json:"connection_success"`
+	CommandSuccess    bool   `json:"command_success"`
+	AuthMethod        string `json:"auth_method,omitempty"`
+	Output            string `json:"output,omitempty"`
+	ErrorKind         string `json:"error_kind,omitempty"`
+	Error             string `json:"error,omitempty"`
+}
+
+func emitHostActionJSON(doc hostActionJSON) error {
+	doc.SchemaVersion = "sshx.hosts.v1"
+	if err := encodeJSON(doc); err != nil {
+		return fmt.Errorf("encode host result: %w", err)
+	}
+	return nil
+}
+
+func hostTestJSONFromResult(result hostTestResult) hostTestJSONEntry {
+	entry := hostTestJSONEntry{
+		Name:              result.Host.Name,
+		Host:              result.Host.Host,
+		Success:           result.Success(),
+		ConnectionSuccess: result.ConnectionSuccess,
+		CommandSuccess:    result.CommandSuccess,
+		AuthMethod:        string(result.AuthMethod),
+		Output:            strings.TrimSpace(result.CommandOutput),
+	}
+	switch {
+	case result.ConnectionError != nil:
+		entry.ErrorKind = classifyError(result.ConnectionError)
+		entry.Error = redactError(result.ConnectionError)
+	case result.CommandError != nil:
+		entry.ErrorKind = classifyError(result.CommandError)
+		entry.Error = redactError(result.CommandError)
+	}
+	return entry
+}
+
+func emitHostTestJSON(action string, result hostTestResult) error {
+	entry := hostTestJSONFromResult(result)
+	doc := hostActionJSON{
+		Success:           entry.Success,
+		Action:            action,
+		Host:              hostJSONEntry(result.Host),
+		ConnectionSuccess: entry.ConnectionSuccess,
+		CommandSuccess:    entry.CommandSuccess,
+		AuthMethod:        entry.AuthMethod,
+		Output:            entry.Output,
+		ErrorKind:         entry.ErrorKind,
+		Error:             entry.Error,
+	}
+	if emitErr := emitHostActionJSON(doc); emitErr != nil {
+		return emitErr
+	}
+	if !entry.Success {
+		return ErrReported
+	}
+	return nil
+}
+
+func emitHostTestAllJSON(results []hostTestResult) error {
+	entries := make([]hostTestJSONEntry, 0, len(results))
+	succeeded := 0
+	for _, result := range results {
+		entry := hostTestJSONFromResult(result)
+		if entry.Success {
+			succeeded++
+		}
+		entries = append(entries, entry)
+	}
+	doc := hostActionJSON{
+		Success:   succeeded == len(results),
+		Action:    "test-all",
+		Count:     len(results),
+		Succeeded: succeeded,
+		Results:   entries,
+	}
+	if succeeded != len(results) {
+		doc.ErrorKind = "connect"
+		doc.Error = fmt.Sprintf("host test failed for %d host(s)", len(results)-succeeded)
+	}
+	if emitErr := emitHostActionJSON(doc); emitErr != nil {
+		return emitErr
+	}
+	if !doc.Success {
+		return ErrReported
+	}
+	return nil
+}
+
 func printHostListJSON(hosts []HostConfig) error {
 	entries := make([]hostListJSONEntry, 0, len(hosts))
 	for _, host := range hosts {
-		entries = append(entries, hostListJSONEntry{
-			Name:            host.Name,
-			Host:            host.Host,
-			Port:            host.Port,
-			User:            host.User,
-			Description:     host.Description,
-			KeyPath:         host.Key,
-			SSHPasswordKey:  host.EffectiveSSHPasswordKey(),
-			SudoPasswordKey: host.EffectiveSudoPasswordKey(),
-			Groups:          host.Groups,
-			Tags:            host.Tags,
-			Type:            host.Type,
-			Bind:            host.Bind,
-		})
+		entries = append(entries, *hostJSONEntry(host))
 	}
 	doc := struct {
 		SchemaVersion string              `json:"schema_version"`
@@ -542,9 +694,14 @@ func handleHostTest(config *sshclient.Config) error {
 		return fmt.Errorf("host not found: %w", err)
 	}
 
-	logger.GetLogger().Info("Testing connection to '%s' (%s)...", hostConfig.Name, hostConfig.Host)
+	if !config.JSONOutput {
+		logger.GetLogger().Info("Testing connection to '%s' (%s)...", hostConfig.Name, hostConfig.Host)
+	}
 
 	result := runHostDiagnostics(hostConfig, settings, config)
+	if config.JSONOutput {
+		return emitHostTestJSON("test", result)
+	}
 	if !result.ConnectionSuccess {
 		if result.ConnectionError != nil {
 			logger.GetLogger().Error("Connection failed: %v", result.ConnectionError)
@@ -589,6 +746,13 @@ func handleHostRemove(config *sshclient.Config) error {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
+	if config.JSONOutput {
+		return emitHostActionJSON(hostActionJSON{
+			Success: true,
+			Action:  "remove",
+			Host:    &hostListJSONEntry{Name: config.HostName},
+		})
+	}
 	logger.GetLogger().Success("Host '%s' removed successfully", config.HostName)
 	return nil
 }
@@ -602,17 +766,34 @@ func handleHostTestAll(config *sshclient.Config) error {
 
 	hosts := ListHosts(settings)
 	if len(hosts) == 0 {
+		if config.JSONOutput {
+			return emitHostActionJSON(hostActionJSON{
+				Success:   true,
+				Action:    "test-all",
+				Count:     0,
+				Succeeded: 0,
+				Results:   []hostTestJSONEntry{},
+			})
+		}
 		fmt.Println("No hosts configured. Use sshx --host-add to add hosts before running --host-test-all.")
 		return nil
 	}
 
-	logger.GetLogger().Info("Testing %d host(s)...", len(hosts))
+	if !config.JSONOutput {
+		logger.GetLogger().Info("Testing %d host(s)...", len(hosts))
+	}
 	results := make([]hostTestResult, 0, len(hosts))
 	for _, host := range hosts {
 		hostCopy := host
-		logger.GetLogger().Info("→ %s (%s)", hostCopy.Name, hostCopy.Host)
+		if !config.JSONOutput {
+			logger.GetLogger().Info("→ %s (%s)", hostCopy.Name, hostCopy.Host)
+		}
 		result := runHostDiagnostics(&hostCopy, settings, config)
 		results = append(results, result)
+	}
+
+	if config.JSONOutput {
+		return emitHostTestAllJSON(results)
 	}
 
 	successCount := 0

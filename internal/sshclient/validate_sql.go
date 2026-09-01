@@ -19,6 +19,9 @@ var guardedDBClients = map[string]string{
 	"psql":    "PostgreSQL",
 	"pgcli":   "PostgreSQL",
 	"sqlite3": "SQLite",
+	"mysql":   "MySQL",
+	"mariadb": "MySQL",
+	"mycli":   "MySQL",
 }
 
 // dbClientHarmlessArgs are client arguments that cannot execute SQL. A client

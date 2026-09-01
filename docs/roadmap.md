@@ -260,5 +260,7 @@ Agent / 自动化 / 人类运维者
 | 受控 SQL 执行（PostgreSQL / SQLite） | 高 | 是 | 是，远端库 | ✅ sqlite 只读查询与带备份 UPDATE | ✅ 直连客户端阻断、ATTACH 分类拒绝、缺路径 | ✅ operator 密码角色 | ✅ UPDATE 前 CSV 可还原旧值 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
 | 受控文件 Apply | 高 | 是 | 是，远端文件 | ✅ 创建/覆盖/幂等 | ✅ 哈希不匹配、符号链接、只读端 | ✅ operator/reader | ✅ 覆盖前备份可还原旧值 | `tests/e2e/apply_e2e_test.go`、`internal/app/apply_test.go`、`internal/sshclient/apply_test.go` |
 | stdio MCP 工具面 | 高 | 是 | 可能，经子进程 | ✅ initialize/tools/list/tools/call 真实执行 | ✅ force 缺 bypass_reason 被拒、非法输入本地拒绝 | ✅ operator 密码角色 | ✅ dry-run 零连接；审计 `entry=mcp` 可追溯 | `tests/e2e/mcp_e2e_test.go`、`internal/app/mcp_test.go` |
+| 审计查询/导出 | 中 | 否 | 否 | ✅ execute → query by run_id | ✅ 空结果 exit 0 | 不适用：本地只读 | 不适用：不改写审计文件 | `tests/e2e/host_audit_e2e_test.go`、`internal/app/audit_query_test.go` |
+| 受控 SQL（MySQL） | 高 | 是 | 是，远端库 | 组件：分类/备份/阻断 | ✅ LOAD DATA / INTO OUTFILE / SET GLOBAL 阻断；run-mode mysql 客户端阻断 | ✅ 与 Postgres 相同的凭据角色 | ✅ CREATE TABLE AS 快照 + CSV | `internal/sqlsafe/mysql_test.go`、`internal/sshclient/validate_sql_test.go` |
 
 当前已达到已实现一级能力的覆盖底线。表中的剩余红项属于尚未实现的方向能力，而不是用组件测试掩盖的既有质量债。未来任何一级能力不得只以参数解析或组件测试作为完成依据；必须沿用编译后二进制边界补充 E2E，并同步更新本矩阵。

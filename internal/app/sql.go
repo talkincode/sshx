@@ -207,15 +207,27 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 }
 
 func newSQLExecutor(config *sshclient.Config, password string) sqlsafe.SQLExecutor {
-	if sqlsafe.NormalizeEngine(config.SQLEngine) == sqlsafe.EngineSQLite {
+	engine := sqlsafe.NormalizeEngine(config.SQLEngine)
+	if engine == sqlsafe.EngineSQLite {
 		return sqlsafe.SQLiteConn{Path: config.SQLDatabase}
+	}
+	passwordStdin := password != "" || config.SQLPasswordKey != "" || config.SQLCredFrom != ""
+	if engine == sqlsafe.EngineMySQL {
+		return sqlsafe.MySQLConn{
+			Database:      config.SQLDatabase,
+			User:          config.SQLUser,
+			Host:          config.SQLHost,
+			Port:          config.SQLPort,
+			PasswordStdin: passwordStdin,
+			Docker:        config.SQLDockerContainer,
+		}
 	}
 	return sqlsafe.Conn{
 		Database:      config.SQLDatabase,
 		User:          config.SQLUser,
 		Host:          config.SQLHost,
 		Port:          config.SQLPort,
-		PasswordStdin: password != "" || config.SQLPasswordKey != "" || config.SQLCredFrom != "",
+		PasswordStdin: passwordStdin,
 		Docker:        config.SQLDockerContainer,
 	}
 }
@@ -228,8 +240,9 @@ func validateSQLConfig(config *sshclient.Config) error {
 	switch config.SQLEngine {
 	case sqlsafe.EnginePostgres:
 	case sqlsafe.EngineSQLite:
+	case sqlsafe.EngineMySQL:
 	default:
-		return fmt.Errorf("unsupported --engine %q (implemented: postgres, sqlite)", config.SQLEngine)
+		return fmt.Errorf("unsupported --engine %q (implemented: postgres, sqlite, mysql)", config.SQLEngine)
 	}
 	if config.Host == "" {
 		return fmt.Errorf("host is required (use -h=<host>)")
@@ -437,7 +450,13 @@ func (r *sqlRun) explainPhase() error {
 	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineSQLite {
 		return nil
 	}
-	rows, parseErr := sqlsafe.ParseExplainRows(res.Stdout)
+	var rows int64
+	var parseErr error
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineMySQL {
+		rows, parseErr = sqlsafe.ParseMySQLExplainRows(res.Stdout)
+	} else {
+		rows, parseErr = sqlsafe.ParseExplainRows(res.Stdout)
+	}
 	if parseErr != nil {
 		return r.fail("explain_failed", fmt.Errorf("cannot parse EXPLAIN output: %w", parseErr))
 	}
@@ -453,10 +472,10 @@ func (r *sqlRun) backupPhase() error {
 	}
 	var plan sqlsafe.BackupPlan
 	var planErr error
-	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineSQLite {
-		plan, planErr = sqlsafe.DecideSQLiteBackup(r.cls, r.opts)
+	if dialect, dialectErr := sqlsafe.LookupDialect(r.config.SQLEngine); dialectErr != nil {
+		planErr = dialectErr
 	} else {
-		plan, planErr = sqlsafe.DecideBackup(r.cls, estimate, r.opts)
+		plan, planErr = dialect.DecideBackup(r.cls, estimate, r.opts)
 	}
 	if planErr != nil {
 		return r.fail("blocked", planErr)

@@ -3,7 +3,34 @@ package app
 import (
 	"strings"
 	"testing"
+
+	"github.com/talkincode/sshx/internal/execution"
 )
+
+func TestSynthesizeRunJSONResultSingleTarget(t *testing.T) {
+	events := []execution.Event{
+		{Kind: execution.EventRunStarted, RunID: "run-1", Action: &execution.ActionSpec{Command: "probe"}},
+		{
+			Kind:  execution.EventTargetFinished,
+			RunID: "run-1",
+			Result: &execution.TargetResult{
+				Target:     execution.ResolvedTarget{Alias: "lab", Address: "127.0.0.1", Port: "22", User: "probe"},
+				Action:     execution.ActionSpec{Command: "probe"},
+				Status:     execution.StatusSucceeded,
+				Phase:      execution.PhaseComplete,
+				Completion: execution.CompletionCompleted,
+				ExitCode:   0,
+			},
+		},
+	}
+	raw := synthesizeRunJSONResult(events)
+	if raw == "" {
+		t.Fatal("expected a synthesized single-target document")
+	}
+	if !strings.Contains(raw, `"schema_version":"sshx.result.v1"`) {
+		t.Fatalf("synthesized = %s", raw)
+	}
+}
 
 func TestBuildRunArgsCommand(t *testing.T) {
 	args, stdin, err := buildRunArgs(mcpRunInput{

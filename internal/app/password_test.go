@@ -40,7 +40,7 @@ func TestHandlePasswordManagement_UnknownAction(t *testing.T) {
 }
 
 func TestSetPassword_EmptyKey(t *testing.T) {
-	err := setPassword("test-service", "", "test-value")
+	err := setPassword(nil, "test-service", "", "test-value")
 	if err == nil {
 		t.Error("Expected error when key is empty")
 	}
@@ -60,7 +60,7 @@ func TestGetPassword_EmptyKey(t *testing.T) {
 }
 
 func TestDeletePassword_EmptyKey(t *testing.T) {
-	err := deletePassword("test-service", "")
+	err := deletePassword(nil, "test-service", "")
 	if err == nil {
 		t.Error("Expected error when key is empty")
 	}
@@ -70,7 +70,7 @@ func TestDeletePassword_EmptyKey(t *testing.T) {
 }
 
 func TestCheckPassword_EmptyKey(t *testing.T) {
-	err := checkPassword("test-service", "")
+	err := checkPassword(nil, "test-service", "")
 	if err == nil {
 		t.Error("Expected error when key is empty")
 	}

@@ -636,6 +636,22 @@ func TestParseArgs_DefaultSudoKey(t *testing.T) {
 	if config.SudoKey != sshclient.DefaultSudoKey {
 		t.Errorf("Expected default sudo key '%s', got %s", sshclient.DefaultSudoKey, config.SudoKey)
 	}
+	if config.SudoKeySet {
+		t.Fatal("omitted -pk must not set SudoKeySet")
+	}
+
+	hostAdd := ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "-h=127.0.0.1"})
+	if hostAdd.SudoKeySet {
+		t.Fatal("host-add without -pk must not set SudoKeySet")
+	}
+	explicit := ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "-pk=web-sudo"})
+	if !explicit.SudoKeySet || explicit.SudoKey != "web-sudo" {
+		t.Fatalf("explicit -pk: set=%t key=%q", explicit.SudoKeySet, explicit.SudoKey)
+	}
+	cleared := ParseArgs([]string{"sshx", "--host-update", "--host-name=lab", "-pk="})
+	if !cleared.SudoKeySet || cleared.SudoKey != "" {
+		t.Fatalf("empty -pk=: set=%t key=%q", cleared.SudoKeySet, cleared.SudoKey)
+	}
 }
 
 func TestParseArgs_DefaultValues(t *testing.T) {

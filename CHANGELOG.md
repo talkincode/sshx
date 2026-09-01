@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--password-check/--password-list/--password-set --json` emit `sshx.secrets.v1`.
+  A missing `--password-check` key exits non-zero (`exists: false`) instead of
+  looking like success.
+- `--host-add/--host-update/--host-remove/--host-test/--host-test-all --json`
+  emit `sshx.hosts.v1` documents so agents need not scrape logger text.
+- `sshx audit query` and `sshx audit export`: read-only filters over local
+  audit JSONL (`--since/--until/--target/--action/--run-id/--error-kind/--bypass-only`).
+- `sshx_run` over MCP forwards JSONL `target_finished` events as progress
+  notifications when the client supplies a `progressToken`. `--pty` is
+  documented as out of MCP scope.
+- Guarded MySQL/MariaDB engine (`sshx sql --engine=mysql`) behind a `Dialect`
+  interface shared with PostgreSQL and SQLite. Run-mode blocks `mysql` /
+  `mariadb` / `mycli` and redirects to `sshx sql`.
+- Release artifacts can be signed with cosign (keyless OIDC), accompanied by
+  SPDX SBOMs and GitHub build provenance attestations.
+- Contract freeze policy (`docs/contract.md`) for v1 schemas.
+
+### Changed
+
+- `--host-add` without `-pk` no longer persists `sudo_password_key=master`.
+  The runtime sudo fallback remains `master`; inventory only records keys the
+  operator set.
+- `internal/sshclient/client.go` is split along connect/hostkey/exec/SFTP seams
+  with no behavior change.
+
+### Fixed
+
+- Piped `--password-set` no longer writes the password prompt onto stdout.
+
 ## [0.12.1] - 2026-08-30
 
 ### Fixed

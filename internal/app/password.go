@@ -16,30 +16,64 @@ import (
 	"github.com/talkincode/sshx/pkg/logger"
 )
 
+const secretsSchemaVersion = "sshx.secrets.v1" //nolint:gosec // schema id, not a credential
+
+// errPasswordNotFound is returned by --password-check when the named key is
+// absent. Callers that branch on exit code must treat this as failure.
+var errPasswordNotFound = errors.New("password not found")
+
+type secretsJSONResult struct {
+	SchemaVersion string   `json:"schema_version"`
+	Success       bool     `json:"success"`
+	Action        string   `json:"action"`
+	Key           string   `json:"key,omitempty"`
+	Exists        *bool    `json:"exists,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	ListComplete  *bool    `json:"list_complete,omitempty"`
+	Backend       string   `json:"backend,omitempty"`
+	ErrorKind     string   `json:"error_kind,omitempty"`
+	Error         string   `json:"error,omitempty"`
+}
+
 // HandlePasswordManagement handles all password management operations.
 func HandlePasswordManagement(config *sshclient.Config) error {
 	switch config.PasswordAction {
 	case "set":
-		return setPassword(sshclient.KeyringServiceName, config.PasswordKey, config.PasswordValue)
+		return setPassword(config, sshclient.KeyringServiceName, config.PasswordKey, config.PasswordValue)
 	case "get":
 		return getPassword(sshclient.KeyringServiceName, config.PasswordKey)
 	case "delete", "del", "rm":
-		return deletePassword(sshclient.KeyringServiceName, config.PasswordKey)
+		return deletePassword(config, sshclient.KeyringServiceName, config.PasswordKey)
 	case "list", "ls":
-		return listPasswords()
+		return listPasswords(config)
 	case "check", "exists":
-		return checkPassword(sshclient.KeyringServiceName, config.PasswordKey)
+		return checkPassword(config, sshclient.KeyringServiceName, config.PasswordKey)
 	default:
 		return fmt.Errorf("unknown password action: %s (use: set, get, delete, list, check)", config.PasswordAction)
 	}
 }
 
-func setPassword(serviceName, key, value string) error {
+func emitSecretsJSON(result secretsJSONResult) error {
+	result.SchemaVersion = secretsSchemaVersion
+	if result.Backend == "" {
+		result.Backend = secretBackendName()
+	}
+	if err := encodeJSON(result); err != nil {
+		return fmt.Errorf("encode secrets result: %w", err)
+	}
+	return nil
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func setPassword(config *sshclient.Config, serviceName, key, value string) error {
 	if key == "" {
 		return fmt.Errorf("password key is required")
 	}
 	if value == "" {
-		fmt.Printf("Enter password for key '%s': ", key)
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintf(os.Stderr, "Enter password for key '%s': ", key)
+		}
 		password, err := readPassword()
 		if err != nil {
 			return fmt.Errorf("failed to read password: %w", err)
@@ -52,22 +86,32 @@ func setPassword(serviceName, key, value string) error {
 	}
 
 	backend := secretBackendLabel()
+	if config != nil && config.JSONOutput {
+		return emitSecretsJSON(secretsJSONResult{
+			Success: true,
+			Action:  "set",
+			Key:     key,
+			Exists:  boolPtr(true),
+			Backend: secretBackendName(),
+		})
+	}
+
 	logger.GetLogger().Success("Password saved to %s", backend)
 	logger.GetLogger().Info("  Service: %s", serviceName)
 	logger.GetLogger().Info("  Key: %s", key)
 
-	fmt.Println("\nVerify with:")
-	fmt.Printf("  sshx --password-check=%s\n", key)
+	fmt.Fprintln(os.Stderr, "\nVerify with:")
+	fmt.Fprintf(os.Stderr, "  sshx --password-check=%s\n", key)
 	if keyringstore.CanReveal() {
 		if isWindows() {
-			fmt.Println("  Windows: Check Credential Manager -> Generic Credentials")
+			fmt.Fprintln(os.Stderr, "  Windows: Check Credential Manager -> Generic Credentials")
 		} else if isMacOS() {
-			fmt.Printf("  macOS: security find-generic-password -s %s -a %s -w\n", serviceName, key)
+			fmt.Fprintf(os.Stderr, "  macOS: security find-generic-password -s %s -a %s -w\n", serviceName, key)
 		} else {
-			fmt.Printf("  Linux: secret-tool lookup service %s username %s\n", serviceName, key)
+			fmt.Fprintf(os.Stderr, "  Linux: secret-tool lookup service %s username %s\n", serviceName, key)
 		}
 	} else {
-		fmt.Println("  Local vault is write-only; sshx injects the secret over stdin during execution.")
+		fmt.Fprintln(os.Stderr, "  Local vault is write-only; sshx injects the secret over stdin during execution.")
 	}
 
 	return nil
@@ -108,7 +152,7 @@ func getPassword(serviceName, key string) error {
 	return nil
 }
 
-func deletePassword(serviceName, key string) error {
+func deletePassword(config *sshclient.Config, serviceName, key string) error {
 	if key == "" {
 		return fmt.Errorf("password key is required")
 	}
@@ -116,6 +160,19 @@ func deletePassword(serviceName, key string) error {
 	_, err := keyringstore.Get(serviceName, key)
 	if err != nil {
 		if errors.Is(err, keyringstore.ErrNotFound) {
+			if config != nil && config.JSONOutput {
+				if emitErr := emitSecretsJSON(secretsJSONResult{
+					Success:   true,
+					Action:    "delete",
+					Key:       key,
+					Exists:    boolPtr(false),
+					ErrorKind: "not_found",
+					Error:     fmt.Sprintf("password not found for key: %s (already deleted or never existed)", key),
+				}); emitErr != nil {
+					return emitErr
+				}
+				return nil
+			}
 			logger.GetLogger().Warning("Password not found for key: %s (already deleted or never existed)", key)
 			return nil
 		}
@@ -126,6 +183,15 @@ func deletePassword(serviceName, key string) error {
 		return fmt.Errorf("failed to delete password: %w", err)
 	}
 
+	if config != nil && config.JSONOutput {
+		return emitSecretsJSON(secretsJSONResult{
+			Success: true,
+			Action:  "delete",
+			Key:     key,
+			Exists:  boolPtr(false),
+		})
+	}
+
 	logger.GetLogger().Success("Password deleted from %s", secretBackendLabel())
 	logger.GetLogger().Info("  Service: %s", serviceName)
 	logger.GetLogger().Info("  Key: %s", key)
@@ -133,36 +199,72 @@ func deletePassword(serviceName, key string) error {
 	return nil
 }
 
-func checkPassword(serviceName, key string) error {
+func checkPassword(config *sshclient.Config, serviceName, key string) error {
 	if key == "" {
 		return fmt.Errorf("password key is required")
 	}
 
 	_, err := keyringstore.Get(serviceName, key)
 	if err == nil {
+		if config != nil && config.JSONOutput {
+			return emitSecretsJSON(secretsJSONResult{
+				Success: true,
+				Action:  "check",
+				Key:     key,
+				Exists:  boolPtr(true),
+			})
+		}
 		logger.GetLogger().Success("Password exists for key: %s", key)
-		fmt.Printf("\nKey '%s' is stored in %s\n", key, secretBackendLabel())
-		fmt.Printf("Service: %s\n", serviceName)
+		fmt.Fprintf(os.Stderr, "\nKey '%s' is stored in %s\n", key, secretBackendLabel())
+		fmt.Fprintf(os.Stderr, "Service: %s\n", serviceName)
 		return nil
 	}
 
 	if errors.Is(err, keyringstore.ErrNotFound) {
+		missing := fmt.Errorf("%w: key %q is not stored", errPasswordNotFound, key)
+		if config != nil && config.JSONOutput {
+			if emitErr := emitSecretsJSON(secretsJSONResult{
+				Success:   false,
+				Action:    "check",
+				Key:       key,
+				Exists:    boolPtr(false),
+				ErrorKind: "not_found",
+				Error:     missing.Error(),
+			}); emitErr != nil {
+				return emitErr
+			}
+			return ErrReported
+		}
 		logger.GetLogger().Warning("Password not found for key: %s", key)
-		fmt.Printf("\nKey '%s' is NOT stored in %s\n", key, secretBackendLabel())
-		fmt.Printf("Use 'sshx --password-set=%s' to add it\n", key)
-		return nil
+		fmt.Fprintf(os.Stderr, "\nKey '%s' is NOT stored in %s\n", key, secretBackendLabel())
+		fmt.Fprintf(os.Stderr, "Use 'sshx --password-set=%s' to add it\n", key)
+		return missing
 	}
 
 	return fmt.Errorf("failed to check password: %w", err)
 }
 
-func listPasswords() error {
-	fmt.Println("Checking password keys in", secretBackendLabel()+"...")
-	fmt.Println("Service:", sshclient.KeyringServiceName)
-	fmt.Println()
+func listPasswords(config *sshclient.Config) error {
+	jsonMode := config != nil && config.JSONOutput
+	if !jsonMode {
+		fmt.Println("Checking password keys in", secretBackendLabel()+"...")
+		fmt.Println("Service:", sshclient.KeyringServiceName)
+		fmt.Println()
+	}
 
 	names, err := keyringstore.Accounts(sshclient.KeyringServiceName)
 	if err == nil {
+		if jsonMode {
+			if names == nil {
+				names = []string{}
+			}
+			return emitSecretsJSON(secretsJSONResult{
+				Success:      true,
+				Action:       "list",
+				Keys:         names,
+				ListComplete: boolPtr(true),
+			})
+		}
 		if len(names) == 0 {
 			fmt.Println("  (no keys stored)")
 			return nil
@@ -185,18 +287,39 @@ func listPasswords() error {
 		"password",
 	}
 
+	var present []string
+	for _, key := range commonKeys {
+		_, getErr := keyringstore.Get(sshclient.KeyringServiceName, key)
+		if getErr == nil {
+			present = append(present, key)
+		} else if !errors.Is(getErr, keyringstore.ErrNotFound) && jsonMode {
+			return fmt.Errorf("failed to list passwords: %w", getErr)
+		}
+	}
+	if jsonMode {
+		if present == nil {
+			present = []string{}
+		}
+		return emitSecretsJSON(secretsJSONResult{
+			Success:      true,
+			Action:       "list",
+			Keys:         present,
+			ListComplete: boolPtr(false),
+		})
+	}
+
 	fmt.Println("Common keys:")
 	found := false
 	for _, key := range commonKeys {
-		_, err := keyringstore.Get(sshclient.KeyringServiceName, key)
+		_, getErr := keyringstore.Get(sshclient.KeyringServiceName, key)
 		switch {
-		case err == nil:
+		case getErr == nil:
 			fmt.Printf("  ✓ %s (exists)\n", key)
 			found = true
-		case errors.Is(err, keyringstore.ErrNotFound):
+		case errors.Is(getErr, keyringstore.ErrNotFound):
 			fmt.Printf("    %s (not set)\n", key)
 		default:
-			fmt.Printf("  ? %s (error: %v)\n", key, err)
+			fmt.Printf("  ? %s (error: %v)\n", key, getErr)
 		}
 	}
 
@@ -219,6 +342,14 @@ func listPasswords() error {
 	}
 
 	return nil
+}
+
+func secretBackendName() string {
+	backend := keyringstore.Inspect().Backend
+	if backend == "" {
+		return keyringstore.BackendKeyring
+	}
+	return backend
 }
 
 func secretBackendLabel() string {

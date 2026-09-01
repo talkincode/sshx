@@ -35,6 +35,8 @@ Usage:
   sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
   sshx login <name> [--sudo]                      # Human interactive login (TTY required)
   sshx mcp                                        # Serve the execution contract over stdio (MCP)
+  sshx audit query [filters] [--json]             # Read-only audit trail query
+  sshx audit export --to=<file> [filters]         # Export matching audit events as JSONL
 
 SSH Options:
   -h, --host=HOST          Remote host address (required in compatibility mode)
@@ -145,6 +147,12 @@ Audit Trail:
   stdout/stderr. Command text is best-effort redacted for password/token-style
   arguments.
 
+  Read-only consumption:
+    sshx audit query --since=2026-09-01 --target=prod-web --json
+    sshx audit query --run-id=<id> --error-kind=blocked --bypass-only
+    sshx audit export --to=./incident.jsonl --since=2026-09-01
+  Empty query results exit 0. JSON mode emits {schema_version, success, count, events}.
+
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
   --no-safety-check     Disable safety checks completely (not recommended)
@@ -157,8 +165,8 @@ Safety Options:
     - Critical file modifications (/etc/passwd, /etc/shadow)
     - Dangerous pipe operations (curl | sh)
     - Fork bombs and other malicious patterns
-    - Direct database client execution (psql/pgcli, incl. docker exec,
-      sudo -u, sh -c, kubectl exec wrappers) — use 'sshx sql' instead
+    - Direct database client execution (psql/pgcli/sqlite3/mysql/mariadb,
+      incl. docker exec, sudo -u, sh -c, kubectl exec wrappers) — use 'sshx sql' instead
 
 SFTP Options:
   --upload=<local>      Upload file (use with --to=<remote>)
@@ -182,9 +190,12 @@ Password Management (Cross-Platform):
                                       If password omitted, will prompt
   --password-get=<key>                OS keyring: emit the value only when piped.
                                       Local vault: always refused (write-only).
-  --password-check=<key>              Check if password exists (alias: --password-exists)
+  --password-check=<key>              Check if password exists (alias: --password-exists).
+                                      Missing keys exit non-zero. --json emits
+                                      sshx.secrets.v1 with success/exists.
   --password-delete=<key>             Delete password (alias: --password-del)
-  --password-list                     List stored keys (vault) or common keys (keyring)
+  --password-list                     List stored keys (vault) or common keys (keyring).
+                                      --json emits keys[] (list_complete=false on keyring probes)
 
   Default backend: OS keyring (macOS Keychain / Linux Secret Service /
   Windows Credential Manager). Headless servers can opt into an encrypted
@@ -194,7 +205,9 @@ Password Management (Cross-Platform):
   SSHX_VAULT_KEY_FILE (0600). The vault file is $SSHX_HOME/vault.
 
 Host Management:
-  --host-add                          Add new host (interactive or with options)
+  --host-add                          Add new host (interactive or with options).
+                                      Omitting -pk does not persist sudo_password_key=master.
+                                      --json emits sshx.hosts.v1 for add/update/remove/test.
   --host-import                       Selectively import hosts from ~/.ssh/config (interactive)
   --host-import=<name1,name2>         Import only the named ssh_config hosts (non-interactive)
   --ssh-config=<path>                 ssh_config file to import from (default: ~/.ssh/config)
@@ -241,7 +254,7 @@ Guarded SQL Execution:
   sshx sql -h=<host> --db=<name> [options] -- <SQL words...>
 
   Statements run through the database client already present on the remote
-  host (psql or sqlite3). sshx embeds no database driver and opens no tunnel.
+  host (psql, sqlite3, or mysql/mariadb). sshx embeds no database driver and opens no tunnel.
   Exactly one statement per invocation. Unknown or dangerous statement heads
   (DROP DATABASE/SCHEMA, ALTER SYSTEM, COPY, DO, ATTACH, sqlite3 dot-commands,
   transaction control, multi-statement input), psql meta-commands,
@@ -253,7 +266,7 @@ Guarded SQL Execution:
   with a literal-redacted statement, its exact SHA-256 digest, classification,
   backup, and outcome.
 
-  --engine=postgres|sqlite  SQL engine (default: postgres)
+  --engine=postgres|sqlite|mysql  SQL engine (default: postgres)
   --db=NAME                 PostgreSQL database name, or SQLite path if --db-file is omitted
   --db-file=PATH            Absolute SQLite database file path (required for --engine=sqlite)
   --db-user=USER            Database role (default: remote psql default; sqlite unused)

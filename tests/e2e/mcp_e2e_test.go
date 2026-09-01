@@ -90,6 +90,47 @@ func (c *mcpClient) notify(method string, params map[string]any) {
 
 // call sends one request and blocks until its matching response arrives,
 // skipping any server-initiated notifications.
+func (c *mcpClient) callCollecting(method string, params map[string]any) (map[string]any, []map[string]any) {
+	c.t.Helper()
+	c.nextID++
+	id := c.nextID
+	require.NoError(c.t, c.stdin.Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  method,
+		"params":  params,
+	}))
+
+	var notes []map[string]any
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		require.True(c.t, time.Now().Before(deadline), "timed out waiting for %s response", method)
+		line, err := c.reader.ReadString('\n')
+		require.NoError(c.t, err, "read MCP response for %s", method)
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var message map[string]any
+		require.NoError(c.t, json.Unmarshal([]byte(line), &message), "parse MCP message: %s", line)
+		rawID, hasID := message["id"]
+		if !hasID {
+			notes = append(notes, message)
+			continue
+		}
+		gotID, ok := rawID.(float64)
+		if !ok || int(gotID) != id {
+			continue
+		}
+		if errObj, isErr := message["error"]; isErr {
+			c.t.Fatalf("MCP %s returned protocol error: %v", method, errObj)
+		}
+		result, ok := message["result"].(map[string]any)
+		require.True(c.t, ok, "MCP %s result is not an object: %s", method, line)
+		return result, notes
+	}
+}
+
 func (c *mcpClient) call(method string, params map[string]any) map[string]any {
 	c.t.Helper()
 	c.nextID++
@@ -264,6 +305,42 @@ func TestMCPServerContract(t *testing.T) {
 		assert.True(t, isError, "missing command and script must fail")
 		assert.Contains(t, text, "exactly one of command or script", "got: %s", text)
 	})
+}
+
+func TestMCPRunProgressMatchesTargetCount(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	writeSettings(t, home, map[string]any{"hosts": []map[string]any{
+		{"name": "mcp-a", "host": server.host, "port": server.port, "user": "operator"},
+		{"name": "mcp-b", "host": server.host, "port": server.port, "user": "operator"},
+	}})
+	trust := runSSHX(t, home, []string{
+		"-h=mcp-a", "--no-key", "--accept-unknown-host", "probe",
+	}, map[string]string{"SSH_PASSWORD": operatorPassword})
+	require.Equal(t, 0, trust.exitCode, trust.stderr)
+
+	client := startMCPClient(t, home, map[string]string{"SSH_PASSWORD": operatorPassword})
+	result, notes := client.callCollecting("tools/call", map[string]any{
+		"name": "sshx_run",
+		"arguments": map[string]any{
+			"targets": []any{"mcp-a", "mcp-b"},
+			"command": "probe",
+		},
+		"_meta": map[string]any{"progressToken": "e2e-progress"},
+	})
+	isError := false
+	if v, ok := result["isError"].(bool); ok {
+		isError = v
+	}
+	assert.False(t, isError, "sshx_run with progress failed: %v", result)
+	progress := 0
+	for _, note := range notes {
+		method, isString := note["method"].(string)
+		if isString && method == "notifications/progress" {
+			progress++
+		}
+	}
+	assert.Equal(t, 2, progress, "progress notifications=%d notes=%v", progress, notes)
 }
 
 func TestMCPRejectsArguments(t *testing.T) {

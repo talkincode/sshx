@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ func withAppVault(t *testing.T) {
 func TestGetPassword_VaultIsWriteOnly(t *testing.T) {
 	withAppVault(t)
 	const key = "prod-web"
-	if err := setPassword(sshclient.KeyringServiceName, key, "never-print-this-secret"); err != nil {
+	if err := setPassword(nil, sshclient.KeyringServiceName, key, "never-print-this-secret"); err != nil {
 		t.Fatalf("setPassword: %v", err)
 	}
 	err := getPassword(sshclient.KeyringServiceName, key)
@@ -39,10 +40,10 @@ func TestGetPassword_VaultIsWriteOnly(t *testing.T) {
 
 func TestCheckPassword_VaultExistsWithoutRevealing(t *testing.T) {
 	withAppVault(t)
-	if err := setPassword(sshclient.KeyringServiceName, "prod-web", "vault-secret"); err != nil {
+	if err := setPassword(nil, sshclient.KeyringServiceName, "prod-web", "vault-secret"); err != nil {
 		t.Fatalf("setPassword: %v", err)
 	}
-	if err := checkPassword(sshclient.KeyringServiceName, "prod-web"); err != nil {
+	if err := checkPassword(nil, sshclient.KeyringServiceName, "prod-web"); err != nil {
 		t.Fatalf("checkPassword: %v", err)
 	}
 }
@@ -101,6 +102,100 @@ func TestUnknownSecretBackend_DryRunFailsClosed(t *testing.T) {
 	}
 	if plan.SecretBackend != "invalid" {
 		t.Fatalf("SecretBackend = %q, want invalid", plan.SecretBackend)
+	}
+}
+
+func TestCheckPassword_MissingKeyFailsAndJSON(t *testing.T) {
+	withAppVault(t)
+	err := checkPassword(nil, sshclient.KeyringServiceName, "missing")
+	if err == nil {
+		t.Fatal("missing key must not succeed")
+	}
+	if !errors.Is(err, errPasswordNotFound) {
+		t.Fatalf("error = %v, want errPasswordNotFound", err)
+	}
+
+	cfg := ParseArgs([]string{"sshx", "--password-check=missing", "--json"})
+	var jsonErr error
+	out := string(captureStdout(t, func() {
+		jsonErr = checkPassword(cfg, sshclient.KeyringServiceName, "missing")
+	}))
+	if !errors.Is(jsonErr, ErrReported) {
+		t.Fatalf("json missing check error = %v, want ErrReported", jsonErr)
+	}
+	if strings.Contains(out, "NOT stored") || strings.Contains(out, "Password not found") {
+		t.Fatalf("json stdout leaked human text: %s", out)
+	}
+	var doc secretsJSONResult
+	if unmarshalErr := json.Unmarshal([]byte(out), &doc); unmarshalErr != nil {
+		t.Fatalf("json: %v (%s)", unmarshalErr, out)
+	}
+	if doc.SchemaVersion != secretsSchemaVersion || doc.Success || doc.Exists == nil || *doc.Exists || doc.Action != "check" {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if doc.ErrorKind != "not_found" {
+		t.Fatalf("error_kind = %q", doc.ErrorKind)
+	}
+}
+
+func TestPasswordSetListCheckJSON(t *testing.T) {
+	withAppVault(t)
+	cfg := ParseArgs([]string{"sshx", "--password-set=lab", "--json"})
+	var setErr error
+	out := string(captureStdout(t, func() {
+		setErr = setPassword(cfg, sshclient.KeyringServiceName, "lab", "vault-lab-pass")
+	}))
+	if setErr != nil {
+		t.Fatalf("set: %v", setErr)
+	}
+	if strings.Contains(out, "Enter password") || strings.Contains(out, "vault-lab-pass") {
+		t.Fatalf("set json leaked prompt or secret: %s", out)
+	}
+	var setDoc secretsJSONResult
+	if unmarshalErr := json.Unmarshal([]byte(out), &setDoc); unmarshalErr != nil {
+		t.Fatalf("set json: %v (%s)", unmarshalErr, out)
+	}
+	if !setDoc.Success || setDoc.Action != "set" || setDoc.Key != "lab" {
+		t.Fatalf("set doc = %+v", setDoc)
+	}
+
+	listCfg := ParseArgs([]string{"sshx", "--password-list", "--json"})
+	var listErr error
+	out = string(captureStdout(t, func() { listErr = listPasswords(listCfg) }))
+	if listErr != nil {
+		t.Fatalf("list: %v", listErr)
+	}
+	var listDoc secretsJSONResult
+	if unmarshalErr := json.Unmarshal([]byte(out), &listDoc); unmarshalErr != nil {
+		t.Fatalf("list json: %v (%s)", unmarshalErr, out)
+	}
+	if !listDoc.Success || listDoc.ListComplete == nil || !*listDoc.ListComplete {
+		t.Fatalf("list doc = %+v", listDoc)
+	}
+	found := false
+	for _, key := range listDoc.Keys {
+		if key == "lab" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("list keys = %v, want lab", listDoc.Keys)
+	}
+
+	checkCfg := ParseArgs([]string{"sshx", "--password-check=lab", "--json"})
+	var checkErr error
+	out = string(captureStdout(t, func() {
+		checkErr = checkPassword(checkCfg, sshclient.KeyringServiceName, "lab")
+	}))
+	if checkErr != nil {
+		t.Fatalf("check: %v", checkErr)
+	}
+	var checkDoc secretsJSONResult
+	if unmarshalErr := json.Unmarshal([]byte(out), &checkDoc); unmarshalErr != nil {
+		t.Fatalf("check json: %v (%s)", unmarshalErr, out)
+	}
+	if !checkDoc.Success || checkDoc.Exists == nil || !*checkDoc.Exists {
+		t.Fatalf("check doc = %+v", checkDoc)
 	}
 }
 

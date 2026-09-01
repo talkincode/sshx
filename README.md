@@ -906,7 +906,7 @@ sudo chmod +x /usr/local/bin/sshx
 
 ## Development
 
-The project's target state, hard non-goals, and capability coverage matrix live in the [Project Profile and Direction](docs/roadmap.md). Every new top-level capability must add a Happy Path E2E and update the matrix; high-risk, permission-sensitive, and state-changing capabilities must also meet the corresponding failure, permission-state, and recovery coverage floors.
+The project's target state, hard non-goals, and capability coverage matrix live in the [Project Profile and Direction](docs/roadmap.md). The frozen v1 CLI/JSON/`error_kind` commitment is in [Contract Freeze Policy](docs/contract.md). Every new top-level capability must add a Happy Path E2E and update the matrix; high-risk, permission-sensitive, and state-changing capabilities must also meet the corresponding failure, permission-state, and recovery coverage floors.
 
 ```bash
 # Run fast unit/component tests
@@ -936,6 +936,11 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the
 development workflow, testing requirements (including the acceptance-matrix
 rule for new features), and PR expectations, and [AGENT.md](AGENT.md) for the
 project's mission and scope boundaries.
+
+The project currently has a single primary maintainer. Issues labeled
+`good first issue` are the intended on-ramp; if the maintainer is unavailable,
+those labeled issues plus CONTRIBUTING.md and AGENT.md are the succession
+record for continuing the contract without expanding scope.
 
 ## License
 

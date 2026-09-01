@@ -41,6 +41,9 @@ func TestValidateCommand_BlocksDirectDBClients(t *testing.T) {
 		{"plain sqlite3", `sqlite3 /var/lib/app.db "DELETE FROM users"`},
 		{"sudo sqlite3", `sudo -u app sqlite3 /data/app.db "SELECT 1"`},
 		{"sh -c sqlite3", `sh -c 'sqlite3 /tmp/app.db "SELECT 1"'`},
+		{"plain mysql", `mysql -u app -e "DELETE FROM users"`},
+		{"mariadb client", `mariadb -e "SELECT 1"`},
+		{"docker exec mysql", `docker exec db mysql -u root -e "SELECT 1"`},
 	}
 	for _, tt := range blocked {
 		t.Run(tt.name, func(t *testing.T) {

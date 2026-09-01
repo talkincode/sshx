@@ -1,11 +1,134 @@
 package app
 
 import (
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/talkincode/sshx/internal/sshclient"
 )
+
+func TestHostAddOmitsDefaultSudoKey(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	cfg := ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "-u=probe", "--json"})
+	if cfg.SudoKeySet {
+		t.Fatal("omitted -pk must not set SudoKeySet")
+	}
+	var addErr error
+	out := string(captureStdout(t, func() { addErr = HandleHostManagement(cfg) }))
+	if addErr != nil {
+		t.Fatalf("host-add: %v", addErr)
+	}
+	if strings.Contains(out, "added successfully") {
+		t.Fatalf("json stdout leaked human text: %s", out)
+	}
+	var addDoc hostActionJSON
+	if unmarshalErr := json.Unmarshal([]byte(out), &addDoc); unmarshalErr != nil {
+		t.Fatalf("add json: %v (%s)", unmarshalErr, out)
+	}
+	if !addDoc.Success || addDoc.Action != "add" || addDoc.SchemaVersion != "sshx.hosts.v1" {
+		t.Fatalf("add doc = %+v", addDoc)
+	}
+	if addDoc.Host == nil || addDoc.Host.SudoPasswordKey != "" {
+		t.Fatalf("sudo_password_key should be omitted, got %+v", addDoc.Host)
+	}
+
+	listCfg := ParseArgs([]string{"sshx", "--host-list", "--json"})
+	var listErr error
+	listOut := string(captureStdout(t, func() { listErr = HandleHostManagement(listCfg) }))
+	if listErr != nil {
+		t.Fatalf("host-list: %v", listErr)
+	}
+	if strings.Contains(listOut, `"sudo_password_key": "master"`) {
+		t.Fatalf("inventory persisted default master key: %s", listOut)
+	}
+
+	explicit := ParseArgs([]string{"sshx", "--host-add", "--host-name=web", "--host=10.0.0.1", "-pk=web-sudo", "--json"})
+	if !explicit.SudoKeySet || explicit.SudoKey != "web-sudo" {
+		t.Fatalf("explicit -pk not recorded: set=%t key=%q", explicit.SudoKeySet, explicit.SudoKey)
+	}
+	var explicitErr error
+	_ = captureStdout(t, func() { explicitErr = HandleHostManagement(explicit) })
+	if explicitErr != nil {
+		t.Fatalf("explicit host-add: %v", explicitErr)
+	}
+	listOut = string(captureStdout(t, func() {
+		listErr = HandleHostManagement(ParseArgs([]string{"sshx", "--host-list", "--json"}))
+	}))
+	if listErr != nil {
+		t.Fatalf("host-list after explicit: %v", listErr)
+	}
+	if !strings.Contains(listOut, `"sudo_password_key": "web-sudo"`) {
+		t.Fatalf("explicit sudo key missing: %s", listOut)
+	}
+}
+
+func TestHostUpdateRemoveJSON(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	var err error
+	_ = captureStdout(t, func() {
+		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "--json"}))
+	})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	out := string(captureStdout(t, func() {
+		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-update", "--host-name=lab", "--host-desc=updated", "--json"}))
+	}))
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	var updateDoc hostActionJSON
+	if unmarshalErr := json.Unmarshal([]byte(out), &updateDoc); unmarshalErr != nil {
+		t.Fatalf("update json: %v (%s)", unmarshalErr, out)
+	}
+	if !updateDoc.Success || updateDoc.Host == nil || updateDoc.Host.Description != "updated" {
+		t.Fatalf("update doc = %+v", updateDoc)
+	}
+
+	out = string(captureStdout(t, func() {
+		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-remove=lab", "--json"}))
+	}))
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	var removeDoc hostActionJSON
+	if unmarshalErr := json.Unmarshal([]byte(out), &removeDoc); unmarshalErr != nil {
+		t.Fatalf("remove json: %v (%s)", unmarshalErr, out)
+	}
+	if !removeDoc.Success || removeDoc.Action != "remove" {
+		t.Fatalf("remove doc = %+v", removeDoc)
+	}
+}
+
+func TestHostTestJSONFailedConnect(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	var err error
+	_ = captureStdout(t, func() {
+		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "-u=probe", "--json"}))
+	})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	out := string(captureStdout(t, func() {
+		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-test=lab", "--json", "--no-key"}))
+	}))
+	if !errors.Is(err, ErrReported) {
+		t.Fatalf("test error = %v, want ErrReported; stdout=%s", err, out)
+	}
+	if strings.Contains(out, "Testing connection") || strings.Contains(out, "Connection failed") {
+		t.Fatalf("json stdout leaked human text: %s", out)
+	}
+	var doc hostActionJSON
+	if unmarshalErr := json.Unmarshal([]byte(out), &doc); unmarshalErr != nil {
+		t.Fatalf("test json: %v (%s)", unmarshalErr, out)
+	}
+	if doc.Success || doc.Action != "test" || doc.ErrorKind == "" {
+		t.Fatalf("test doc = %+v", doc)
+	}
+}
 
 func TestFormatAuthDescription(t *testing.T) {
 	tests := []struct {

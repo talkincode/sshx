@@ -11,6 +11,7 @@ import (
 const (
 	EnginePostgres = "postgres"
 	EngineSQLite   = "sqlite"
+	EngineMySQL    = "mysql"
 )
 
 // NormalizeEngine maps a user-supplied --engine value to a canonical name.
@@ -21,6 +22,8 @@ func NormalizeEngine(engine string) string {
 		return EnginePostgres
 	case EngineSQLite, "sqlite3":
 		return EngineSQLite
+	case EngineMySQL, "mariadb":
+		return EngineMySQL
 	default:
 		return strings.ToLower(strings.TrimSpace(engine))
 	}
@@ -28,14 +31,11 @@ func NormalizeEngine(engine string) string {
 
 // ClassifyFor dispatches statement analysis to the engine-specific classifier.
 func ClassifyFor(engine, sql string) (*Classification, error) {
-	switch NormalizeEngine(engine) {
-	case EnginePostgres:
-		return Classify(sql)
-	case EngineSQLite:
-		return ClassifySQLite(sql)
-	default:
-		return nil, &BlockedError{Reason: fmt.Sprintf("unsupported --engine %q (implemented: postgres, sqlite)", engine)}
+	dialect, err := LookupDialect(engine)
+	if err != nil {
+		return nil, err
 	}
+	return dialect.Classify(sql)
 }
 
 // SQLExecutor assembles remote client commands for one engine. sshx embeds no
@@ -58,6 +58,7 @@ type SQLiteConn struct {
 var (
 	_ SQLExecutor = Conn{}
 	_ SQLExecutor = SQLiteConn{}
+	_ SQLExecutor = MySQLConn{}
 )
 
 // NeedsPasswordLine is always false: SQLite file access uses OS permissions.
@@ -229,10 +230,14 @@ func DecideSQLiteBackup(cls *Classification, opts Options) (BackupPlan, error) {
 
 // RestoreHintFor is the engine-aware restore hint used in JSON results.
 func RestoreHintFor(engine string, plan BackupPlan, path string) string {
-	if NormalizeEngine(engine) == EngineSQLite {
+	switch NormalizeEngine(engine) {
+	case EngineSQLite:
 		return sqliteRestoreHint(plan, path)
+	case EngineMySQL:
+		return mysqlRestoreHint(plan, path)
+	default:
+		return RestoreHint(plan, path)
 	}
-	return RestoreHint(plan, path)
 }
 
 func sqliteRestoreHint(plan BackupPlan, path string) string {

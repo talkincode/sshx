@@ -10,7 +10,8 @@ Interactive setup:
 sshx --host-add
 ```
 
-Command-line setup:
+Command-line setup. Omit `-pk` unless you want a stored sudo key; the inventory
+must not record the runtime fallback `master`.
 
 ```bash
 sshx --host-add \
