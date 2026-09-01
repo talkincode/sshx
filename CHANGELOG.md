@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-01
+
 ### Added
 
 - `--password-check/--password-list/--password-set --json` emit `sshx.secrets.v1`.
@@ -594,7 +596,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/talkincode/sshx/compare/v0.12.1...v0.13.0
+[0.12.1]: https://github.com/talkincode/sshx/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/talkincode/sshx/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/talkincode/sshx/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/talkincode/sshx/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/talkincode/sshx/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/talkincode/sshx/compare/v0.7.0...v0.8.0
