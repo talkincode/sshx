@@ -10,7 +10,12 @@
 sshx --host-add
 ```
 
-命令行添加：
+命令行添加。不要 `-pk` 就不要写 sudo key；清单不得把运行时回退值 `master`
+当成操作者配置持久化下来。
+
+`--json` 时 add / update / remove / test / test-all / import 输出
+`sshx.hosts.v1` 文档（`success`、主机身份；探测失败带 `error_kind`）。
+人类日志走 stderr，不要解析 ✓ 文本。
 
 ```bash
 sshx --host-add \
@@ -43,10 +48,12 @@ sshx --host-import
 
 sshx 会列出可导入条目（含解析后的 `user@host:port` 与 key）以及所有被跳过的条目和原因，然后由你按编号、名称或 `all` 选择。
 
-按名称非交互导入（适合脚本 / agent，全部成功或全部失败）：
+按名称非交互导入（适合脚本 / agent，全部成功或全部失败）。`--json` 需要带
+名称列表：
 
 ```bash
 sshx --host-import=web1,db1
+sshx --host-import=web1,db1 --json
 ```
 
 从其他配置文件导入：

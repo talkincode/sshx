@@ -317,6 +317,9 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 		case strings.Contains(payload.Command, "sqlite3"):
 			handleSQLiteSession(channel, server, payload.Command)
 			return
+		case strings.Contains(payload.Command, "mysql"):
+			handleMySQLSession(channel, server, payload.Command)
+			return
 		case payload.Command == "rm -rf /":
 			_, _ = io.WriteString(channel, "forced-ok\n") //nolint:errcheck // fixture response
 		case payload.Command == "sudo -S -p '' whoami":
@@ -368,6 +371,51 @@ func handleSQLiteSession(channel ssh.Channel, server *testSSHServer, cmdline str
 		return
 	}
 	sendExitStatus(channel, 126)
+}
+
+func handleMySQLSession(channel ssh.Channel, server *testSSHServer, cmdline string) {
+	stdin, err := io.ReadAll(io.LimitReader(channel, 12<<20))
+	if err != nil {
+		_, _ = io.WriteString(channel.Stderr(), "mysql stdin read failed\n") //nolint:errcheck // fixture response
+		sendExitStatus(channel, 24)
+		return
+	}
+	command := exec.Command("sh", "-c", cmdline) // #nosec G204 -- isolated E2E fixture executes generated mysql client scripts only
+	command.Dir = server.root
+	command.Env = append(os.Environ(),
+		"HOME="+server.root,
+		"PATH="+filepath.Join(server.root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	command.Stdin = bytes.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	runErr := command.Run()
+	_, _ = channel.Write(stdout.Bytes())          //nolint:errcheck // fixture response
+	_, _ = channel.Stderr().Write(stderr.Bytes()) //nolint:errcheck // fixture response
+	if runErr == nil {
+		sendExitStatus(channel, 0)
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		sendExitStatus(channel, uint32(exitErr.ExitCode())) // #nosec G115 -- process exit codes are bounded.
+		return
+	}
+	sendExitStatus(channel, 126)
+}
+
+func installFakeMySQL(t *testing.T, server *testSSHServer) {
+	t.Helper()
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	bin := filepath.Join(server.root, "bin")
+	require.NoError(t, os.MkdirAll(bin, 0o750)) // #nosec G301 -- isolated fixture PATH dir must be executable
+	src, err := os.ReadFile("fake_mysql.py")    // #nosec G304 -- package-local E2E fixture
+	require.NoError(t, err)
+	dest := filepath.Join(bin, "mysql")
+	require.NoError(t, os.WriteFile(dest, src, 0o750)) // #nosec G306,G703 -- isolated fixture PATH binary must be executable
 }
 
 // collectorShells mirrors the shell family sshx may select from a script

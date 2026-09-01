@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--password-check/--password-list/--password-set --json` emit `sshx.secrets.v1`.
   A missing `--password-check` key exits non-zero (`exists: false`) instead of
   looking like success.
-- `--host-add/--host-update/--host-remove/--host-test/--host-test-all --json`
+- `--host-add/--host-update/--host-remove/--host-test/--host-test-all/--host-import --json`
   emit `sshx.hosts.v1` documents so agents need not scrape logger text.
+  `--host-import --json` requires `--host-import=<name1,name2>`.
 - `sshx audit query` and `sshx audit export`: read-only filters over local
   audit JSONL (`--since/--until/--target/--action/--run-id/--error-kind/--bypass-only`).
 - `sshx_run` over MCP forwards JSONL `target_finished` events as progress

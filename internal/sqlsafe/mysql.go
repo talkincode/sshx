@@ -138,7 +138,7 @@ func (c MySQLConn) RelatedEffectsCommand(table, verb string) (RemoteCommand, err
 			"' AND REFERENCED_TABLE_NAME='" + name + "' AND " + fkCol + " IN ('CASCADE','SET NULL','SET DEFAULT'))"
 	}
 	return RemoteCommand{
-		Command: c.clientCommand(),
+		Command: c.wrap(shellJoin(c.dockerArgv(c.mysqlArgv("-N")))),
 		Stdin:   "SELECT CASE WHEN " + expr + " THEN 1 ELSE 0 END;\n",
 	}, nil
 }

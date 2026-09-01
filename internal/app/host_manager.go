@@ -221,6 +221,10 @@ func handleHostImport(config *sshclient.Config) error {
 	plan := buildImportPlan(entries, settings)
 	plan.Notes = append(plan.Notes, parseNotes...)
 
+	if config.JSONOutput && config.HostImportNames == "" {
+		return fmt.Errorf("host-import --json requires --host-import=<name1,name2>")
+	}
+
 	var selected []importCandidate
 	if config.HostImportNames != "" {
 		selected, err = selectCandidatesByName(plan, config.HostImportNames)
@@ -247,6 +251,19 @@ func handleHostImport(config *sshclient.Config) error {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
+	if config.JSONOutput {
+		hosts := make([]hostListJSONEntry, 0, len(selected))
+		for _, candidate := range selected {
+			hosts = append(hosts, *hostJSONEntry(candidate.Host))
+		}
+		return emitHostActionJSON(hostActionJSON{
+			Success: true,
+			Action:  "import",
+			Count:   len(hosts),
+			Hosts:   hosts,
+			Notes:   plan.Notes,
+		})
+	}
 	for _, candidate := range selected {
 		logger.GetLogger().Success("Imported host '%s' (%s)", candidate.Host.Name, candidate.Host.Host)
 	}
@@ -560,6 +577,8 @@ type hostActionJSON struct {
 	Output            string              `json:"output,omitempty"`
 	Count             int                 `json:"count,omitempty"`
 	Succeeded         int                 `json:"succeeded,omitempty"`
+	Hosts             []hostListJSONEntry `json:"hosts,omitempty"`
+	Notes             []string            `json:"notes,omitempty"`
 	Results           []hostTestJSONEntry `json:"results,omitempty"`
 	ErrorKind         string              `json:"error_kind,omitempty"`
 	Error             string              `json:"error,omitempty"`

@@ -85,3 +85,6 @@ sshx inspect -h=prod-web system.baseline --json
 - [主机探测能力与本地插件](inspection-plugins.md)说明内置能力、`plugin create`、信任和观察快照。
 - [SFTP 工作流](sftp.md)覆盖上传、下载、列目录、创建目录和删除。
 - [受控文件 Apply](apply.md)用备份和哈希检查替换一个远程文件。
+- [MCP 服务器（stdio）](mcp.md)说明工具面、进度通知，以及 `--pty` 不在 MCP 范围。
+- [审计查询与导出](audit.md)用只读过滤器消费本地 JSONL 审计。
+- [契约冻结策略](contract.md)列出 v1 冻结表面和 1.0 门槛。

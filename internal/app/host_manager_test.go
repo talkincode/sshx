@@ -3,6 +3,8 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +102,37 @@ func TestHostUpdateRemoveJSON(t *testing.T) {
 	}
 	if !removeDoc.Success || removeDoc.Action != "remove" {
 		t.Fatalf("remove doc = %+v", removeDoc)
+	}
+}
+
+func TestHostImportJSON(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	sshConfig := filepath.Join(home, "ssh_config")
+	if err := os.WriteFile(sshConfig, []byte("Host imported\n  HostName 127.0.0.1\n  User probe\n"), 0o600); err != nil {
+		t.Fatalf("write ssh config: %v", err)
+	}
+	var importErr error
+	out := string(captureStdout(t, func() {
+		importErr = HandleHostManagement(ParseArgs([]string{
+			"sshx", "--host-import=imported", "--ssh-config=" + sshConfig, "--json",
+		}))
+	}))
+	if importErr != nil {
+		t.Fatalf("import: %v stdout=%s", importErr, out)
+	}
+	if strings.Contains(out, "Imported host") || strings.Contains(out, "Imported 1") {
+		t.Fatalf("json stdout leaked human text: %s", out)
+	}
+	var doc hostActionJSON
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("import json: %v (%s)", err, out)
+	}
+	if !doc.Success || doc.Action != "import" || doc.Count != 1 || len(doc.Hosts) != 1 {
+		t.Fatalf("import doc = %+v", doc)
+	}
+	if doc.Hosts[0].Name != "imported" || doc.Hosts[0].Host != "127.0.0.1" {
+		t.Fatalf("imported host = %+v", doc.Hosts[0])
 	}
 }
 

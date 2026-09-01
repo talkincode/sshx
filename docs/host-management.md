@@ -44,11 +44,17 @@ sshx --host-import
 
 sshx lists importable entries (with the resolved `user@host:port` and key) plus everything it skipped and why, then asks which entries to import (numbers, names, or `all`).
 
-Non-interactive, by name (script/agent friendly, all-or-nothing):
+Non-interactive, by name (script/agent friendly, all-or-nothing). `--json`
+requires the name list and emits `sshx.hosts.v1`:
 
 ```bash
 sshx --host-import=web1,db1
+sshx --host-import=web1,db1 --json
 ```
+
+`--host-add` / `--host-update` / `--host-remove` / `--host-test` /
+`--host-test-all` also honor `--json` with the same schema (`success`, host
+identity, and `error_kind` on failed tests).
 
 Import from a different config file:
 

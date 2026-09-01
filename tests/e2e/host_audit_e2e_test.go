@@ -101,9 +101,26 @@ func TestCLIHostImportIsUsableAndFailedSelectionIsAllOrNothing(t *testing.T) {
 	imported := runSSHX(t, home, []string{
 		"--host-import=imported",
 		"--ssh-config=" + sshConfig,
+		"--json",
 		"--no-audit",
 	}, nil)
 	require.Equal(t, 0, imported.exitCode, imported.stderr)
+	var importDoc struct {
+		SchemaVersion string `json:"schema_version"`
+		Success       bool   `json:"success"`
+		Action        string `json:"action"`
+		Count         int    `json:"count"`
+		Hosts         []struct {
+			Name string `json:"name"`
+		} `json:"hosts"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(imported.stdout), &importDoc))
+	assert.Equal(t, "sshx.hosts.v1", importDoc.SchemaVersion)
+	assert.True(t, importDoc.Success)
+	assert.Equal(t, "import", importDoc.Action)
+	assert.Equal(t, 1, importDoc.Count)
+	require.Len(t, importDoc.Hosts, 1)
+	assert.Equal(t, "imported", importDoc.Hosts[0].Name)
 	settingsPath := filepath.Join(home, ".sshx", "settings.json")
 	settingsBeforeFailure, err := os.ReadFile(settingsPath) // #nosec G304 -- path is inside this test's temporary HOME.
 	require.NoError(t, err)
