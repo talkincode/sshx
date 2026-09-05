@@ -66,7 +66,7 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 		}
 		return nil, fmt.Errorf("inspect plugin root: %w", rootErr)
 	}
-	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 || unsafePOSIXPermissions(rootInfo, 0o022) {
+	if !rootInfo.IsDir() || rootInfo.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || unsafePOSIXPermissions(rootInfo, 0o022) {
 		return nil, fmt.Errorf("plugin root must be a real directory not writable by group or others: %s", pluginRoot)
 	}
 	info, statErr := os.Lstat(pluginPath)
@@ -76,7 +76,7 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 		}
 		return nil, fmt.Errorf("inspect plugin path: %w", statErr)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return nil, fmt.Errorf("plugin path must be a real directory: %s", pluginPath)
 	}
 	if unsafePOSIXPermissions(info, 0o022) {
@@ -226,7 +226,7 @@ func safeChild(root, relative string) (string, error) {
 		if statErr != nil {
 			return "", statErr
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			return "", fmt.Errorf("path contains symlink %s", current)
 		}
 	}
@@ -238,7 +238,7 @@ func readRegularFile(path string, limit int64, forbiddenPerm os.FileMode) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.Mode().IsRegular() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	if info.Size() > limit {

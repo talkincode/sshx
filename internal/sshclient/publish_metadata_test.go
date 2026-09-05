@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -278,13 +277,13 @@ func TestSFTPUploadMatchesServerCreatePermissions(t *testing.T) {
 	client := reliabilitySFTP(t, root, false).client(t, context.Background())
 	protocol, err := client.newSFTPClient()
 	require.NoError(t, err)
-	baseline, err := protocol.Create(filepath.Join(root, "ordinary-create"))
+	baseline, err := protocol.Create(remoteFixturePath(root, "ordinary-create"))
 	require.NoError(t, err)
 	info, err := baseline.Stat()
 	require.NoError(t, err)
 	require.NoError(t, baseline.Close())
 	require.NoError(t, protocol.Close())
-	client.config.SftpAction, client.config.RemotePath = "upload", filepath.Join(root, "staged-upload")
+	client.config.SftpAction, client.config.RemotePath = "upload", remoteFixturePath(root, "staged-upload")
 	client.config.PreparedPayload = []byte("fixture")
 	out, err := client.ExecuteSftpResult()
 	require.NoError(t, err)

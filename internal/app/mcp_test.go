@@ -483,9 +483,8 @@ func TestMCPChildDrainsLargeOutputDespiteSlowProgress(t *testing.T) {
 	release := make(chan struct{})
 	called := make(chan struct{}, 1)
 	defer close(release)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	start := time.Now()
 	res, gotEvents, err := execMCPCommand(ctx, mcpTestCommand(t, "copy", ""), output.String(), 0, func(execution.Event) {
 		select {
 		case called <- struct{}{}:
@@ -497,7 +496,8 @@ func TestMCPChildDrainsLargeOutputDespiteSlowProgress(t *testing.T) {
 	require.NoError(t, res.AdapterError)
 	require.Equal(t, 4, len(gotEvents))
 	assert.Equal(t, output.String(), res.Stdout)
-	assert.Less(t, time.Since(start), 4*time.Second)
+	// Completion while release remains blocked proves progress cannot block draining.
+	require.NoError(t, ctx.Err())
 	select {
 	case <-called:
 	default:

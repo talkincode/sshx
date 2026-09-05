@@ -60,7 +60,7 @@ func (c *SSHClient) ConnectDirect() (err error) {
 				keyPath = filepath.Join(home, keyPath[2:])
 			}
 		}
-		key, keyErr := os.ReadFile(keyPath) //nolint:gosec // caller-supplied key path
+		key, keyErr := os.ReadFile(keyPath) // #nosec G304 -- operator-selected SSH key path is intentionally read.
 		var signer ssh.Signer
 		if keyErr == nil {
 			signer, keyErr = ssh.ParsePrivateKey(key)

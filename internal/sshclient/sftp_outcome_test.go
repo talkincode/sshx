@@ -131,7 +131,7 @@ func TestRenderSFTPOutcomeWithoutExecution(t *testing.T) {
 	root := reliabilityDirectory(t)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "artifact.txt"), []byte("listing fixture"), 0o600))
 	client := reliabilitySFTP(t, root, false).client(t, context.Background())
-	client.config.SftpAction, client.config.RemotePath = "list", root
+	client.config.SftpAction, client.config.RemotePath = "list", remoteFixturePath(root)
 	out, err := client.ExecuteSftpResult()
 	require.NoError(t, err)
 	require.NoError(t, client.Close())

@@ -36,6 +36,15 @@ func reliabilityDirectory(t *testing.T) string {
 	return absolute
 }
 
+func remoteFixturePath(elem ...string) string {
+	target := filepath.Join(elem...)
+	slashed := filepath.ToSlash(target)
+	if !strings.HasPrefix(slashed, "/") {
+		return "/" + slashed
+	}
+	return slashed
+}
+
 type reliabilityServer struct {
 	host, port string
 	key        ssh.PublicKey
@@ -519,7 +528,8 @@ func TestSFTPReliabilityWithoutAtomicReplace(t *testing.T) {
 	root := reliabilityDirectory(t)
 	server := reliabilitySFTP(t, root, false, true)
 	client := server.client(t, context.Background())
-	client.config.SftpAction, client.config.RemotePath = "upload", filepath.Join(root, "destination")
+	destination := filepath.Join(root, "destination")
+	client.config.SftpAction, client.config.RemotePath = "upload", remoteFixturePath(destination)
 	client.config.PreparedPayload = []byte("first")
 	outcome, err := client.ExecuteSftpResult()
 	require.NoError(t, err)
@@ -530,7 +540,7 @@ func TestSFTPReliabilityWithoutAtomicReplace(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "lacks atomic replacement")
 	assert.Equal(t, "unchanged", outcome.ChangeState)
-	actual, err := os.ReadFile(client.config.RemotePath) // #nosec G304 -- isolated fixture path
+	actual, err := os.ReadFile(destination) // #nosec G304 -- isolated fixture path
 	require.NoError(t, err)
 	assert.Equal(t, "first", string(actual))
 	entries, err := os.ReadDir(root)
@@ -544,7 +554,7 @@ func TestSFTPReliabilityStagedUploadDownload(t *testing.T) {
 	client := server.client(t, context.Background())
 	destination := filepath.Join(root, "destination")
 	require.NoError(t, os.WriteFile(destination, []byte("old"), 0o640)) // #nosec G306 -- permission preservation fixture
-	client.config.SftpAction, client.config.LocalPath, client.config.RemotePath = "upload", "unread-legacy-source", destination
+	client.config.SftpAction, client.config.LocalPath, client.config.RemotePath = "upload", "unread-legacy-source", remoteFixturePath(destination)
 	client.config.PreparedPayload = []byte("admitted bytes")
 	outcome, err := client.ExecuteSftpResult()
 	require.NoError(t, err)
@@ -562,11 +572,12 @@ func TestSFTPReliabilityStagedUploadDownload(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, outcome.Verified)
 	assert.EqualValues(t, 0, outcome.BytesTransferred)
-	client.config.SftpAction, client.config.LocalPath = "download", filepath.Join(root, "local")
+	localPath := filepath.Join(root, "local")
+	client.config.SftpAction, client.config.LocalPath = "download", localPath
 	outcome, err = client.ExecuteSftpResult()
 	require.NoError(t, err)
 	assert.True(t, outcome.Verified)
-	actual, err = os.ReadFile(client.config.LocalPath)
+	actual, err = os.ReadFile(localPath) // #nosec G304 -- isolated fixture path
 	require.NoError(t, err)
 	assert.Empty(t, actual)
 	entries, err := os.ReadDir(root)
@@ -580,7 +591,7 @@ func TestSFTPReliabilityPermissionAndLocalFailure(t *testing.T) {
 	client := server.client(t, context.Background())
 	destination := filepath.Join(root, "destination")
 	require.NoError(t, os.WriteFile(destination, []byte("preserve"), 0o600))
-	client.config.SftpAction, client.config.RemotePath = "upload", destination
+	client.config.SftpAction, client.config.RemotePath = "upload", remoteFixturePath(destination)
 	client.config.PreparedPayload = []byte("replace")
 	outcome, err := client.ExecuteSftpResult()
 	assert.Equal(t, "remote_io", errorKind(t, err))
@@ -608,7 +619,7 @@ func TestSFTPReliabilityPartialCopyPreservesDestination(t *testing.T) {
 	defer func() { _ = sftpClient.Close() }() //nolint:errcheck // fixture
 	destination := filepath.Join(root, "destination")
 	require.NoError(t, os.WriteFile(destination, []byte("original"), 0o600))
-	entry := FileOutcome{Path: destination, ChangeState: "unchanged"}
+	entry := FileOutcome{Path: remoteFixturePath(destination), ChangeState: "unchanged"}
 	source := io.MultiReader(bytes.NewBufferString("partial"), failedCopyReader{})
 	err = publishRemoteFile(context.Background(), sftpClient, source, "local_io", 100, nil, &entry)
 	assert.Equal(t, "local_io", errorKind(t, err))
@@ -628,7 +639,9 @@ func TestSFTPReliabilityDirectoryEvidence(t *testing.T) {
 	root := reliabilityDirectory(t)
 	server := reliabilitySFTP(t, root, false)
 	client := server.client(t, context.Background())
-	client.config.SftpAction, client.config.RemotePath = "mkdir", filepath.Join(root, "new", "child")
+	newChild := filepath.Join(root, "new", "child")
+	newDir := filepath.Join(root, "new")
+	client.config.SftpAction, client.config.RemotePath = "mkdir", remoteFixturePath(newChild)
 	outcome, err := client.ExecuteSftpResult()
 	require.NoError(t, err)
 	assert.True(t, outcome.Verified)
@@ -636,13 +649,13 @@ func TestSFTPReliabilityDirectoryEvidence(t *testing.T) {
 	outcome, err = client.ExecuteSftpResult()
 	require.NoError(t, err)
 	assert.Equal(t, "unchanged", outcome.ChangeState)
-	client.config.SftpAction, client.config.RemotePath = "remove", filepath.Join(root, "new")
+	client.config.SftpAction, client.config.RemotePath = "remove", remoteFixturePath(newDir)
 	outcome, err = client.ExecuteSftpResult()
 	require.NoError(t, err)
 	assert.True(t, outcome.Verified)
 	assert.False(t, outcome.DirectoryAtomic)
 	assert.Len(t, outcome.Entries, 2)
-	_, err = os.Stat(client.config.RemotePath)
+	_, err = os.Stat(newDir)
 	assert.True(t, os.IsNotExist(err))
 }
 
@@ -653,7 +666,7 @@ func TestTransferReliabilityVerifiedTree(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(sourcePath, "file"), []byte("transfer fixture"), 0o640)) // #nosec G306 -- permission preservation fixture
 	src := reliabilitySFTP(t, root, false).client(t, context.Background())
 	dst := reliabilitySFTP(t, root, false).client(t, context.Background())
-	outcome, err := src.TransferToResult(dst, sourcePath, destination)
+	outcome, err := src.TransferToResult(dst, remoteFixturePath(sourcePath), remoteFixturePath(destination))
 	require.NoError(t, err)
 	assert.True(t, outcome.Verified)
 	assert.False(t, outcome.DirectoryAtomic)
@@ -673,7 +686,7 @@ func TestTransferReliabilityPartialDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(target, "b"), []byte("not a directory"), 0o600))
 	source := reliabilitySFTP(t, root, false).client(t, context.Background())
 	dest := reliabilitySFTP(t, root, false).client(t, context.Background())
-	outcome, err := source.TransferToResult(dest, sourcePath, destination)
+	outcome, err := source.TransferToResult(dest, remoteFixturePath(sourcePath), remoteFixturePath(destination))
 	require.Error(t, err)
 	assert.True(t, outcome.Partial)
 	assert.False(t, outcome.Verified)
@@ -795,7 +808,7 @@ func TestTransferReliabilityCancellationClosesBoth(t *testing.T) {
 	destination := destinationServer.client(t, context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := source.TransferToResult(destination, filepath.Join(root, "file"), "/destination")
+		_, err := source.TransferToResult(destination, remoteFixturePath(root, "file"), "/destination")
 		done <- err
 	}()
 	awaitReliability(t, reached)
