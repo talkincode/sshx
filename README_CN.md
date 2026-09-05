@@ -309,6 +309,25 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 dry-run 只是本地计划预览。它会说明主机解析、模式/动作、sudo key 选择、安全检查结果，
 以及真实执行时是否会连接、执行、读取 secret 或修改状态；它不承诺远程命令一定成功。
 
+### 绑定审核计划并判断副作用
+
+远端预览增加嵌套 `sshx.plan.v1`、`plan_hash` 和标量 `risk`
+（`read|mutation|privileged|destructive`）。审核可绑定的预览后，以相同输入加
+`--expect-plan="$reviewed_hash"` 执行；哈希格式为 `sha256:` 加 64 位小写十六进制。
+command/run、apply、SQL、SFTP、transfer、inspect 均支持；不匹配时在 secret/
+网络操作前拒绝，即使使用 `--force` 也不能绕过。
+
+绑定要求明确 IP、key 认证时可用的公钥 sidecar，以及严格可用的主机信任。
+DNS-only、缺少身份 pin、放宽信任和依赖远端发现的 SQL 身份不能绑定。
+当前哈希包含排序后的整个信任记录快照，因此修改无关 `known_hosts` 记录也会
+保守地使旧计划失效。计划不冻结远端状态。
+
+结果增加 `execution_id`、`parent_execution_id`、`execution_fingerprint`、
+`effects`、`change_state`、可空 `executed`、`verified`、`verification` 与条件数组。
+未知命令/脚本默认 mutation 且副作用未知，调用方 `intent=read` 不是只读证明。
+成功不等于已验证，未知不等于“未改变”；重试前先检查部分/未知结果。
+原始输出和秘密值不纳入指纹。详见[计划、结果与安全重试](docs/zh/execution-contract.md)。
+
 ### 本地审计日志
 
 每次非 dry-run 调用都会默认写入一条 JSONL 审计事件：
@@ -327,10 +346,13 @@ sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
 它不会记录明文密码、私钥内容或 stdout/stderr。命令文本会作为溯源信息写入，但会对常见 password/token
 类参数做尽力脱敏。可以用 `--no-audit` 或 `SSHX_NO_AUDIT=true` 禁用单次调用或当前环境的审计写入。
 
+可用 `sshx audit query --execution-id=<id> --json` 关联执行；损坏行诊断区分记录
+损坏与空查询。审计是尽力写入，持久化状态与执行成功分开：不能为补日志重复成功的变更。
+
 ### `--timeout` 与 `--pty`
 
 ```bash
-# 命令运行超过 30 秒则杀掉（也支持 2m 等写法，纯数字按秒处理）
+# 将命令等待时间限制为 30 秒（也支持 2m 等写法，纯数字按秒处理）
 sshx -h=prod-web --timeout=30s "apt-get update"
 
 # 对必须要终端的命令重新启用 PTY
@@ -339,6 +361,11 @@ sshx -h=prod-web --pty "top -b -n1"
 ```
 
 超时也可以通过环境变量 `SSH_TIMEOUT` 设置。
+可选 `--host-timeout` 覆盖已准入目标，`--global-timeout` 还覆盖排队时间；
+原 `--timeout` 含义和默认值保持不变。fan-out 的 `--fail-fast`
+（`--failure-mode=fail_fast` 别名）与 `--max-failures=N` **只停止新准入**，
+活跃目标继续完成，可能继续增加失败。取消/期限可以停止活跃本地传输，
+但不保证远端进程终止或回滚。
 
 ### MCP server（stdio）
 

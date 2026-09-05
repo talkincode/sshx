@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/talkincode/sshx/skills"
@@ -200,7 +201,8 @@ func installationStatus(destination, metadataPath string, content []byte, force 
 	desiredDigest := digest(content)
 	metadataCurrent := metadataExists && metadata.SchemaVersion == metadataSchema && metadata.SHA256 == desiredDigest
 	if bytes.Equal(existing, content) {
-		if info.Mode().Perm() != 0o644 {
+		// Windows mode bits do not represent POSIX owner/group permissions.
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 			return "repaired", metadataCurrent, nil
 		}
 		return "current", metadataCurrent, nil

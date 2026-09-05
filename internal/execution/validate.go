@@ -32,6 +32,12 @@ func NormalizeRequest(req *Request) error {
 	if req.Limits.MaxPayloadBytes <= 0 {
 		req.Limits.MaxPayloadBytes = DefaultMaxPayload
 	}
+	if req.Limits.Timeout < 0 || req.Limits.HostTimeout < 0 || req.Limits.GlobalTimeout < 0 {
+		return fmt.Errorf("%w: timeouts must not be negative", ErrConfig)
+	}
+	if req.Policy.MaxFailures < 0 {
+		return fmt.Errorf("%w: max failures must be positive when set", ErrConfig)
+	}
 	if req.Policy.FailureMode == "" {
 		req.Policy.FailureMode = FailureContinue
 	}
@@ -39,6 +45,9 @@ func NormalizeRequest(req *Request) error {
 	case FailureContinue, FailureFailFast:
 	default:
 		return fmt.Errorf("%w: invalid failure mode %q", ErrConfig, req.Policy.FailureMode)
+	}
+	if req.Policy.FailureMode == FailureFailFast && req.Policy.MaxFailures > 1 {
+		return fmt.Errorf("%w: fail_fast conflicts with max failures greater than one", ErrConfig)
 	}
 
 	if req.Action.Kind == "" {
@@ -135,7 +144,18 @@ func SafetyCheck(req *Request, payload []byte) error {
 
 // BuildDryRunPlan resolves selectors and reports effects without secrets/network.
 func BuildDryRunPlan(req *Request, hosts []HostRecord, defaults HostRecord, payload *Payload) DryRunPlan {
+	if req == nil {
+		return DryRunPlan{
+			SchemaVersion: RequestSchemaVersion,
+			DryRun:        true,
+			Error:         BuildError(ErrConfig, ErrorKindConfig, IntentUnknown, CompletionNotStarted),
+		}
+	}
+	risk, effects := requestRisk(req)
 	plan := DryRunPlan{
+		Plan:          req.Plan,
+		Risk:          risk,
+		Effects:       effects,
 		SchemaVersion: RequestSchemaVersion,
 		DryRun:        true,
 		Valid:         true,
@@ -146,6 +166,9 @@ func BuildDryRunPlan(req *Request, hosts []HostRecord, defaults HostRecord, payl
 		Notes: []string{
 			"dry-run does not connect, execute, read secrets, mutate known_hosts, or write local/remote state",
 		},
+	}
+	if req.Plan != nil {
+		plan.PlanHash = req.Plan.PlanHash
 	}
 
 	if err := NormalizeRequest(req); err != nil {
@@ -188,7 +211,7 @@ func BuildDryRunPlan(req *Request, hosts []HostRecord, defaults HostRecord, payl
 	plan.WouldConnect = plan.Valid && snap.Count > 0
 	plan.WouldExecute = plan.WouldConnect
 	plan.WouldReadSecret = plan.WouldConnect && wouldReadSecret(req, snap)
-	plan.WouldMutateRemote = plan.WouldConnect && req.Action.Intent == IntentChange
+	plan.WouldMutateRemote = plan.WouldConnect && (plan.Effects.RemoteWrite || plan.Effects.Unknown)
 	plan.MayMutateKnownHosts = plan.WouldConnect && req.Policy.AcceptUnknownHost
 	plan.WouldWriteLocal = false
 	return plan

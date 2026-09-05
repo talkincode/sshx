@@ -36,33 +36,49 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 	if loadErr != nil {
 		return reportRunRequestFailure(config, audit, loadErr)
 	}
+	snap, resolveErr := execution.ResolveTargets(hosts, req.Targets, defaults)
+	if resolveErr != nil {
+		if config.DryRun && config.ExpectPlan == "" {
+			preview := execution.BuildDryRunPlan(req, hosts, defaults, payload)
+			attachRunSecretBackend(&preview)
+			return emitRunDryRun(config, preview)
+		}
+		return reportRunRequestFailure(config, audit, resolveErr)
+	}
+	if req.Limits.GlobalTimeout == 0 && req.Limits.Timeout > 0 {
+		waves := time.Duration(max(1, (snap.Count+req.Limits.Concurrency-1)/req.Limits.Concurrency))
+		if req.Limits.Timeout > (time.Duration(1<<63-1)-5*time.Second)/waves {
+			return reportRunRequestFailure(config, audit, fmt.Errorf("%w: derived global timeout is too large", execution.ErrConfig))
+		}
+		req.Limits.GlobalTimeout = req.Limits.Timeout*waves + 5*time.Second
+	}
+	plan, planErr := prepareRunPlan(config, req, &snap, payload)
+	if planErr != nil {
+		return reportRunRequestFailure(config, audit, planErr, plan)
+	}
 
 	if config.DryRun {
-		plan := execution.BuildDryRunPlan(req, hosts, defaults, payload)
-		attachRunSecretBackend(&plan)
-		return emitRunDryRun(config, plan)
+		preview := execution.BuildDryRunPlan(req, hosts, defaults, payload)
+		preview.Plan = plan
+		preview.PlanHash, preview.Risk, preview.Effects = plan.PlanHash, plan.Risk, plan.Effects
+		attachRunSecretBackend(&preview)
+		return emitRunDryRun(config, preview)
 	}
 
 	if normErr := execution.NormalizeRequest(req); normErr != nil {
-		return reportRunRequestFailure(config, audit, normErr)
+		return reportRunRequestFailure(config, audit, normErr, plan)
 	}
 	if safetyErr := execution.SafetyCheck(req, payloadBytes(payload)); safetyErr != nil {
-		return reportRunRequestFailure(config, audit, safetyErr)
+		return reportRunRequestFailure(config, audit, safetyErr, plan)
 	}
 
-	snap, resolveErr := execution.ResolveTargets(hosts, req.Targets, defaults)
-	if resolveErr != nil {
-		return reportRunRequestFailure(config, audit, resolveErr)
+	ctx := config.Context
+	if ctx == nil {
+		ctx = context.Background()
 	}
-
-	ctx := context.Background()
-	if req.Limits.Timeout > 0 {
-		// Overall run budget: per-target timeout still applies inside sessions.
-		// Use a generous multiple so fan-out can complete under continue mode.
-		budget := req.Limits.Timeout * time.Duration(max(1, (snap.Count+req.Limits.Concurrency-1)/req.Limits.Concurrency))
-		budget += 5 * time.Second
+	if req.Limits.GlobalTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, budget)
+		ctx, cancel = execution.WithScopedTimeout(ctx, req.Limits.GlobalTimeout, "global")
 		defer cancel()
 	}
 
@@ -88,6 +104,10 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 		Events:   events,
 	})
 	if execErr != nil {
+		if outcome.RunID != "" {
+			recordRunAudit(audit, config, req, snap, outcome)
+			return execErr
+		}
 		return reportRunRequestFailure(config, audit, execErr)
 	}
 
@@ -96,7 +116,7 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 	// Single-target --json emits one versioned result document.
 	if req.JSONOutput && !req.JSONLOutput && outcome.Single != nil {
 		if err := encodeJSON(outcome.Single); err != nil {
-			logger.GetLogger().Error("failed to encode run result: %v", err)
+			return fmt.Errorf("%w: deliver run result: %w", execution.ErrLocalIO, err)
 		}
 	}
 
@@ -172,7 +192,7 @@ func attachRunSecretBackend(plan *execution.DryRunPlan) {
 	}
 }
 
-func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err error) error {
+func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err error, plans ...*execution.Plan) error {
 	kind := execution.Classify(err)
 	if kind == "" {
 		kind = execution.ErrorKindConfig
@@ -180,21 +200,32 @@ func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err
 	if audit != nil {
 		audit.recordFailure(config, sshclient.AuthMethodUnknown, kind, err)
 	}
+	var plan *execution.Plan
+	if len(plans) > 0 {
+		plan = plans[0]
+	}
+	meta := execution.NewMetadata(plan, config.ExecutionID)
+	attachPrepared(config, &preparedOperation{plan: plan, meta: meta, audit: audit})
+	res := execution.Result{
+		Metadata:      meta,
+		SchemaVersion: execution.ResultSchemaVersion,
+		RunID:         config.ExecutionID,
+		Status:        execution.StatusFailed,
+		Phase:         execution.PhaseResolve,
+		Completion:    execution.CompletionNotStarted,
+		ExitCode:      -1,
+		Success:       false,
+		Error:         execution.BuildError(err, kind, execution.IntentUnknown, execution.CompletionNotStarted),
+		ErrorKind:     kind,
+	}
 	if config.JSONOutput || config.JSONLOutput {
-		res := execution.Result{
-			SchemaVersion: execution.ResultSchemaVersion,
-			Status:        execution.StatusFailed,
-			Phase:         execution.PhaseResolve,
-			Completion:    execution.CompletionNotStarted,
-			ExitCode:      -1,
-			Success:       false,
-			Error:         execution.BuildError(err, kind, execution.IntentUnknown, execution.CompletionNotStarted),
-			ErrorKind:     kind,
-		}
-		if encErr := encodeJSON(res); encErr != nil {
-			logger.GetLogger().Error("failed to encode run failure: %v", encErr)
+		if encErr := emitLifecycleJSON(config, res); encErr != nil {
+			return encErr
 		}
 		return ErrReported
+	}
+	if _, finalizeErr := finalizeLifecycle(config, res); finalizeErr != nil {
+		return finalizeErr
 	}
 	return err
 }
@@ -295,8 +326,11 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 			Timeout:                 config.Timeout,
 			MaxOutputBytesPerTarget: config.MaxOutputBytes,
 			MaxPayloadBytes:         config.MaxPayloadBytes,
+			HostTimeout:             config.HostTimeout,
+			GlobalTimeout:           config.GlobalTimeout,
 		},
 		Policy: execution.Policy{
+			MaxFailures:          config.MaxFailures,
 			FailureMode:          config.FailureMode,
 			SafetyCheckEnabled:   config.SafetyCheck,
 			SafetyBypass:         config.Force || !config.SafetyCheck,
@@ -409,6 +443,8 @@ func recordRunAudit(audit *auditRecorder, config *sshclient.Config, req *executi
 	audit.event.Concurrency = req.Limits.Concurrency
 	audit.event.FailureMode = req.Policy.FailureMode
 	audit.event.TargetCount = snap.Count
+	audit.completed = true
+	audit.event.Metadata = outcome.Metadata
 	if outcome.Counts.Succeeded == outcome.Counts.Selected && outcome.Counts.Failed == 0 {
 		code := 0
 		audit.event.ExitCode = &code
@@ -450,6 +486,8 @@ func writeTargetAudit(config *sshclient.Config, runID string, req *execution.Req
 	rec.event.Completion = tr.Completion
 	rec.event.Phase = tr.Phase
 	rec.event.AuthMethod = tr.AuthMethod
+	rec.event.Metadata = tr.Metadata
+	rec.completed = true
 	code := tr.ExitCode
 	rec.event.ExitCode = &code
 	rec.event.DurationMs = tr.DurationMs

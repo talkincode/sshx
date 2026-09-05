@@ -80,8 +80,10 @@ fi
 ## Guarded File Apply
 
 Prefer `sshx apply` when replacing one remote regular file. Branch on
-`changed`, `completion`, and `error_kind`. A `precondition` failure means the
-file was not written.
+`change_state`, `executed`, `verified`, `verification`, `completion`, and
+`error_kind`. Legacy `changed` is not proof of no change on an error. A
+`precondition` failure before commit means no target write; post-write
+`verification_failed` requires inspecting hashes/backup before retrying.
 
 ```bash
 sshx apply --target=prod-web --path=/etc/nginx/nginx.conf \
@@ -137,6 +139,14 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
 Use dry-run to verify host resolution, selected sudo key, safety status, and whether the command would mutate state. Do not treat it as proof that the remote service can restart successfully.
 
+For command/run, apply, SQL, SFTP, transfer and inspect, review the nested
+`sshx.plan.v1` and top-level `plan_hash`/`risk`. If `plan.bindable` is true,
+repeat the invocation with `--expect-plan="$reviewed_hash"`. It rejects local
+drift before secrets/network; it does not freeze remote state. Unknown commands
+and scripts retain unknown effects with mutation risk, regardless of caller
+intent. See [Plans, Outcomes, and Safe Retries](execution-contract.md) for public
+identity requirements, trust-store invalidation and the outcome decision table.
+
 ## Timeouts
 
 Always set timeouts for unattended workflows. `sshx run` defaults the command
@@ -149,6 +159,17 @@ sshx -h=prod-web --timeout=30s --json "systemctl is-active nginx"
 sshx -h=prod-web --timeout=2m --json "sudo apt-get update"
 sshx run --target=prod-web --json -- "uptime"   # command timeout defaults to 60s
 ```
+
+Add `--host-timeout=2m` to limit the whole admitted target, or
+`--global-timeout=5m` for the operation including queue time. These are opt-in;
+the run's existing derived aggregate budget remains unless overridden.
+Cancellation closes local transports but does not guarantee remote termination
+or rollback. Native secret-backend calls may remain noninterruptible.
+
+Fan-out supports `--fail-fast` (the `--failure-mode=fail_fast` alias) and
+`--max-failures=N`. Thresholds stop new admission only; active targets finish
+and can add failures. Never-started targets must be distinguished from
+cancelled or uncertain work; do not retry a mutation on transport error alone.
 
 ## Audit Events
 

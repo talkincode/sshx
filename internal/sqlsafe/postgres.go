@@ -2,7 +2,6 @@ package sqlsafe
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -35,8 +34,9 @@ type Conn struct {
 // for the SSH exec channel plus the stdin payload (SQL text or psql
 // meta-commands). The caller prepends the password line when needed.
 type RemoteCommand struct {
-	Command string
-	Stdin   string
+	Command  string
+	Stdin    string
+	Protocol *Protocol
 }
 
 // NeedsPasswordLine reports whether the command expects a leading PGPASSWORD
@@ -105,18 +105,27 @@ func (c Conn) ExplainCommand(stmt string) RemoteCommand {
 // ExecuteCommand runs the statement itself. Command tags (e.g. "UPDATE 3")
 // stay on stdout so the affected row count can be parsed afterwards.
 func (c Conn) ExecuteCommand(stmt string) RemoteCommand {
+	p := newProtocol(EnginePostgres, stmt, true, false)
+	lines := []string{p.psql("start", "1"), statementSQL(stmt)}
+	if p.Affected {
+		lines = append(lines, p.psql("affected", ":ROW_COUNT"))
+	}
+	lines = append(lines, p.psql("commit", "acknowledged"))
 	return RemoteCommand{
-		Command: c.wrap(shellJoin(c.dockerArgv(c.psqlArgv()))),
-		Stdin:   stmt + ";\n",
+		Command:  c.wrap(shellJoin(c.dockerArgv(c.psqlArgv()))),
+		Stdin:    strings.Join(lines, "\n") + "\n",
+		Protocol: p,
 	}
 }
 
 // ExecuteReadCommand enforces PostgreSQL's transaction-level read-only mode so
 // SELECT-invoked functions cannot mutate persistent database state.
 func (c Conn) ExecuteReadCommand(stmt string) RemoteCommand {
+	p := newProtocol(EnginePostgres, stmt, false, false)
 	return RemoteCommand{
-		Command: c.wrap(shellJoin(c.dockerArgv(c.psqlArgv()))),
-		Stdin:   "BEGIN TRANSACTION READ ONLY;\n" + stmt + ";\nCOMMIT;\n",
+		Command:  c.wrap(shellJoin(c.dockerArgv(c.psqlArgv()))),
+		Stdin:    p.psql("start", "1") + "\nBEGIN TRANSACTION READ ONLY;\n" + statementSQL(stmt) + "\nCOMMIT;\n" + p.psql("commit", "acknowledged") + "\n",
+		Protocol: p,
 	}
 }
 
@@ -131,71 +140,44 @@ func (c Conn) ExecuteWithBackupCommand(stmt, table, where, path string, kind Bac
 	if kind != BackupRows && kind != BackupTable {
 		return RemoteCommand{}, fmt.Errorf("unsupported transactional backup kind %q", kind)
 	}
-	if containsNewline(where) {
+	if kind == BackupRows && containsNewline(where) {
 		return RemoteCommand{}, &BlockedError{Reason: "row backup WHERE clause must be single-line"}
 	}
+	if kind == BackupRows && !stableBackupPredicate(where) {
+		return RemoteCommand{}, unsupportedGuard("postgres", "row preimages require a stable predicate; use a table snapshot")
+	}
+	if err := ValidateBackupDir(path); err != nil {
+		return RemoteCommand{}, err
+	}
+	p := newProtocol(EnginePostgres, stmt, true, true)
+	p.BackupForm = "csv"
 	filter := ""
 	if kind == BackupRows && strings.TrimSpace(where) != "" {
 		filter = " WHERE " + strings.TrimSpace(where)
 	}
 	lines := []string{
+		p.psql("start", "1"),
 		"BEGIN;",
 		"LOCK TABLE " + table + " IN SHARE ROW EXCLUSIVE MODE;",
 		"SELECT 1 / (CASE WHEN " + relatedEffectsExpression(table, mutationVerb(stmt)) + " THEN 0 ELSE 1 END);",
 	}
-	if c.Docker == "" {
-		lines = append(lines, fmt.Sprintf(
-			"\\copy (SELECT * FROM %s%s) TO '%s' WITH (FORMAT csv, HEADER true, FORCE_QUOTE *)",
-			table, filter, psqlString(path)))
-		lines = append(lines, stmt+";", "COMMIT;")
-		return RemoteCommand{
-			Command: c.wrap(mkdirPrefix(path) + shellJoin(c.psqlArgv())),
-			Stdin:   strings.Join(lines, "\n") + "\n",
-		}, nil
-	}
-
-	sum := sha256.Sum256([]byte(path))
-	token := hex.EncodeToString(sum[:8])
-	startMarker := "__SSHX_BACKUP_BEGIN_" + token + "__"
-	endMarker := "__SSHX_BACKUP_END_" + token + "__"
 	lines = append(lines,
-		"\\echo "+startMarker,
+		p.psql("copy", "begin"),
 		fmt.Sprintf("COPY (SELECT * FROM %s%s) TO STDOUT WITH (FORMAT csv, HEADER true, FORCE_QUOTE *);", table, filter),
-		"\\echo "+endMarker,
+		p.psql("copy", "end"),
 	)
 	prelude := strings.Join(lines, "\n") + "\n"
-	mutation := stmt + ";\nCOMMIT;\n"
-	inputFIFO := path + ".stdin"
-	outputFIFO := path + ".stdout"
+	mutation := statementSQL(stmt) + "\n"
+	if p.Affected {
+		mutation += p.psql("affected", ":ROW_COUNT") + "\n"
+	}
+	mutation += "COMMIT;\n" + p.psql("commit", "acknowledged") + "\n"
 	psqlCommand := shellJoin(c.dockerArgv(c.psqlArgv("-q")))
-	command := mkdirPrefix(path) +
-		"rm -f " + maybeQuote(inputFIFO) + " " + maybeQuote(outputFIFO) + "; " +
-		"mkfifo " + maybeQuote(inputFIFO) + " " + maybeQuote(outputFIFO) + " || exit $?; " +
-		"cleanup_sqlx_fifos() { rm -f " + maybeQuote(inputFIFO) + " " + maybeQuote(outputFIFO) + "; }; " +
-		"trap cleanup_sqlx_fifos EXIT HUP INT TERM; " +
-		psqlCommand + " < " + maybeQuote(inputFIFO) + " > " + maybeQuote(outputFIFO) + " & psql_pid=$!; " +
-		"exec 3> " + maybeQuote(inputFIFO) + "; exec 4< " + maybeQuote(outputFIFO) + "; " +
-		"exec 5> " + maybeQuote(path) + " || { exec 3>&-; cat <&4 >/dev/null; wait \"$psql_pid\"; exit 1; }; " +
-		"printf '%s' " + shellQuote(prelude) + " >&3 || { exec 5>&-; exec 3>&-; cat <&4 >/dev/null; wait \"$psql_pid\"; exit 1; }; " +
-		"copying=0; end_seen=0; backup_failed=0; " +
-		"while IFS= read -r line <&4; do " +
-		"if [ \"$line\" = " + shellQuote(startMarker) + " ]; then copying=1; " +
-		"elif [ \"$line\" = " + shellQuote(endMarker) + " ]; then end_seen=1; break; " +
-		"elif [ \"$copying\" -eq 1 ]; then printf '%s\\n' \"$line\" >&5 || backup_failed=1; " +
-		"else printf '%s\\n' \"$line\"; fi; done; exec 5>&-; " +
-		"if [ \"$backup_failed\" -ne 0 ] || [ \"$end_seen\" -ne 1 ]; then " +
-		"exec 3>&-; cat <&4 >/dev/null; wait \"$psql_pid\"; exit 1; fi; " +
-		"printf '%s' " + shellQuote(mutation) + " >&3 || { exec 3>&-; cat <&4 >/dev/null; wait \"$psql_pid\"; exit 1; }; " +
-		"exec 3>&-; cat <&4; output_status=$?; wait \"$psql_pid\"; psql_status=$?; " +
-		"if [ \"$psql_status\" -ne 0 ]; then exit \"$psql_status\"; fi; exit \"$output_status\""
 	return RemoteCommand{
-		Command: c.wrap(command),
-		Stdin:   "",
+		Command:  c.wrap(streamLockedBackup(psqlCommand, prelude, mutation, path, p)),
+		Stdin:    "",
+		Protocol: p,
 	}, nil
-}
-
-func psqlString(value string) string {
-	return strings.ReplaceAll(value, "'", "''")
 }
 
 func mutationVerb(stmt string) string {

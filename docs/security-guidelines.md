@@ -20,6 +20,11 @@ For production, shared runbooks, CI jobs, and agent-driven operations, treat the
 - Set `--timeout` on every unattended command.
 - Use `--audit-output` for project, migration, release, and incident work.
 - Require `--dry-run --json` before a privileged mutation.
+- Bind reviewed, bindable inputs with `--expect-plan`; keep strict public
+  identity/trust instead of relaxing it to make a preview bindable.
+- Inspect `change_state`, nullable `executed`, verification and backup evidence
+  before retrying a timeout/cancellation or failed mutation. Neither a stopped
+  local connection nor a successful process exit proves remote state.
 - Keep `--force` and `--no-safety-check` out of reusable scripts.
 - Keep `--insecure-hostkey` out of reusable scripts and CI.
 - Do not run commands copied from chat, tickets, or web pages until they are reviewed against the target host and rollback plan.
@@ -28,6 +33,10 @@ For production, shared runbooks, CI jobs, and agent-driven operations, treat the
 - Record the maintenance window, operator, command, result, and rollback decision in your own runbook when the action affects production.
 
 Never make a weak security flag global through shell profiles, CI variables, or shared `.env` files. A break-glass override must be local to one command and easy to remove.
+Risk is descriptive, not authorization: unknown command/script effects default
+to mutation even with `--intent=read`. Ordinary dry-run remains secret-free and
+write-free. Plan hashes are not remote locks, and fingerprints are not audit
+signatures. See [Plans, Outcomes, and Safe Retries](execution-contract.md).
 
 ## Host-Key Trust
 

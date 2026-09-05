@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/talkincode/sshx/internal/sshclient"
-	"github.com/talkincode/sshx/pkg/errutil"
 )
 
 // SecretResolver reads typed keyring references. Implementations must not be
@@ -169,6 +169,7 @@ type RunOptions struct {
 
 // RunOutcome is the process-level summary for one accepted run.
 type RunOutcome struct {
+	Metadata
 	RunID   string
 	Counts  RunCounts
 	Results []TargetResult
@@ -197,6 +198,14 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 	if opts.Snapshot.Count == 0 || len(opts.Snapshot.Targets) == 0 {
 		return RunOutcome{}, ErrNoTargets
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if req.Limits.GlobalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = WithScopedTimeout(ctx, req.Limits.GlobalTimeout, "global")
+		defer cancel()
+	}
 	if opts.Dialer == nil {
 		opts.Dialer = DefaultDialer{}
 	}
@@ -210,25 +219,46 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 		}
 	}
 
-	runID := NewRunID()
-	var seq atomic.Int64
+	runID := req.ExecutionID
+	if runID == "" {
+		runID = NewRunID()
+		req.ExecutionID = runID
+	}
+	runMetadata := requestMetadata(req, runID)
+	var seq int64
 	var emitMu sync.Mutex
+	var deliveryErr error
 	emit := func(ev Event) {
-		// Assign sequence and publish under one lock so JSONL stream order is
-		// strictly monotonic even when workers finish concurrently.
 		emitMu.Lock()
 		defer emitMu.Unlock()
+		// A broken stream cannot promise further terminal records. Preserve all
+		// remote outcomes in memory and return the delivery failure separately.
+		if deliveryErr != nil {
+			return
+		}
+		if ev.Result != nil {
+			ev.Metadata = ev.Result.Metadata
+			ev.Target = &ev.Result.Target
+		} else if ev.ExecutionID == "" {
+			if ev.Target != nil {
+				ev.Metadata = targetMetadata(req, *ev.Target)
+			} else {
+				ev.Metadata = runMetadata
+			}
+		}
 		ev.SchemaVersion = EventSchemaVersion
 		ev.RunID = runID
 		ev.RequestID = req.RequestID
-		ev.Sequence = seq.Add(1)
+		seq++
+		ev.Sequence = seq
 		ev.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = opts.Events.WriteEvent(ev) //nolint:errcheck // event write failure must not rewrite remote outcomes
+		if err := opts.Events.WriteEvent(ev); err != nil {
+			deliveryErr = fmt.Errorf("%w: deliver %s event: %w", ErrLocalIO, ev.Kind, err)
+		}
 	}
 
 	counts := RunCounts{
 		Selected: len(opts.Snapshot.Targets),
-		Skipped:  len(opts.Snapshot.Skipped),
 	}
 	emit(Event{
 		Kind:           EventRunStarted,
@@ -236,32 +266,47 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 		SelectorDigest: opts.Snapshot.SelectorDigest,
 		Concurrency:    req.Limits.Concurrency,
 		FailureMode:    req.Policy.FailureMode,
+		MaxFailures:    req.Policy.MaxFailures,
 		Action:         &req.Action,
 	})
 
-	type job struct {
-		target ResolvedTarget
-	}
-	jobs := make(chan job)
 	results := make([]TargetResult, len(opts.Snapshot.Targets))
-	var resultsMu sync.Mutex
-	var startedCount atomic.Int64
-	var failFast atomic.Bool
+	// Admission and completed-failure accounting share one linearization
+	// point. A blocked event sink must not postpone the failure threshold.
+	var admissionMu sync.Mutex
+	next, failures, startedCount := 0, 0, 0
+	maxFailures := req.Policy.MaxFailures
+	if req.Policy.FailureMode == FailureFailFast {
+		maxFailures = 1
+	}
+	admit := func() (int, bool) {
+		admissionMu.Lock()
+		defer admissionMu.Unlock()
+		if next == len(results) || ctx.Err() != nil || (maxFailures > 0 && failures >= maxFailures) {
+			return 0, false
+		}
+		pos := next
+		next++
+		startedCount++
+		return pos, true
+	}
 	var wg sync.WaitGroup
 
 	worker := func() {
 		defer wg.Done()
-		for j := range jobs {
-			if ctx.Err() != nil || (req.Policy.FailureMode == FailureFailFast && failFast.Load()) {
-				res := skippedResult(req, j.target, "not_admitted")
-				resultsMu.Lock()
-				results[j.target.Index] = res
-				resultsMu.Unlock()
-				emit(Event{Kind: EventTargetFinished, Target: &j.target, Result: &res})
-				continue
+		for {
+			pos, ok := admit()
+			if !ok {
+				return
 			}
-			startedCount.Add(1)
-			emit(Event{Kind: EventTargetStarted, Target: &j.target})
+			target := opts.Snapshot.Targets[pos]
+			hostCtx := ctx
+			cancel := func() {}
+			if req.Limits.HostTimeout > 0 {
+				hostCtx, cancel = WithScopedTimeout(ctx, req.Limits.HostTimeout, "host")
+			}
+			metadata := targetMetadata(req, target)
+			emit(Event{Metadata: metadata, Kind: EventTargetStarted, Target: &target})
 			if opts.ActiveSessions != nil {
 				cur := opts.ActiveSessions.Add(1)
 				if opts.MaxObserved != nil {
@@ -273,19 +318,18 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 					}
 				}
 			}
-			res := executeOne(ctx, opts, j.target)
+			res := executeOneWithMetadata(hostCtx, opts, target, metadata)
+			cancel()
 			if opts.ActiveSessions != nil {
 				opts.ActiveSessions.Add(-1)
 			}
-			resultsMu.Lock()
-			results[j.target.Index] = res
-			resultsMu.Unlock()
-			emit(Event{Kind: EventTargetFinished, Target: &j.target, Result: &res})
-			if res.Status != StatusSucceeded {
-				if req.Policy.FailureMode == FailureFailFast {
-					failFast.Store(true)
-				}
+			admissionMu.Lock()
+			results[pos] = res
+			if res.Status == StatusFailed {
+				failures++
 			}
+			admissionMu.Unlock()
+			emit(Event{Kind: EventTargetFinished, Target: &target, Result: &res})
 		}
 	}
 
@@ -298,47 +342,28 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 		go worker()
 	}
 
-sendLoop:
-	for _, t := range opts.Snapshot.Targets {
-		select {
-		case <-ctx.Done():
-			// Remaining targets get terminal skipped events after close.
-			break sendLoop
-		default:
-		}
-		if req.Policy.FailureMode == FailureFailFast && failFast.Load() {
-			res := skippedResult(req, t, "fail_fast")
-			resultsMu.Lock()
-			results[t.Index] = res
-			resultsMu.Unlock()
-			emit(Event{Kind: EventTargetFinished, Target: &t, Result: &res})
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			res := skippedResult(req, t, "canceled")
-			resultsMu.Lock()
-			results[t.Index] = res
-			resultsMu.Unlock()
-			emit(Event{Kind: EventTargetFinished, Target: &t, Result: &res})
-		case jobs <- job{target: t}:
-		}
-	}
-	close(jobs)
 	wg.Wait()
 
-	// Ensure every selected target has a terminal result (canceled before admit).
+	reason := "max_failures"
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		reason = "deadline_exceeded"
+	case ctx.Err() != nil:
+		reason = "canceled"
+	case req.Policy.FailureMode == FailureFailFast:
+		reason = "fail_fast"
+	}
 	for i := range results {
 		if results[i].Status == "" {
 			t := opts.Snapshot.Targets[i]
-			results[i] = skippedResult(req, t, "canceled")
+			results[i] = skippedResult(ctx, req, t, reason)
 			emit(Event{Kind: EventTargetFinished, Target: &t, Result: &results[i]})
 		}
 	}
 
 	final := RunCounts{
 		Selected: len(opts.Snapshot.Targets),
-		Started:  int(startedCount.Load()),
+		Started:  startedCount,
 	}
 	for _, r := range results {
 		switch {
@@ -356,28 +381,145 @@ sendLoop:
 			final.Failed++
 		}
 	}
+	runMetadata.ObserveContext(ctx)
+	finishRunMetadata(&runMetadata, results, final)
 	emit(Event{
 		Kind:           EventRunFinished,
 		Counts:         &final,
 		SelectorDigest: opts.Snapshot.SelectorDigest,
 		Concurrency:    req.Limits.Concurrency,
 		FailureMode:    req.Policy.FailureMode,
+		MaxFailures:    req.Policy.MaxFailures,
 		Action:         &req.Action,
 	})
 
-	out := RunOutcome{RunID: runID, Counts: final, Results: results}
+	out := RunOutcome{Metadata: runMetadata, RunID: runID, Counts: final, Results: results}
 	if len(results) == 1 {
 		out.Single = ToResult(runID, req.RequestID, results[0])
 	}
-	return out, nil
+	return out, deliveryErr
 }
 
 type noopEvents struct{}
 
 func (noopEvents) WriteEvent(Event) error { return nil }
 
-func skippedResult(req *Request, t ResolvedTarget, reason string) TargetResult {
-	return TargetResult{
+func requestRisk(req *Request) (Risk, Effects) {
+	if req.Plan != nil {
+		return req.Plan.Risk, req.Plan.Effects
+	}
+	action := req.Action.Kind
+	if action == ActionSFTP {
+		action = req.Action.SftpAction
+	}
+	return ClassifyRisk(action, req.Action.Command, req.Action.UseSudo)
+}
+
+func retryIntent(req *Request) string {
+	risk, effects := requestRisk(req)
+	if risk == RiskRead && !effects.Unknown && !effects.RemoteWrite && !effects.LocalWrite &&
+		!effects.Privileged && !effects.Destructive {
+		return IntentRead
+	}
+	return IntentChange
+}
+
+func requestMetadata(req *Request, id string) Metadata {
+	m := NewMetadata(req.Plan, id)
+	m.Risk, m.Effects = requestRisk(req)
+	return m
+}
+
+func targetExecutionID(parent string, target ResolvedTarget) string {
+	identity, err := json.Marshal(struct {
+		Parent  string
+		Index   int
+		Address string
+		Port    string
+		User    string
+	}{parent, target.Index, target.Address, target.Port, target.User})
+	if err != nil {
+		panic(err) // The identity projection contains only strings and an integer.
+	}
+	sum := sha256.Sum256(identity)
+	return "target-" + hex.EncodeToString(sum[:])
+}
+
+func targetMetadata(req *Request, target ResolvedTarget) Metadata {
+	m := requestMetadata(req, targetExecutionID(req.ExecutionID, target))
+	m.ParentExecutionID = req.ExecutionID
+	return m
+}
+
+func observeTargetPeer(res *TargetResult, peer PeerIdentity) {
+	res.AuthMethod = peer.AuthMethod
+	res.PeerAddress = peer.Address
+	if peer.HostKeyFingerprint != "" {
+		res.Target.HostKeyFingerprint = peer.HostKeyFingerprint
+	}
+	res.Peers = append(res.Peers, peer)
+}
+
+func finishTargetMetadata(res *TargetResult) {
+	kind := ""
+	if res.Error != nil {
+		kind = res.Error.Kind
+	}
+	res.Finish(res.Status, res.Phase, res.Completion, res.ExitCode, kind)
+}
+
+func finishRunMetadata(m *Metadata, results []TargetResult, counts RunCounts) {
+	status, completion, code := StatusSucceeded, CompletionCompleted, 0
+	if counts.Succeeded != counts.Selected {
+		status, code = StatusFailed, 1
+	}
+	executed, unknownExecution, anyCompleted := false, false, false
+	m.ChangeState = "unchanged"
+	m.TargetFingerprints = make([]string, 0, len(results))
+	for _, r := range results {
+		m.TargetFingerprints = append(m.TargetFingerprints, r.ExecutionFingerprint)
+		if r.Executed == nil {
+			unknownExecution = true
+		} else if *r.Executed {
+			executed = true
+		}
+		if r.Completion == CompletionCompleted {
+			anyCompleted = true
+		} else {
+			completion = CompletionPartial
+		}
+		if r.ChangeState == "changed" {
+			m.ChangeState = "changed"
+		} else if r.ChangeState != "unchanged" && m.ChangeState != "changed" {
+			m.ChangeState = "unknown"
+		}
+	}
+	if !unknownExecution || executed {
+		m.Executed = &executed
+	}
+	if !executed && !unknownExecution {
+		completion = CompletionNotStarted
+	} else if counts.Uncertain > 0 {
+		completion = CompletionUnknown
+	} else if !anyCompleted {
+		completion = CompletionPartial
+	}
+	if executed {
+		m.Verification = "unsupported"
+	}
+	m.Finish(status, PhaseComplete, completion, code, "")
+}
+
+func skippedResult(ctx context.Context, req *Request, t ResolvedTarget, reason string) TargetResult {
+	kind := ErrorKindConfig
+	switch reason {
+	case "canceled":
+		kind = ErrorKindCancelled
+	case "deadline_exceeded":
+		kind = ErrorKindTimeout
+	}
+	res := TargetResult{
+		Metadata:   targetMetadata(req, t),
 		Target:     t,
 		Action:     req.Action,
 		Status:     StatusSkipped,
@@ -385,18 +527,35 @@ func skippedResult(req *Request, t ResolvedTarget, reason string) TargetResult {
 		Completion: CompletionNotStarted,
 		ExitCode:   -1,
 		Error: &ErrorInfo{
-			Kind:        ErrorKindConfig,
+			Kind:        kind,
 			Message:     reason,
 			Retryable:   false,
 			RetrySafety: RetryUnknown,
 		},
 	}
+	res.StartedAt = ""
+	res.ObserveContext(ctx)
+	finishTargetMetadata(&res)
+	return res
 }
 
 func executeOne(ctx context.Context, opts RunOptions, target ResolvedTarget) TargetResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if opts.Request.Limits.HostTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = WithScopedTimeout(ctx, opts.Request.Limits.HostTimeout, "host")
+		defer cancel()
+	}
+	return executeOneWithMetadata(ctx, opts, target, targetMetadata(opts.Request, target))
+}
+
+func executeOneWithMetadata(ctx context.Context, opts RunOptions, target ResolvedTarget, metadata Metadata) (res TargetResult) {
 	req := opts.Request
 	start := time.Now()
-	res := TargetResult{
+	res = TargetResult{
+		Metadata:   metadata,
 		Target:     target,
 		Action:     req.Action,
 		Status:     StatusFailed,
@@ -404,31 +563,57 @@ func executeOne(ctx context.Context, opts RunOptions, target ResolvedTarget) Tar
 		Completion: CompletionNotStarted,
 		ExitCode:   -1,
 	}
+	defer func() {
+		res.DurationMs = time.Since(start).Milliseconds()
+		res.ObserveContext(ctx)
+		finishTargetMetadata(&res)
+	}()
 
 	if err := ctx.Err(); err != nil {
 		res.Phase = PhaseAdmission
-		res.Error = BuildError(err, ErrorKindConfig, req.Action.Intent, CompletionNotStarted)
-		res.DurationMs = time.Since(start).Milliseconds()
-		return res
-	}
-
-	cfg := buildSSHConfig(req, target)
-	// Resolve secrets only for this target and only for required roles.
-	if err := applySecrets(cfg, req, target, opts.Secrets); err != nil {
-		res.Phase = PhaseAuthenticate
-		res.Error = BuildError(err, ErrorKindAuth, req.Action.Intent, CompletionNotStarted)
-		res.DurationMs = time.Since(start).Milliseconds()
+		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
 		return res
 	}
 
 	if err := SafetyCheck(req, payloadBytes(opts.Payload)); err != nil {
 		res.Phase = PhaseAdmission
-		res.Error = BuildError(err, ErrorKindBlocked, req.Action.Intent, CompletionNotStarted)
-		res.DurationMs = time.Since(start).Milliseconds()
+		res.Error = BuildError(err, ErrorKindBlocked, retryIntent(req), CompletionNotStarted)
+		return res
+	}
+	if req.Action.Kind != ActionCommand && req.Action.Kind != ActionScript {
+		res.Phase = PhaseAdmission
+		err := fmt.Errorf("%w: action kind %q not executable by run executor", ErrConfig, req.Action.Kind)
+		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
+		return res
+	}
+	if req.Action.Kind == ActionScript && opts.Payload == nil {
+		res.Phase = PhaseAdmission
+		res.Error = BuildError(fmt.Errorf("%w: missing script payload", ErrConfig), "", retryIntent(req), CompletionNotStarted)
 		return res
 	}
 
-	client, err := opts.Dialer.Connect(cfg)
+	cfg := buildSSHConfig(req, target)
+	cfg.Context = ctx
+	if err := applySecrets(cfg, req, target, opts.Secrets); err != nil {
+		res.Phase = PhaseAuthenticate
+		kind := Classify(err)
+		if kind == ErrorKindUnknown {
+			kind = ErrorKindAuth
+		}
+		res.Error = BuildError(err, kind, retryIntent(req), CompletionNotStarted)
+		return res
+	}
+	if err := ctx.Err(); err != nil {
+		res.Phase = PhaseAdmission
+		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
+		return res
+	}
+
+	dialer := opts.Dialer
+	if dialer == nil {
+		dialer = DefaultDialer{}
+	}
+	client, err := dialer.Connect(cfg)
 	if err != nil {
 		kind := Classify(err)
 		phase := PhaseConnect
@@ -437,59 +622,79 @@ func executeOne(ctx context.Context, opts RunOptions, target ResolvedTarget) Tar
 		}
 		res.Phase = phase
 		res.Completion = CompletionFor(phase, kind, false, false)
-		res.Error = BuildError(err, kind, req.Action.Intent, res.Completion)
-		res.DurationMs = time.Since(start).Milliseconds()
+		res.Error = BuildError(err, kind, retryIntent(req), res.Completion)
 		return res
 	}
-	defer errutil.HandleCloseError(&err, client)
+	if client == nil {
+		res.Error = BuildError(errors.New("dialer returned no client"), ErrorKindProtocol, retryIntent(req), CompletionNotStarted)
+		return res
+	}
+	defer func() { _ = client.Close() }() //nolint:errcheck // teardown does not invalidate observed remote outcomes
 
-	res.AuthMethod = string(client.AuthMethodUsed())
+	observeTargetPeer(&res, PeerIdentity{
+		Role:               "target",
+		Address:            client.PeerAddress(),
+		HostKeyFingerprint: client.HostKeyFingerprint(),
+		AuthMethod:         string(client.AuthMethodUsed()),
+		User:               cfg.User,
+		SSHPasswordKey:     firstNonEmpty(req.Policy.SSHPasswordKey, target.SSHPasswordKey),
+		SudoPasswordKey:    cfg.SudoKey,
+	})
+	if err := ctx.Err(); err != nil {
+		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
+		return res
+	}
 	res.Phase = PhaseExecute
-	remoteStarted := true
 
 	var execRes sshclient.ExecResult
 	var execErr error
 	switch req.Action.Kind {
 	case ActionCommand:
-		cfg.Command = req.Action.Command
 		execRes, execErr = client.RunCommand(true)
 	case ActionScript:
-		if opts.Payload == nil {
-			execErr = fmt.Errorf("%w: missing script payload", ErrConfig)
-		} else {
-			useSudo := req.Action.UseSudo
-			execRes, execErr = client.RunScriptWithShell(opts.Payload.Bytes, req.Action.ScriptRunner, useSudo)
-		}
-	default:
-		execErr = fmt.Errorf("%w: action kind %q not executable by run executor", ErrConfig, req.Action.Kind)
+		execRes, execErr = client.RunScriptWithShell(opts.Payload.Bytes, req.Action.ScriptRunner, req.Action.UseSudo)
 	}
 
-	res.DurationMs = time.Since(start).Milliseconds()
+	applyExecResult(&res, req, execRes, execErr)
+	return res
+}
+
+func applyExecResult(res *TargetResult, req *Request, execRes sshclient.ExecResult, execErr error) {
 	res.Stdout = execRes.Stdout
 	res.Stderr = execRes.Stderr
 	res.StdoutTruncated = execRes.StdoutTruncated
 	res.StderrTruncated = execRes.StderrTruncated
-	res.AuthMethod = string(client.AuthMethodUsed())
+	res.ExitCode = execRes.ExitCode
+	executed := execRes.Started || execRes.ExitObserved
+	res.Executed = &executed
+	if execRes.StartAttempted && !executed {
+		res.Executed = nil
+	}
+	if executed {
+		res.Verification = "unsupported"
+		if retryIntent(req) == IntentRead {
+			res.ChangeState = "unchanged"
+		}
+	}
+	if execErr == nil && !execRes.ExitObserved {
+		if execRes.Started {
+			execErr = sshclient.ErrNoExitStatus
+		} else {
+			execErr = &BoundaryError{Kind: ErrorKindProtocol, Message: "transport returned without an execution acknowledgement"}
+		}
+	}
 
 	if execErr != nil {
 		kind := Classify(execErr)
-		exitObserved := false
-		res.ExitCode = execRes.ExitCode
 		if kind == ErrorKindExitMissing {
 			res.Phase = PhaseCollect
 		}
-		res.Completion = CompletionFor(res.Phase, kind, remoteStarted, exitObserved)
-		// Timeout after start is partial.
-		if kind == ErrorKindTimeout {
-			res.Phase = PhaseExecute
-			res.Completion = CompletionPartial
-		}
+		res.Completion = CompletionForAttempt(res.Phase, kind, execRes.StartAttempted, execRes.Started, execRes.ExitObserved)
 		res.Status = StatusFailed
-		res.Error = BuildError(execErr, kind, req.Action.Intent, res.Completion)
-		return res
+		res.Error = BuildError(execErr, kind, retryIntent(req), res.Completion)
+		return
 	}
 
-	res.ExitCode = execRes.ExitCode
 	res.Phase = PhaseComplete
 	res.Completion = CompletionCompleted
 	if execRes.ExitCode != 0 {
@@ -497,33 +702,45 @@ func executeOne(ctx context.Context, opts RunOptions, target ResolvedTarget) Tar
 		res.Error = BuildError(
 			fmt.Errorf("remote command exited with status %d", execRes.ExitCode),
 			ErrorKindRemoteExit,
-			req.Action.Intent,
+			retryIntent(req),
 			CompletionCompleted,
 		)
-		return res
+		return
 	}
 	res.Status = StatusSucceeded
-	return res
 }
 
 func buildSSHConfig(req *Request, target ResolvedTarget) *sshclient.Config {
 	cfg := &sshclient.Config{
-		Host:                 target.Address,
-		Port:                 target.Port,
-		User:                 target.User,
-		KeyPath:              firstNonEmpty(req.Policy.KeyPath, target.KeyPath),
-		UseKeyAuth:           req.Policy.UseKeyAuth,
-		Timeout:              req.Limits.Timeout,
-		SafetyCheck:          req.Policy.SafetyCheckEnabled && !req.Policy.SafetyBypass,
-		Force:                req.Policy.SafetyBypass,
-		AcceptUnknownHost:    req.Policy.AcceptUnknownHost,
-		AllowInsecureHostKey: req.Policy.AllowInsecureHostKey,
-		KnownHostsPath:       req.Policy.KnownHostsPath,
-		JSONOutput:           true,
-		SudoKey:              firstNonEmpty(target.SudoPasswordKey, req.Policy.SudoPasswordKey),
-		Command:              req.Action.Command,
-		Mode:                 "ssh",
-		Bind:                 target.Bind,
+		Host:                   target.Address,
+		Port:                   target.Port,
+		User:                   target.User,
+		KeyPath:                firstNonEmpty(req.Policy.KeyPath, target.KeyPath),
+		UseKeyAuth:             req.Policy.UseKeyAuth,
+		Timeout:                req.Limits.Timeout,
+		HostTimeout:            req.Limits.HostTimeout,
+		GlobalTimeout:          req.Limits.GlobalTimeout,
+		MaxFailures:            req.Policy.MaxFailures,
+		MaxOutputBytes:         req.Limits.MaxOutputBytesPerTarget,
+		MaxPayloadBytes:        req.Limits.MaxPayloadBytes,
+		ExecutionID:            targetExecutionID(req.ExecutionID, target),
+		KnownHostsData:         target.KnownHostsData,
+		ExpectedKeyFingerprint: target.ExpectedKeyFingerprint,
+		SafetyCheck:            req.Policy.SafetyCheckEnabled && !req.Policy.SafetyBypass,
+		Force:                  req.Policy.SafetyBypass,
+		AcceptUnknownHost:      req.Policy.AcceptUnknownHost,
+		AllowInsecureHostKey:   req.Policy.AllowInsecureHostKey,
+		KnownHostsPath:         req.Policy.KnownHostsPath,
+		JSONOutput:             true,
+		SudoKey:                firstNonEmpty(target.SudoPasswordKey, req.Policy.SudoPasswordKey),
+		Command:                req.Action.Command,
+		Mode:                   "ssh",
+		Bind:                   target.Bind,
+	}
+	risk, _ := requestRisk(req)
+	cfg.Risk = string(risk)
+	if req.Plan != nil {
+		cfg.PlanHash = req.Plan.PlanHash
 	}
 	if cfg.Port == "" {
 		cfg.Port = "22"
@@ -535,6 +752,13 @@ func buildSSHConfig(req *Request, target ResolvedTarget) *sshclient.Config {
 }
 
 func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, secrets SecretResolver) error {
+	ctx := cfg.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// SSH login password: only explicit password, SSH_PASSWORD, or ssh_password_key.
 	if req.Policy.SSHPassword != "" {
 		cfg.Password = req.Policy.SSHPassword
@@ -545,6 +769,9 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 			return fmt.Errorf("%w: ssh password key %q requested without secret resolver", ErrConfig, sshKey)
 		}
 		pw, err := secrets.GetSSHPassword(sshKey)
+		if cause := ctx.Err(); cause != nil {
+			return cause
+		}
 		if err != nil {
 			return err
 		}
@@ -555,6 +782,9 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 	if !needSudo {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sudoKey := firstNonEmpty(req.Policy.SudoPasswordKey, target.SudoPasswordKey)
 	if sudoKey == "" {
 		sudoKey = sshclient.DefaultSudoKey
@@ -564,6 +794,9 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 		return fmt.Errorf("%w: sudo password key %q requested without secret resolver", ErrConfig, sudoKey)
 	}
 	pw, err := secrets.GetSudoPassword(sudoKey)
+	if cause := ctx.Err(); cause != nil {
+		return cause
+	}
 	if err != nil {
 		// Match legacy behavior for command mode: continue without auto-fill.
 		// For explicit script --sudo, fail closed.
@@ -580,6 +813,7 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 // with compatibility fields.
 func ToResult(runID, requestID string, tr TargetResult) *Result {
 	r := &Result{
+		Metadata:        tr.Metadata,
 		SchemaVersion:   ResultSchemaVersion,
 		RunID:           runID,
 		RequestID:       requestID,
@@ -601,6 +835,7 @@ func ToResult(runID, requestID string, tr TargetResult) *Result {
 		StderrTruncated: tr.StderrTruncated,
 		DurationMs:      tr.DurationMs,
 		AuthMethod:      tr.AuthMethod,
+		PeerAddress:     tr.PeerAddress,
 	}
 	if tr.Error != nil {
 		r.ErrorKind = tr.Error.Kind

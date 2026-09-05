@@ -2,9 +2,11 @@ package e2e
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,7 +46,12 @@ func TestCLISkillInstallIsStandaloneIdempotentAndConflictSafe(t *testing.T) {
 	assert.Equal(t, want, got, "compiled binary must install the canonical repository skill")
 	metadataInfo, err := os.Stat(filepath.Join(targetDir, ".sshx-managed.json"))
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o644), metadataInfo.Mode().Perm())
+	t.Run("POSIX metadata mode", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows synthetic mode bits are not POSIX permission evidence")
+		}
+		assert.Equal(t, os.FileMode(0o644), metadataInfo.Mode().Perm())
+	})
 
 	current := runSSHX(t, home, []string{"skill", "install", "--json"}, nil)
 	require.Equal(t, 0, current.exitCode, current.stderr)
@@ -77,16 +84,16 @@ func TestCLISkillInstallIsStandaloneIdempotentAndConflictSafe(t *testing.T) {
 }
 
 func TestCLISkillInstallRejectsSymlinkedDirectoryWithoutEscaping(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows skill installation is outside the current release scope")
-	}
-
 	home := t.TempDir()
 	root := t.TempDir()
 	outside := filepath.Join(root, "outside")
 	require.NoError(t, os.Mkdir(outside, 0o750))
 	linked := filepath.Join(root, "linked")
-	require.NoError(t, os.Symlink(outside, linked))
+	symlinkErr := os.Symlink(outside, linked)
+	if runtime.GOOS == "windows" && (errors.Is(symlinkErr, os.ErrPermission) || errors.Is(symlinkErr, syscall.Errno(1314))) {
+		t.Skipf("Windows symlink privilege unavailable: %v", symlinkErr)
+	}
+	require.NoError(t, symlinkErr)
 
 	result := runSSHX(t, home, []string{
 		"skill", "install", "--dir=" + linked, "--force", "--json",

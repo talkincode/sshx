@@ -1,6 +1,9 @@
 package sqlsafe
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Dialect captures engine-specific classification and backup policy.
 // Remote client invocation stays on SQLExecutor (Conn / SQLiteConn / MySQLConn).
@@ -37,7 +40,15 @@ func (mysqlDialect) Classify(sql string) (*Classification, error) {
 	return ClassifyMySQL(sql)
 }
 func (mysqlDialect) DecideBackup(cls *Classification, estimatedRows int64, opts Options) (BackupPlan, error) {
-	return DecideBackup(cls, estimatedRows, opts)
+	plan, err := DecideBackup(cls, estimatedRows, opts)
+	if err == nil && plan.Kind != BackupNone {
+		plan.Reason = strings.ReplaceAll(plan.Reason, "CSV", "hex-row")
+		if estimatedRows < 0 && plan.Kind == BackupRows {
+			plan.Kind = BackupTable
+			plan.Reason = "MySQL row estimate unavailable; taking a full-table hex-row snapshot"
+		}
+	}
+	return plan, err
 }
 
 // LookupDialect returns the dialect for a user-supplied --engine value.

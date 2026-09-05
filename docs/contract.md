@@ -12,7 +12,8 @@ renaming, or changing the meaning of a field, flag, exit code, or
 | Surface | Frozen names | Notes |
 | --- | --- | --- |
 | Request schema | `sshx.request.v1` | `sshx run` request envelope |
-| Result schema | `sshx.result.v1` | Single-target run / compatibility JSON |
+| Run result schema | `sshx.result.v1` | Single-target run; compatibility command JSON retains its legacy fields |
+| Plan schema | `sshx.plan.v1` | Nested in existing previews; does not replace `sshx.request.v1` |
 | Event schema | `sshx.event.v1` | JSONL `run_started` / `target_started` / `target_finished` / `run_finished` |
 | Host inventory | `sshx.hosts.v1` | `--host-list` and host mutation/test JSON |
 | Secrets | `sshx.secrets.v1` | `--password-check` / `--password-list` / `--password-set` JSON |
@@ -37,17 +38,35 @@ not be introduced for an existing invocation shape.
 - `--json` stdout stays a machine document. Human logs belong on stderr.
 - MCP tools return the CLI JSON verbatim. MCP does not grow a parallel schema.
 
-## 1.0 gate checklist
+## Additive execution hardening
 
-1.0 is not a date. It is this checklist:
+[Plans, Outcomes, and Safe Retries](execution-contract.md) defines
+`--expect-plan`, scalar risk and effects, execution identity/fingerprint,
+nullable execution observation, verification, deadlines and safe retry decisions.
+These fields do not redefine legacy `intent`, `changed`, `force`, completion,
+or exit status. New `plan_mismatch`, `plan_unresolved`, `cancelled`, and
+`verification_failed` categories are additive; parse categories, not error prose.
 
-- [x] stdio MCP server (`sshx mcp`) ships and is execution-equivalent to the CLI
-- [x] Windows unit-test + build matrix is green for the CLI/SSH core
-- [x] `internal/keyringstore` has unit coverage for system and e2e backends
-- [x] Versioned JSON contracts exist for run, sql, apply, hosts, secrets, audit
-- [ ] Windows E2E for plugin/skill/tests packages (tracked separately)
-- [x] No known contract-breaking TODOs on the frozen v1 field names above
-- [x] This policy is linked from README and AGENT.md
+Do not assume every historical JSON response had a schema tag or the same
+envelope. Run, apply, SQL, inspection, compatibility command and file operations
+retain their domain-specific payloads. Common metadata is additive, not a
+replacement JSON object. JSONL event names remain unchanged.
+
+## 1.0 evidence gates
+
+1.0 is not a date or a blanket checked box. Each gate needs evidence:
+
+| Gate | Evidence and remaining boundary |
+| --- | --- |
+| CLI/MCP contract parity | `internal/app/mcp_test.go`, `tests/e2e/mcp_e2e_test.go`; malformed streams and shutdown require their own tests |
+| Windows correctness | Native CI jobs, not a cross-build; POSIX permissions, login and signals are not Windows guarantees |
+| Secret backend lifecycle | `internal/keyringstore` plus isolated native-keyring runs; the e2e backend does not prove native integration |
+| Frozen JSON/JSONL and exits | Contract fixtures and compiled-binary tests; legacy envelopes must remain consumable |
+| Mutation/recovery evidence | Real file/SQL state and backup checks; mocked SQL counts do not prove engine transactions |
+
+See the [acceptance matrix](roadmap.md#issue-71-execution-hardening-evidence)
+for concrete test paths and named prerequisites. A test existing in the tree
+does not mean it ran on every platform.
 
 Until 1.0, minor versions may still add first-level capabilities. They must
 not break the frozen names in this document.

@@ -598,7 +598,11 @@ type hostTestJSONEntry struct {
 
 func emitHostActionJSON(doc hostActionJSON) error {
 	doc.SchemaVersion = "sshx.hosts.v1"
-	if err := encodeJSON(doc); err != nil {
+	envelope := struct {
+		hostActionJSON
+		localRiskMetadata
+	}{doc, localRiskFields("host", doc.Action)}
+	if err := encodeJSON(envelope); err != nil {
 		return fmt.Errorf("encode host result: %w", err)
 	}
 	return nil
@@ -683,10 +687,14 @@ func printHostListJSON(hosts []HostConfig) error {
 		entries = append(entries, *hostJSONEntry(host))
 	}
 	doc := struct {
+		localRiskMetadata
 		SchemaVersion string              `json:"schema_version"`
 		Count         int                 `json:"count"`
 		Hosts         []hostListJSONEntry `json:"hosts"`
-	}{SchemaVersion: "sshx.hosts.v1", Count: len(entries), Hosts: entries}
+	}{
+		localRiskMetadata: localRiskFields("host", "list"),
+		SchemaVersion:     "sshx.hosts.v1", Count: len(entries), Hosts: entries,
+	}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode host list: %w", err)

@@ -114,7 +114,7 @@ func TestDockerTransactionalBackupStreamsToHost(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, rc.Command, "COPY (SELECT * FROM users WHERE id=42) TO STDOUT")
 	assert.Contains(t, rc.Command, "docker exec -i -e PGPASSWORD pg-prod psql")
-	assert.Contains(t, rc.Command, ".sshx/sql-backups/x.csv.stdin")
+	assert.Contains(t, rc.Command, ".sshx/sql-backups/x.csv.stream-")
 	assert.Empty(t, rc.Stdin)
 	assert.NotContains(t, rc.Command, "password")
 }

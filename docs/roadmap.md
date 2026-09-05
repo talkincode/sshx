@@ -238,6 +238,10 @@ Agent / 自动化 / 人类运维者
 
 当前仓库已建立 `tests/e2e` 编译后二进制验收套件：测试进程通过真实 TCP SSH/SFTP 协议连接隔离服务端，并从进程退出码、stdout/stderr、JSON、远端文件/状态、`known_hosts`、settings、keyring 和审计 JSONL 观察结果。默认 keyring 场景使用仅在 `sshx_e2e` 构建标签下启用的隔离后端；macOS CI 还会创建临时系统 Keychain，验证生产二进制跨真实 OS keyring 的完整生命周期。组件测试不计作 CLI E2E，表内证据按实际边界标注。
 
+下表记录既有测试覆盖位置，不代表本次工作已在所有 OS/SQL 引擎上执行通过。
+特别是通过真实 SSH 调用模拟 SQL 客户端，仍不能证明真实数据库事务正确。
+issue #71 的新增边界、验证状态及外部前提单列在后面的证据矩阵。
+
 | 一级功能 | 风险 | 权限 | 修改状态 | Happy Path E2E | 失败路径 | 权限状态覆盖 | 失败恢复/回滚 | 现有证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 单次远程命令执行 | 高 | 是 | 可能 | ✅ | ✅ 远端非零/超时/异常断连 | ✅ operator/reader | ✅ 部分完成后重读状态 | `tests/e2e/cli_e2e_test.go` |
@@ -245,7 +249,7 @@ Agent / 自动化 / 人类运维者
 | dry-run 执行预览 | 中 | 否 | 否 | ✅ | ✅ 组件级无效计划 | 不适用：不获取远端权限 | ✅ 证明零连接、零信任/审计写入 | `tests/e2e/cli_e2e_test.go`、`internal/app/agentmode_test.go` |
 | 命名主机管理与 SSH config 导入 | 中 | 否 | 是，本地 | ✅ 导入后按别名执行 | ✅ 选择项缺失 | 不适用：单用户本地配置 | ✅ 失败选择不部分写入 | `tests/e2e/host_audit_e2e_test.go` |
 | SFTP 上传/下载/目录操作 | 高 | 是 | 是，远端 | ✅ | ✅ 只读端拒绝写入 | ✅ operator/reader | ✅ 失败上传无目标残留 | `tests/e2e/sftp_e2e_test.go` |
-| 远端到远端传输 | 高 | 是，两端 | 是，两端 | ✅ | ✅ 目标端只读 | ✅ 可写/只读目标 | ✅ 失败无残留，改用可写端重试 | `tests/e2e/sftp_e2e_test.go` |
+| 远端到远端传输 | 高 | 是，两端 | 是，目的端；源端只读 | ✅ | ✅ 目标端只读 | ✅ 可写/只读目标 | ✅ 失败无残留，改用可写端重试；不证明目录整体回滚 | `tests/e2e/sftp_e2e_test.go` |
 | keyring 凭据管理与认证回退 | 高 | 是 | 是，本地 secret | ✅ | ✅ 缺失 secret/公钥被拒 | ✅ key/password-fallback、stored/missing | ✅ 删除后缺失；可重新设置 | `tests/e2e/keyring_e2e_test.go`、`tests/e2e/cli_e2e_test.go` |
 | 加密本地保险库 | 高 | 是 | 是，本地 secret | ✅ set/check/sudo 注入 | ✅ get 拒绝、错误口令、过宽权限 | ✅ 0600 可读 / 0644 拒绝 | ✅ 失败写入保留原 vault 字节 | `tests/e2e/vault_e2e_test.go`、`internal/keyringstore/vault_test.go` |
 | host-key 校验 | 高 | 是，信任状态 | 可能修改 `known_hosts` | ✅ 显式信任后严格复用 | ✅ 未知/变更 key | ✅ strict/accept-unknown | ✅ 首次写入后重新严格连接 | `tests/e2e/cli_e2e_test.go` |
@@ -257,10 +261,98 @@ Agent / 自动化 / 人类运维者
 | 远端观察缓存 | 高 | 是 | 是，远端 JSON | ✅ 冷写入/热复用/并发原子替换 | ✅ TTL/boot ID、格式、大小、属主、权限、symlink、只读端 | ✅ 可写/只读 SFTP | ✅ 失败写入保留原有效快照 | `tests/e2e/inspect_plugin_e2e_test.go` |
 | 有界多主机执行 | 高 | 是 | 可能，多主机 | ✅ `sshx run` 组/标签选择 + concurrency 1/4/8/32 | ✅ fail_fast、部分失败、零匹配 | ✅ operator 密码角色 | ✅ 每个选中目标都有终态事件 | `tests/e2e/run_e2e_test.go`、`internal/execution/*_test.go` |
 | 可解释执行治理 | 高 | 是 | 可能 | ✅ run 契约 dry-run/digest/intent/bypass_reason | ✅ blocked、uncertain completion、typed error.kind | ✅ SSH login vs sudo key 分离 | ✅ completion 指导 verify_first/unsafe | `tests/e2e/run_e2e_test.go`、`internal/app/run.go`、`internal/execution` |
-| 受控 SQL 执行（PostgreSQL / SQLite） | 高 | 是 | 是，远端库 | ✅ sqlite 只读查询与带备份 UPDATE | ✅ 直连客户端阻断、ATTACH 分类拒绝、缺路径 | ✅ operator 密码角色 | ✅ UPDATE 前 CSV 可还原旧值 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
+| 受控 SQL 执行（SQLite） | 高 | 是 | 是，远端库 | sqlite3 可用时：只读查询与带备份 UPDATE | 直连客户端阻断、ATTACH 分类拒绝、缺路径 | operator SSH 密码角色；非完整 DB 权限矩阵 | UPDATE 前 CSV 可还原旧值；不等于全部失败注入 | `tests/e2e/sql_sqlite_e2e_test.go`、`internal/sqlsafe/*_test.go`、`internal/app/sql_test.go` |
 | 受控文件 Apply | 高 | 是 | 是，远端文件 | ✅ 创建/覆盖/幂等 | ✅ 哈希不匹配、符号链接、只读端 | ✅ operator/reader | ✅ 覆盖前备份可还原旧值 | `tests/e2e/apply_e2e_test.go`、`internal/app/apply_test.go`、`internal/sshclient/apply_test.go` |
 | stdio MCP 工具面 | 高 | 是 | 可能，经子进程 | ✅ initialize/tools/list/tools/call 真实执行 | ✅ force 缺 bypass_reason 被拒、非法输入本地拒绝 | ✅ operator 密码角色 | ✅ dry-run 零连接；审计 `entry=mcp` 可追溯 | `tests/e2e/mcp_e2e_test.go`、`internal/app/mcp_test.go` |
-| 审计查询/导出 | 中 | 否 | 否 | ✅ execute → query by run_id | ✅ 空结果 exit 0 | 不适用：本地只读 | 不适用：不改写审计文件 | `tests/e2e/host_audit_e2e_test.go`、`internal/app/audit_query_test.go` |
-| 受控 SQL（MySQL） | 高 | 是 | 是，远端库 | ✅ 只读查询与带备份 UPDATE | ✅ LOAD DATA / INTO OUTFILE 分类拒绝；run-mode mysql 客户端阻断且零连接 | ✅ operator 密码角色 | ✅ UPDATE 前快照 CSV 含旧值 | `tests/e2e/sql_mysql_e2e_test.go`、`internal/sqlsafe/mysql_test.go` |
+| 审计查询/导出 | 中 | 否 | 查询无写入；导出写本地目标 | ✅ execute → query by run_id | ✅ 空结果 exit 0 | 不适用：本地调用者 | 不改写源审计文件 | `tests/e2e/host_audit_e2e_test.go`、`internal/app/audit_query_test.go` |
+| 受控 SQL（MySQL） | 高 | 是 | 是，远端库 | 真实 SSH + 模拟 mysql 客户端；非真实引擎 | LOAD DATA / INTO OUTFILE 分类拒绝；run-mode mysql 阻断且零连接 | operator SSH 密码角色；非真实 DB 权限验证 | 模拟快照含旧值，不证明真实引擎回滚/原子性 | `tests/e2e/sql_mysql_e2e_test.go`、`tests/e2e/fake_mysql.py`、`internal/sqlsafe/mysql_test.go` |
 
-当前已达到已实现一级能力的覆盖底线。表中的剩余红项属于尚未实现的方向能力，而不是用组件测试掩盖的既有质量债。未来任何一级能力不得只以参数解析或组件测试作为完成依据；必须沿用编译后二进制边界补充 E2E，并同步更新本矩阵。
+不能据此声称完整平台/引擎验收已通过。任何一级能力不得只以参数解析或组件测试
+作为完成依据；必须补充相应外部边界 E2E，并如实记录不可用环境与未证明的保证。
+
+## Issue 71 execution hardening evidence
+
+本轮是执行原语加固，不是产品扩张；上述非目标不变。公开契约见
+[English](execution-contract.md) / [中文](zh/execution-contract.md)。
+“测试已存在”与“本次已执行通过”分开，不把跨平台编译、mock 或跳过计为真实验收。
+
+| Requirement / 要求 | In-tree evidence / 仓库证据 | Boundary / 验证边界与前提 |
+| --- | --- | --- |
+| Canonical plan/risk / 规范计划与风险 | `internal/execution/plan_test.go`、`risk_test.go`、`internal/app/plan_test.go` | 本地向量/准入测试；整个信任记录快照保守失效，不承诺仅相关记录失效 |
+| Legacy contract fixtures / 既有契约 fixture | `tests/e2e/contract_golden_e2e_test.go`、`tests/e2e/testdata/contract/` | 7 份增量兼容规范化 v1 JSON/JSONL fixture；不证明真实数据库事务 |
+| Bound CLI, offline rejection / 绑定与离线拒绝 | `tests/e2e/plan_e2e_test.go` | 编译后二进制、真实 SSH；DNS、缺公钥/信任、远端 SQL 身份应拒绝绑定；完整各动词矩阵仍需逐项证据 |
+| Effect/verification evidence / 副作用验证 | apply / SQL / SFTP 的领域测试与共享元数据 | 未知不可当 false；任意程序副作用、远端状态锁不在保证内 |
+| Invocation/target identity / 执行关联 | `internal/execution/lifecycle_test.go`、`tests/e2e/plan_e2e_test.go` | 身份/指纹为脱敏关联，不是签名、防重放或防篡改日志 |
+| Deadline/fan-out admission / 期限与准入 | `internal/execution/executor_test.go`、`lifecycle_test.go`、`internal/sshclient/transport_reliability_test.go` | 本地并发/协议故障测试；阈值只停止准入，不保证远端终止 |
+| Compiled-binary faults / 二进制故障路径 | `tests/e2e/reliability_e2e_test.go` | 缺失/损坏/加密 key、认证回退、信任损坏/变更/只读、损坏 settings、HOME/USERPROFILE 隔离；不自动证明所有传输阶段、原生 OS 或数据库故障 |
+| Apply recovery / 文件恢复 | `tests/e2e/apply_e2e_test.go`、`internal/sshclient/apply_test.go` | 服务端 rename 与 sudo 工具前提；SFTP 不是任意写入者 CAS |
+| File transfer effects / 传输副作用 | `tests/e2e/sftp_e2e_test.go` | 单文件/部分目录证据；不承诺目录整体原子回滚或大小即内容相同 |
+| SQL CLI engine effects / SQL CLI 效果 | `tests/e2e/reliability_sql_native_e2e_test.go`、SQLite E2E；旧 MySQL 模拟测试另列 | PostgreSQL/MySQL read/update/no-op/zero、备份回读、reader 拒绝/恢复 fixture 已存在；编译后 CLI 原生 opt-in 缺主机 psql/mysql 而失败，仍待 CI/原生客户端 |
+| SQL transaction engines / SQL 引擎事务 | `internal/sqlsafe/real_engine_integration_test.go` | 隔离 Docker 中真实 PostgreSQL 17.11 / MySQL 8.4.11：RollbackAndCommit、ConcurrentWriterExcludedFromPreimage 均通过；是生成 SQL/真实客户端/真实服务端组件集成，不是编译 CLI SSH E2E |
+| Audit diagnostics / 审计诊断 | `internal/app/audit_query_test.go`、`audit_test.go`、`tests/e2e/host_audit_e2e_test.go` | best-effort 持久化独立于执行结果；损坏行与真实读写错误不可吞掉 |
+| MCP parity / MCP 一致性 | `internal/app/mcp_test.go`、`tests/e2e/mcp_e2e_test.go` | stdio 子进程，受 watchdog/进度通道限制；中断流不能伪造完成 |
+| Native platforms / 原生平台 | `.github/workflows/ci.yml` 与平台测试 | 原生 Windows 执行、可隔离 keyring、POSIX 权限/信号各自验证；交叉编译不能替代 |
+
+2026-09-05 实现验证记录：macOS 执行器 `go test -race ./internal/execution`
+通过，准入/期限/身份/投递选择器重复 20 次通过；后续 peer 身份投影测试验证各字段
+变化影响目标及父指纹、执行 ID/计划关联保持稳定且 ToResult 保留同一元数据，
+并再次通过 executor race。这些是确定性 barrier、fake/cancel-aware
+dialer 与执行观测映射的组件证据，不涉及外部 SSH 认证、真实数据库或原生 Windows。
+文档/帮助的 `go test ./internal/app -run '^TestPrintUsage' -count=1` 也已通过。
+SQL 包 race、真实 SQLite 事务/证据测试与该范围 lint 已通过；
+SQLite 的本地证据本身不证明 PostgreSQL/MySQL，后者证据另列。
+传输范围 `go test -race ./internal/sshclient`、Transport/SFTPReliability/
+TransferReliability race 选择器重复 5 次通过，范围 lint 为 0 issues。
+`transport_reliability_test.go` 覆盖 loopback 协议取消、rekey、信任/签名 pin、
+输出上限、权限、短复制恢复、缺原子原语、部分目录和双端中转取消；Windows 仅
+测试交叉编译，不代表原生 Windows，也不证明引擎/审计/MCP 边界。
+该记录不扩展为全部外部边界或所有平台已通过。
+可靠性实现环境中 Windows 仅交叉编译与平台 lint，原生执行等待 CI。Windows CI
+选择的 Portable/Reliability/ContractGolden/CLI 认证、streams、failures、safety、
+dry-run、skill 子集已在 macOS 通过；不能算原生 Windows 通过。冻结 golden/认证/信任
+也在未修改 HEAD 快照上通过；settings 测试与 plugin/skill/keyring race 测试通过。
+MCP 范围的 app 定向测试与 `tests/e2e` 的全部 `TestMCP` 生产二进制测试已在
+macOS 通过；Windows/Linux app-test 仅完成交叉编译，不能据此宣称原生 MCP 验证。
+审计范围完整 race 测试已在集成代码上通过（无临时 overlay 替换），覆盖查询诊断、
+部分有效记录、执行关联与 apply/SQL 证据保留。
+编译后 CLI 的原生 PostgreSQL/MySQL opt-in 曾因缺少本地 `psql` / `mysql`
+失败，没有回退到 fake；该 CLI SSH E2E 范围仍待 CI/原生客户端。
+随后通过会话独占、无网络的 Docker fixture 和 `docker exec` 客户端适配器，
+运行实际 PostgreSQL 17.11 / MySQL 8.4.11，两个引擎的
+`TestSQLRealEngineRollbackAndCommit` 与
+`TestSQLRealEngineConcurrentWriterExcludedFromPreimage` 均通过。
+这是生成 SQL、真实客户端、真实服务器及隔离前镜像文件的组件集成，
+不是 mock，也不是编译后 CLI 跨 SSH E2E。没有使用生产资源或源码挂载。
+macOS 原生 keyring 只有明确隔离 fixture、且默认与唯一
+搜索列表 keychain 同时匹配才允许测试，不触碰用户日常钥匙链。
+
+可按需要运行现有选择器，而不是为文档修改启动全套测试：
+
+```bash
+go test ./internal/app -run '^TestPrintUsage' -count=1
+go test ./internal/execution -run 'Test.*(Plan|Risk|Lifecycle|Failure)' -count=1
+```
+
+具体引擎/平台测试的命令、是否跳过和外部服务前提，应随实现验证记录更新；
+MySQL 保证限于受支持策略与实际验证的 rollback/commit、并发写入案例，
+不能推广为所有语句/引擎或整个 CLI 流程的通用原子性。
+
+### Native SQL prerequisites
+
+CI 的 `sql-native` job 提供 PostgreSQL 16、MySQL 8.4 和 native `psql` /
+`mysql` / `sqlite3` 客户端。本地只能指向可销毁的 loopback 测试服务，不能使用生产库。
+
+- Compiled CLI / 编译后 CLI：`SSHX_E2E_REAL_SQL=1`，明确设置测试专用
+  `SSHX_E2E_PG_PASSWORD` / `SSHX_E2E_MYSQL_PASSWORD`；fixture 使用
+  `127.0.0.1:5432`（用户 `sshx`）和 `127.0.0.1:3306`（用户 `root`），
+  两者数据库均为 `sshx_e2e`。启用后缺客户端或服务应失败，不回退为模拟测试。
+- Engine transactions / 引擎事务：`SSHX_SQL_INTEGRATION_POSTGRES=1` 或
+  `SSHX_SQL_INTEGRATION_MYSQL=1`，并设置
+  `SSHX_SQL_INTEGRATION_{DATABASE,USER,HOST,PORT,PASSWORD}` 指向独立测试数据库。
+  SQLite 使用真实本地客户端；其他引擎未显式启用时跳过，不计为通过。
+
+```bash
+# Only after provisioning disposable services and explicit test credentials:
+SSHX_E2E_REAL_SQL=1 go test ./tests/e2e -run '^TestSQLRealEngineReliability$' -count=1
+go test ./internal/sqlsafe -run 'TestSQLRealEngine(RollbackAndCommit|ConcurrentWriterExcludedFromPreimage)' -count=1
+```

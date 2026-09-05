@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/zalando/go-keyring"
 )
 
 func withVaultEnv(t *testing.T, passphrase string) string {
@@ -107,6 +109,7 @@ func TestVaultMissingPassphraseFailsClosed(t *testing.T) {
 }
 
 func TestVaultDoesNotFallbackToKeyring(t *testing.T) {
+	keyring.MockInit()
 	root := withVaultEnv(t, "vault-only")
 	if err := Set("sshx", "k", "vault-secret"); err != nil {
 		t.Fatalf("Set: %v", err)
@@ -166,9 +169,6 @@ func TestVaultRejectsWorldReadableFile(t *testing.T) {
 }
 
 func TestVaultKeyFileUnlock(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX key-file mode checks are the contract under test")
-	}
 	root := withVaultEnv(t, "")
 	keyFile := filepath.Join(t.TempDir(), "vault.key")
 	if err := os.WriteFile(keyFile, []byte("file-passphrase\n"), 0o600); err != nil {
@@ -193,12 +193,17 @@ func TestVaultKeyFileUnlock(t *testing.T) {
 		t.Fatalf("Unlock = %q, want %s", Inspect().Unlock, UnlockKeyFile)
 	}
 
-	if err := os.Chmod(keyFile, 0o644); err != nil { // #nosec G302 -- deliberately creates an unsafe fixture
-		t.Fatalf("chmod key file: %v", err)
-	}
-	if _, err := Get("sshx", "k"); err == nil {
-		t.Fatal("Get succeeded with a world-readable vault key file")
-	}
+	t.Run("POSIX key file permissions", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows key-file unlock is covered above; POSIX mode checks are not ACL evidence")
+		}
+		if err := os.Chmod(keyFile, 0o644); err != nil { // #nosec G302 -- deliberately creates an unsafe fixture
+			t.Fatalf("chmod key file: %v", err)
+		}
+		if _, err := Get("sshx", "k"); err == nil {
+			t.Fatal("Get succeeded with a world-readable vault key file")
+		}
+	})
 }
 
 func TestVaultCorruptFileFailsClosed(t *testing.T) {

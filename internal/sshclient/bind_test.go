@@ -1,6 +1,7 @@
 package sshclient
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
@@ -156,7 +157,7 @@ func TestConnectDirectUsesResolvedLocalAddr(t *testing.T) {
 	orig := dialTCP
 	t.Cleanup(func() { dialTCP = orig })
 	var got net.Addr
-	dialTCP = func(addr string, localAddr net.Addr, timeout time.Duration) (net.Conn, error) {
+	dialTCP = func(ctx context.Context, addr string, localAddr net.Addr, timeout time.Duration) (net.Conn, error) {
 		got = localAddr
 		return nil, errors.New("dial blocked")
 	}
@@ -183,7 +184,7 @@ func TestConnectDirectInvalidBindDoesNotDial(t *testing.T) {
 	orig := dialTCP
 	t.Cleanup(func() { dialTCP = orig })
 	dialed := false
-	dialTCP = func(addr string, localAddr net.Addr, timeout time.Duration) (net.Conn, error) {
+	dialTCP = func(ctx context.Context, addr string, localAddr net.Addr, timeout time.Duration) (net.Conn, error) {
 		dialed = true
 		return nil, errors.New("should not dial")
 	}

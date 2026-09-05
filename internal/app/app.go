@@ -1,12 +1,14 @@
 package app
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/talkincode/sshx/internal/execution"
@@ -49,10 +51,20 @@ type commandJSONResult struct {
 	Bind            string `json:"bind,omitempty"`
 	ErrorKind       string `json:"error_kind,omitempty"`
 	Error           string `json:"error,omitempty"`
+	Phase           string `json:"phase"`
+	Completion      string `json:"completion"`
+	Executed        *bool  `json:"executed"`
 }
 
 // Run executes the CLI using the provided arguments (typically os.Args).
 func Run(args []string) (err error) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return RunContext(ctx, args)
+}
+
+// RunContext lets one-shot adapters share cancellation with the CLI entry point.
+func RunContext(ctx context.Context, args []string) (err error) {
 	// Handle usage
 	if len(args) < 2 {
 		PrintUsage()
@@ -71,7 +83,15 @@ func Run(args []string) (err error) {
 
 	// Parse command-line arguments
 	config := ParseArgs(args)
+	config.Context = ctx
+	config.ExecutionID = execution.NewRunID()
 	if config.ArgumentError != "" {
+		if config.Mode == "run" {
+			return reportRunRequestFailure(config, nil, fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError))
+		}
+		if config.Mode != "login" && (config.JSONOutput || config.JSONLOutput) {
+			return reportPlanFailure(config, nil, fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError))
+		}
 		return fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError)
 	}
 	applyCommandModeBypassReason(config, args)
@@ -83,15 +103,39 @@ func Run(args []string) (err error) {
 	// event itself: every tool call re-enters sshx as a one-shot child process
 	// that records its own audit trail with the MCP entry marker.
 	if config.Mode == "mcp" {
-		return RunMCPServer()
+		return RunMCPServerContext(ctx)
 	}
 
 	audit := newAuditRecorder(config)
 	defer func() {
+		if prepared := preparedFrom(config); prepared != nil && audit != nil && prepared.meta.ExecutionFingerprint == "" {
+			meta := prepared.meta
+			code := -1
+			if audit.event.ExitCode != nil {
+				code = *audit.event.ExitCode
+			}
+			completion := audit.event.Completion
+			if completion == "" {
+				completion = execution.CompletionUnknown
+				if err == nil {
+					completion = execution.CompletionCompleted
+				}
+			}
+			meta.Finish(audit.event.Outcome.Status, audit.event.Phase, completion, code, audit.event.Outcome.ErrorKind)
+			audit.event.Metadata = meta
+		}
 		if auditErr := audit.finish(config, err); auditErr != nil {
 			logger.GetLogger().Error("failed to write audit event: %v", auditErr)
 		}
 	}()
+	if config.ExpectPlan != "" && config.Mode != "run" && !remoteOperation(config) {
+		return reportPlanFailure(config, audit, fmt.Errorf("%w: --expect-plan is only supported for noninteractive remote operations", execution.ErrConfig))
+	}
+	if config.GlobalTimeout > 0 {
+		var cancel context.CancelFunc
+		config.Context, cancel = execution.WithScopedTimeout(config.Context, config.GlobalTimeout, "global")
+		defer cancel()
+	}
 
 	// Canonical multi-host / script execution contract.
 	if config.Mode == "run" {
@@ -104,8 +148,50 @@ func Run(args []string) (err error) {
 		}
 	}
 
+	if remoteOperation(config) {
+		if config.Mode == "apply" && config.Timeout == 0 {
+			config.Timeout = 60 * time.Second
+		}
+		prepared, prepareErr := prepareOperation(config)
+		if prepared != nil {
+			prepared.audit = audit
+			if prepared.cleanup != nil {
+				defer func() {
+					if cleanupErr := prepared.cleanup(); cleanupErr != nil {
+						logger.GetLogger().Error("failed to clean execution snapshot: %v", cleanupErr)
+					}
+				}()
+			}
+			attachPrepared(config, prepared)
+		}
+		if prepareErr != nil {
+			if config.DryRun && config.ExpectPlan == "" && prepared != nil {
+				if prepared.preview.Valid {
+					prepared.preview.Valid = false
+					prepared.preview.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: execution.Classify(prepareErr), Message: redactError(prepareErr)}
+					fillDryRunEffects(config, &prepared.preview)
+				}
+				return emitDryRunPlan(config)
+			}
+			return reportPlanFailure(config, audit, prepareErr)
+		}
+	}
+
 	if config.DryRun {
 		return emitDryRunPlan(config)
+	}
+	if config.Mode != "run" && remoteOperation(config) {
+		if config.HostTimeout > 0 {
+			var cancel context.CancelFunc
+			config.Context, cancel = execution.WithScopedTimeout(config.Context, config.HostTimeout, "host")
+			defer cancel()
+		}
+		if contextErr := config.Context.Err(); contextErr != nil {
+			return reportPlanFailure(config, audit, contextErr)
+		}
+		if secretErr := resolveSSHCredential(config); secretErr != nil {
+			return reportPlanFailure(config, audit, secretErr)
+		}
 	}
 
 	// Guarded SQL execution pipeline (owns its own SSH connection).
@@ -172,7 +258,13 @@ func Run(args []string) (err error) {
 	// Handle server-to-server transfer mode
 	if config.Mode == "transfer" {
 		if transferErr := HandleTransfer(config); transferErr != nil {
-			return fmt.Errorf("transfer failed: %w", transferErr)
+			if errors.Is(transferErr, ErrReported) {
+				return transferErr
+			}
+			if prepared := preparedFrom(config); prepared != nil && prepared.meta.ExecutionFingerprint != "" {
+				return transferErr
+			}
+			return reportPlanFailure(config, audit, fmt.Errorf("transfer failed: %w", transferErr))
 		}
 		return nil
 	}
@@ -206,8 +298,17 @@ func Run(args []string) (err error) {
 
 	// Auto-fill sudo password if needed
 	if sshclient.CommandUsesSudo(config.Command) && config.SudoKey != "" {
+		if contextErr := operationContextError(config); contextErr != nil {
+			return reportPlanFailure(config, audit, contextErr)
+		}
 		password, pwdErr := sshclient.GetSudoPassword(config.SudoKey)
+		if contextErr := operationContextError(config); contextErr != nil {
+			return reportPlanFailure(config, audit, contextErr)
+		}
 		if pwdErr != nil {
+			if config.ExpectPlan != "" {
+				return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "auth", fmt.Errorf("resolve admitted sudo credential: %w", pwdErr))
+			}
 			logger.GetLogger().Warning("failed to get sudo password from keyring: %v", pwdErr)
 			logger.GetLogger().Info("Continuing without sudo password auto-fill...")
 		} else {
@@ -225,7 +326,9 @@ func Run(args []string) (err error) {
 	defer errutil.HandleCloseError(&err, client)
 
 	// Connect to remote host (use direct connection for CLI mode, no need for pooling)
-	if err = client.ConnectDirect(); err != nil {
+	err = client.ConnectDirect()
+	recordConnectedPeer(config, client, "target")
+	if err != nil {
 		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, classifyError(err),
 			fmt.Errorf("failed to connect: %w", err))
 	}
@@ -235,10 +338,7 @@ func Run(args []string) (err error) {
 
 	// Handle SFTP mode
 	if config.Mode == "sftp" {
-		if err = client.ExecuteSftp(); err != nil {
-			return fmt.Errorf("SFTP operation failed: %w", err)
-		}
-		return nil
+		return runSFTP(client, config, audit)
 	}
 
 	// Handle SSH command execution
@@ -255,7 +355,9 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *au
 	audit.recordCommandResult(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
 
 	if config.JSONOutput {
-		emitCommandJSON(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
+		if outputErr := emitCommandJSON(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr); outputErr != nil {
+			return outputErr
+		}
 		if execErr != nil {
 			return ErrReported
 		}
@@ -263,6 +365,9 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *au
 			return &ExitError{Code: res.ExitCode}
 		}
 		return nil
+	}
+	if _, evidenceErr := finalizeLifecycle(config, commandResult(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)); evidenceErr != nil {
+		return evidenceErr
 	}
 
 	if execErr != nil {
@@ -278,17 +383,46 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *au
 // ErrReported so the caller exits silently), or returns the error unchanged for
 // the normal streamed path.
 func reportSSHFailure(config *sshclient.Config, audit *auditRecorder, authMethod sshclient.AuthMethod, kind string, err error) error {
+	if preparedFrom(config) == nil {
+		attachPrepared(config, &preparedOperation{meta: execution.NewMetadata(nil, config.ExecutionID), audit: audit})
+	}
 	audit.recordFailure(config, authMethod, kind, err)
 	if config.JSONOutput && config.Mode == "ssh" {
-		emitCommandJSON(config, authMethod, sshclient.ExecResult{ExitCode: -1}, 0, kind, err)
+		if outputErr := emitCommandJSON(config, authMethod, sshclient.ExecResult{ExitCode: -1}, 0, kind, err); outputErr != nil {
+			return outputErr
+		}
 		return ErrReported
+	}
+	if config.JSONOutput && config.Mode == "sftp" {
+		return reportPlanFailure(config, audit, err)
+	}
+	if config.Mode == "ssh" {
+		if _, evidenceErr := finalizeLifecycle(config, commandResult(config, authMethod, sshclient.ExecResult{ExitCode: -1}, 0, kind, err)); evidenceErr != nil {
+			return evidenceErr
+		}
 	}
 	return err
 }
 
 // emitCommandJSON writes a single JSON result line to stdout. Diagnostic logs go
 // to stderr, so stdout stays a pure machine-readable stream.
-func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, res sshclient.ExecResult, dur time.Duration, errKind string, execErr error) {
+func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, res sshclient.ExecResult, dur time.Duration, errKind string, execErr error) error {
+	return emitLifecycleJSON(config, commandResult(config, authMethod, res, dur, errKind, execErr))
+}
+
+func commandResult(config *sshclient.Config, authMethod sshclient.AuthMethod, res sshclient.ExecResult, dur time.Duration, errKind string, execErr error) commandJSONResult {
+	phase := execution.PhaseComplete
+	if execErr != nil {
+		phase = execution.PhaseExecute
+		if !res.StartAttempted && !res.Started {
+			phase = execution.PhaseAdmission
+		}
+	}
+	var executed *bool
+	if res.Started || !res.StartAttempted {
+		observed := res.Started
+		executed = &observed
+	}
 	result := commandJSONResult{
 		Host:            config.Host,
 		Port:            config.Port,
@@ -304,19 +438,18 @@ func emitCommandJSON(config *sshclient.Config, authMethod sshclient.AuthMethod, 
 		AuthMethod:      string(authMethod),
 		Bind:            config.Bind,
 		ErrorKind:       errKind,
+		Phase:           phase,
+		Completion:      execution.CompletionForAttempt(phase, errKind, res.StartAttempted, res.Started, res.ExitObserved),
+		Executed:        executed,
 	}
 	if execErr != nil {
 		result.Error = redactError(execErr)
-		if result.ExitCode == 0 {
+		if !res.ExitObserved {
 			result.ExitCode = -1
 		}
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(result); err != nil {
-		logger.GetLogger().Error("failed to encode JSON result: %v", err)
-	}
+	return result
 }
 
 // classifyError maps an sshx-level error to a stable machine-readable kind so an
@@ -378,6 +511,9 @@ func isIPAddress(host string) bool {
 
 // resolveHostFromSettings tries to resolve host configuration from settings
 func resolveHostFromSettings(config *sshclient.Config) error {
+	if publiclyResolved(config) {
+		return nil
+	}
 	// Load settings
 	settings, err := LoadSettings()
 	if err != nil {

@@ -2,352 +2,214 @@ package sshclient
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/talkincode/sshx/pkg/errutil"
 	"github.com/talkincode/sshx/pkg/logger"
 	"golang.org/x/crypto/ssh"
 )
 
+// RunCommand preserves nonzero remote exits as results, not transport errors.
 func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
-	lg := logger.GetLogger()
-	var result ExecResult
-
-	if c.config.SafetyCheck && !c.config.Force {
-		if validateErr := ValidateCommand(c.config.Command); validateErr != nil {
-			result.ExitCode = -1
-			return result, validateErr
-		}
-	} else if c.config.Force {
-		lg.Warning("Safety check skipped (--force mode)")
-	}
-
-	session, err := c.client.NewSession()
-	if err != nil {
-		result.ExitCode = -1
-		return result, fmt.Errorf("failed to create session: %w", err)
-	}
-	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
-
-	command := c.config.Command
-	if c.config.SudoPassword != "" && CommandUsesSudo(command) {
-		lg.Info("Auto-filling sudo password...")
-		command = sudoStdinCommand(command)
-		session.Stdin = strings.NewReader(c.config.SudoPassword + "\n")
-	}
-
-	if c.config.UsePTY && !capture {
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,
-			ssh.TTY_OP_ISPEED: 14400,
-			ssh.TTY_OP_OSPEED: 14400,
-		}
-		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
-			lg.Warning("failed to request PTY: %v", ptyErr)
-		}
-	}
-
-	var stdoutBuf, stderrBuf *cappedBuffer
-	if capture {
-		stdoutBuf = newCappedBuffer(MaxCaptureBytes)
-		stderrBuf = newCappedBuffer(MaxCaptureBytes)
-		session.Stdout = stdoutBuf
-		session.Stderr = stderrBuf
-	} else {
-		session.Stdout = os.Stdout
-		session.Stderr = os.Stderr
-	}
-
-	lg.Debug("Executing: %s", c.config.Command)
-	runErr := runSession(session, command, c.config.Timeout)
-
-	if capture {
-		result.Stdout = stdoutBuf.String()
-		result.Stderr = stderrBuf.String()
-		result.StdoutTruncated = stdoutBuf.Truncated()
-		result.StderrTruncated = stderrBuf.Truncated()
-	}
-
-	switch {
-	case runErr == nil:
-		result.ExitCode = 0
-		return result, nil
-	case errors.Is(runErr, ErrCommandTimeout):
-		result.ExitCode = -1
-		return result, runErr
-	}
-
-	var exitErr *ssh.ExitError
-	if errors.As(runErr, &exitErr) {
-		result.ExitCode = exitErr.ExitStatus()
-		return result, nil
-	}
-
-	var missingErr *ssh.ExitMissingError
-	if errors.As(runErr, &missingErr) {
-		result.ExitCode = -1
-		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
-	}
-
-	result.ExitCode = -1
-	return result, fmt.Errorf("command failed: %w", runErr)
+	return c.runConfiguredCommand(capture, c.config.UsePTY && !capture)
 }
 
-// RunScript streams a trusted local collector to a fresh SSH session using the
-// POSIX shell. The payload is never installed on the target.
+func (c *SSHClient) runConfiguredCommand(capture, pty bool) (ExecResult, error) {
+	if c.config.SafetyCheck && !c.config.Force {
+		if err := ValidateCommand(c.config.Command); err != nil {
+			return ExecResult{ExitCode: -1}, boundaryError("blocked", "validate command", err)
+		}
+	}
+	command := c.config.Command
+	var stdin io.Reader
+	if c.config.SudoPassword != "" && CommandUsesSudo(command) {
+		command = sudoStdinCommand(command)
+		stdin = strings.NewReader(c.config.SudoPassword + "\n")
+	}
+	return c.execute(command, stdin, capture, pty)
+}
+
+// RunScript streams a collector without installing it on the remote host.
 func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) {
 	return c.RunScriptWithShell(payload, "sh", useSudo)
 }
 
-// RunScriptWithShell streams a trusted local script to a fresh SSH session and
-// executes it with the named POSIX-shell-family interpreter. The payload is
-// never installed on the target. When useSudo is true, the password and script
-// share stdin in that order: sudo consumes one line and the shell consumes the
-// remaining bytes.
 func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo bool) (ExecResult, error) {
-	var result ExecResult
 	if shell == "" {
 		shell = "sh"
 	}
 	if !shellNames[shell] {
-		result.ExitCode = -1
-		return result, fmt.Errorf("unsupported script shell %q", shell)
+		return ExecResult{ExitCode: -1}, boundaryError("config", "prepare script", fmt.Errorf("unsupported script shell %q", shell))
 	}
-	if len(payload) == 0 {
-		result.ExitCode = -1
-		return result, fmt.Errorf("collector payload is empty")
+	limit := c.config.MaxPayloadBytes
+	if limit <= 0 {
+		limit = MaxCaptureBytes
 	}
-	if len(payload) > MaxCaptureBytes {
-		result.ExitCode = -1
-		return result, fmt.Errorf("collector payload exceeds %d-byte limit", MaxCaptureBytes)
+	if len(payload) > limit {
+		return ExecResult{ExitCode: -1}, boundaryError("config", "prepare script", fmt.Errorf("collector payload exceeds %d-byte limit", limit))
 	}
 	if useSudo && c.config.SudoPassword == "" {
-		result.ExitCode = -1
-		return result, fmt.Errorf("sudo inspection requires a resolved sudo password")
+		return ExecResult{ExitCode: -1}, boundaryError("auth", "prepare script", fmt.Errorf("sudo inspection requires a resolved sudo password"))
 	}
-
-	session, err := c.client.NewSession()
-	if err != nil {
-		result.ExitCode = -1
-		return result, fmt.Errorf("failed to create collector session: %w", err)
-	}
-	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
-
 	command := shell + " -s --"
-	stdin := bytes.NewReader(payload)
+	var stdin io.Reader = bytes.NewReader(payload)
 	if useSudo {
 		command = "sudo -S -p '' " + shell + " -s --"
-		stdin = bytes.NewReader(append(append([]byte(c.config.SudoPassword+"\n"), payload...), '\n'))
+		stdin = io.MultiReader(strings.NewReader(c.config.SudoPassword+"\n"), bytes.NewReader(payload), strings.NewReader("\n"))
 	}
-	session.Stdin = stdin
-	stdoutBuf := newCappedBuffer(MaxCaptureBytes)
-	stderrBuf := newCappedBuffer(MaxCaptureBytes)
-	session.Stdout = stdoutBuf
-	session.Stderr = stderrBuf
-
-	runErr := runSession(session, command, c.config.Timeout)
-	result.Stdout = stdoutBuf.String()
-	result.Stderr = stderrBuf.String()
-	result.StdoutTruncated = stdoutBuf.Truncated()
-	result.StderrTruncated = stderrBuf.Truncated()
-
-	switch {
-	case runErr == nil:
-		result.ExitCode = 0
-		return result, nil
-	case errors.Is(runErr, ErrCommandTimeout):
-		result.ExitCode = -1
-		return result, runErr
-	}
-	var exitErr *ssh.ExitError
-	if errors.As(runErr, &exitErr) {
-		result.ExitCode = exitErr.ExitStatus()
-		return result, nil
-	}
-	var missingErr *ssh.ExitMissingError
-	if errors.As(runErr, &missingErr) {
-		result.ExitCode = -1
-		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
-	}
-	result.ExitCode = -1
-	return result, fmt.Errorf("collector failed: %w", runErr)
+	return c.execute(command, stdin, true, false)
 }
 
-// RunCommandWithInput runs a caller-assembled command on a fresh SSH session
-// with the given bytes streamed to its stdin, capturing separated output. It
-// is used by the sql mode, whose commands are built from validated templates
-// and may carry a leading secret line on stdin (never in argv).
+// RunCommandWithInput carries caller-prepared data and secrets over stdin.
 func (c *SSHClient) RunCommandWithInput(command string, stdin []byte) (ExecResult, error) {
-	var result ExecResult
 	if strings.TrimSpace(command) == "" {
-		result.ExitCode = -1
-		return result, fmt.Errorf("command is empty")
+		return ExecResult{ExitCode: -1}, boundaryError("config", "prepare command", fmt.Errorf("command is empty"))
 	}
+	return c.execute(command, bytes.NewReader(stdin), true, false)
+}
 
-	session, err := c.client.NewSession()
+func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) (ExecResult, error) {
+	result := ExecResult{ExitCode: -1}
+	conn, err := c.sshConnection()
 	if err != nil {
-		result.ExitCode = -1
-		return result, fmt.Errorf("failed to create session: %w", err)
+		return result, err
+	}
+	session, err := conn.NewSession()
+	if err != nil {
+		return result, c.transportError("connect", "create session", err)
 	}
 	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
-
-	session.Stdin = bytes.NewReader(stdin)
-	stdoutBuf := newCappedBuffer(MaxCaptureBytes)
-	stderrBuf := newCappedBuffer(MaxCaptureBytes)
-	session.Stdout = stdoutBuf
-	session.Stderr = stderrBuf
-
-	runErr := runSession(session, command, c.config.Timeout)
-	result.Stdout = stdoutBuf.String()
-	result.Stderr = stderrBuf.String()
-	result.StdoutTruncated = stdoutBuf.Truncated()
-	result.StderrTruncated = stderrBuf.Truncated()
-
-	switch {
-	case runErr == nil:
+	session.Stdin = stdin
+	if pty {
+		modes := ssh.TerminalModes{ssh.ECHO: 0, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
+		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
+			if c.transportContext().Err() != nil {
+				return result, c.transportError("connect", "request PTY", ptyErr)
+			}
+			logger.GetLogger().Warning("failed to request PTY: %v", ptyErr)
+		}
+	}
+	stdout, stderr := newCappedBuffer(c.captureLimit()), newCappedBuffer(c.captureLimit())
+	if capture {
+		session.Stdout, session.Stderr = stdout, stderr
+	} else {
+		session.Stdout, session.Stderr = os.Stdout, os.Stderr
+	}
+	ctx := c.transportContext()
+	var cancel context.CancelFunc
+	if c.config.Timeout > 0 {
+		ctx, cancel = context.WithTimeoutCause(ctx, c.config.Timeout, ErrCommandTimeout)
+		defer cancel()
+	}
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = c.Close() //nolint:errcheck // socket teardown unblocks Start, Wait and SSH copies
+		close(finished)
+	})
+	err = ctx.Err()
+	if err == nil {
+		result.StartAttempted = true
+		err = session.Start(command)
+		if err == nil {
+			result.Started = true
+			err = session.Wait()
+			var exit *ssh.ExitError
+			result.ExitObserved = err == nil || errors.As(err, &exit)
+			if err == nil {
+				result.ExitCode = 0
+			} else if exit != nil {
+				result.ExitCode = exit.ExitStatus()
+			}
+		}
+	}
+	if !stop() {
+		<-finished
+	}
+	if capture {
+		result.Stdout, result.Stderr = stdout.String(), stderr.String()
+		result.StdoutTruncated, result.StderrTruncated = stdout.Truncated(), stderr.Truncated()
+	}
+	// An observed exit remains evidence even if the outer budget expires while
+	// final output is being drained. Never infer an exit from a local close.
+	if cause := ctx.Err(); cause != nil {
+		if errors.Is(context.Cause(ctx), ErrCommandTimeout) {
+			cause = errors.Join(ErrCommandTimeout, cause)
+		}
+		return result, boundaryError("remote_io", "execute command", cause)
+	}
+	if err == nil {
 		result.ExitCode = 0
 		return result, nil
-	case errors.Is(runErr, ErrCommandTimeout):
-		result.ExitCode = -1
-		return result, runErr
 	}
-	var exitErr *ssh.ExitError
-	if errors.As(runErr, &exitErr) {
-		result.ExitCode = exitErr.ExitStatus()
+	var exit *ssh.ExitError
+	if errors.As(err, &exit) {
+		result.ExitCode = exit.ExitStatus()
 		return result, nil
 	}
-	var missingErr *ssh.ExitMissingError
-	if errors.As(runErr, &missingErr) {
-		result.ExitCode = -1
-		return result, fmt.Errorf("%w: %v", ErrNoExitStatus, runErr)
+	var missing *ssh.ExitMissingError
+	if errors.As(err, &missing) {
+		return result, boundaryError("exit_missing", "execute command", errors.Join(ErrNoExitStatus, err))
 	}
-	result.ExitCode = -1
-	return result, fmt.Errorf("command failed: %w", runErr)
+	return result, c.transportError("remote_io", "execute command", err)
 }
 
-// runSession runs command on session, optionally bounded by timeout. When the
-// timeout fires the session is closed (which unblocks Run) and we wait for the
-// run goroutine to finish before returning, so capture buffers are no longer
-// being written and are safe to read.
-func runSession(session *ssh.Session, command string, timeout time.Duration) error {
-	if timeout <= 0 {
-		return session.Run(command)
+func (c *SSHClient) captureLimit() int {
+	if c.config.MaxOutputBytes > 0 {
+		return c.config.MaxOutputBytes
 	}
-
-	done := make(chan error, 1)
-	go func() { done <- session.Run(command) }()
-
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(timeout):
-		_ = session.Signal(ssh.SIGKILL) //nolint:errcheck // best-effort kill on timeout
-		_ = session.Close()             //nolint:errcheck // best-effort close on timeout
-		<-done
-		return ErrCommandTimeout
-	}
+	return MaxCaptureBytes
 }
 
-// ExecuteCommandWithOutput executes a command and returns the output
-func (c *SSHClient) ExecuteCommandWithOutput() (output string, err error) {
-	lg := logger.GetLogger()
-
-	if c.config.SafetyCheck && !c.config.Force {
-		if validateErr := ValidateCommand(c.config.Command); validateErr != nil {
-			return "", validateErr
-		}
-	}
-
-	session, err := c.client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("failed to create session: %w", err)
-	}
-	// Use new error handling mechanism
-	defer errutil.HandleCloseError(&err, session)
-
+// ExecuteCommandWithOutput is the legacy combined-output adapter.
+func (c *SSHClient) ExecuteCommandWithOutput() (string, error) {
 	useSudo := c.config.SudoPassword != "" && CommandUsesSudo(c.config.Command)
-	command := c.config.Command
-	if useSudo {
-		// Feed the sudo password via stdin instead of embedding it in the
-		// command string (avoids quote breakage and shell injection).
-		command = sudoStdinCommand(command)
-		session.Stdin = strings.NewReader(c.config.SudoPassword + "\n")
-	} else {
-		// Request PTY for better compatibility on the non-sudo path.
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,
-			ssh.TTY_OP_ISPEED: 14400,
-			ssh.TTY_OP_OSPEED: 14400,
-		}
-		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
-			lg.Warning("failed to request PTY: %v", ptyErr)
-		}
+	result, err := c.runConfiguredCommand(true, !useSudo)
+	if err != nil {
+		return "", err
 	}
-
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	execErr := session.Run(command)
-
-	// Build output
-	output = stdout.String()
-	stderrStr := stderr.String()
-
-	// Use enhanced error handling
-	if execErr != nil {
-		enhancedErr := errutil.EnhanceError(execErr, output, stderrStr)
-		if enhancedErr != nil {
-			return "", enhancedErr
-		}
-		// If EnhanceError returns nil, it means EOF with output (success)
+	if result.ExitCode != 0 {
+		return "", boundaryError("remote_exit", "execute command", fmt.Errorf("remote command exited with status %d: %s", result.ExitCode, result.Stderr))
 	}
-
-	// For successful execution, include stderr in output if present
-	if stderrStr != "" {
-		output += "\n--- STDERR ---\n" + stderrStr
+	output := result.Stdout
+	if result.Stderr != "" {
+		output += "\n--- STDERR ---\n" + result.Stderr
 	}
-
 	return output, nil
 }
 
-// ExecResult captures the outcome of running a remote command.
+// ExecResult distinguishes a positive start acknowledgement from observed exit.
+// A disconnect after Started does not prove remote termination or rollback.
 type ExecResult struct {
 	ExitCode        int
 	Stdout          string
 	Stderr          string
 	StdoutTruncated bool
 	StderrTruncated bool
+	Started         bool
+	ExitObserved    bool
+	// StartAttempted without Started means the exec request may have reached
+	// the peer but no positive acknowledgement was observed.
+	StartAttempted bool
 }
 
-// MaxCaptureBytes bounds how much stdout/stderr is buffered in capture mode so
-// a runaway command cannot exhaust memory.
-const MaxCaptureBytes = 10 << 20 // 10 MiB
+const MaxCaptureBytes = 10 << 20
 
 var (
-	// ErrCommandTimeout indicates the command exceeded the configured timeout.
 	ErrCommandTimeout = errors.New("command execution timed out")
-	// ErrNoExitStatus indicates the remote closed the session without reporting
-	// an exit status (for example, the command was terminated by a signal).
-	ErrNoExitStatus = errors.New("remote command terminated without exit status")
+	ErrNoExitStatus   = errors.New("remote command terminated without exit status")
 )
 
-// cappedBuffer accumulates output up to a byte limit and records truncation.
-// Writes beyond the limit are discarded but still reported as fully consumed so
-// the underlying ssh copy loop keeps draining the channel without blocking.
 type cappedBuffer struct {
 	buf       bytes.Buffer
 	limit     int
 	truncated bool
 }
 
-func newCappedBuffer(limit int) *cappedBuffer {
-	return &cappedBuffer{limit: limit}
-}
+func newCappedBuffer(limit int) *cappedBuffer { return &cappedBuffer{limit: limit} }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	if c.limit > 0 {
@@ -370,11 +232,6 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 func (c *cappedBuffer) String() string  { return c.buf.String() }
 func (c *cappedBuffer) Truncated() bool { return c.truncated }
 
-// sudoStdinCommand rewrites a command that begins with "sudo" so that sudo
-// reads the password from standard input (-S) using an empty prompt. The
-// password itself is supplied through the SSH session's stdin and is never
-// interpolated into the command string, which previously broke on quotes and
-// allowed shell injection.
 func sudoStdinCommand(command string) string {
 	remainder, ok := leadingSudoRemainder(command)
 	if !ok {

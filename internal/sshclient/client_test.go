@@ -148,6 +148,19 @@ func TestConfig_Defaults(t *testing.T) {
 	assert.Equal(t, DefaultSSHUser, client.config.User)
 }
 
+func TestConfigPreparedEndpoints(t *testing.T) {
+	source := &Config{Host: "source.example"}
+	destination := &Config{Host: "destination.example"}
+	client, err := NewSSHClient(&Config{
+		Host:                "transfer.example",
+		TransferSource:      source,
+		TransferDestination: destination,
+	})
+	require.NoError(t, err)
+	assert.Same(t, source, client.config.TransferSource)
+	assert.Same(t, destination, client.config.TransferDestination)
+}
+
 func TestConfig_CustomValues(t *testing.T) {
 	config := &Config{
 		Host:        "custom.host",

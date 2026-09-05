@@ -1,119 +1,133 @@
 package sshclient
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"os"
 	"path"
 
 	"github.com/pkg/sftp"
-	"github.com/talkincode/sshx/pkg/errutil"
-	"github.com/talkincode/sshx/pkg/logger"
 )
 
-// TransferTo streams files from this client's remote host directly to the
-// destination client's remote host over SFTP, relaying the data through the
-// local machine without writing it to local disk. It supports single files
-// and recursive directory transfers.
-func (c *SSHClient) TransferTo(dst *SSHClient, srcPath, dstPath string) (err error) {
-	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("both source and destination paths are required")
-	}
+// TransferTo preserves the error-only legacy API.
+func (c *SSHClient) TransferTo(dst *SSHClient, srcPath, dstPath string) error {
+	_, err := c.TransferToResult(dst, srcPath, dstPath)
+	return err
+}
 
-	srcSftp, err := sftp.NewClient(c.client)
+// TransferToResult relays through memory with per-file atomic publication where
+// supported. Canceling either endpoint tears down both owned transports.
+func (c *SSHClient) TransferToResult(dst *SSHClient, srcPath, dstPath string) (out *SFTPOutcome, err error) {
+	out = &SFTPOutcome{Action: "transfer", SourcePath: srcPath, DestinationPath: dstPath, Phase: "connect"}
+	defer func() { finishSFTPOutcome(out, err) }()
+	if dst == nil || srcPath == "" || dstPath == "" {
+		out.Phase = "admission"
+		return out, boundaryError("config", "transfer", fmt.Errorf("both endpoints and paths are required"))
+	}
+	ctx, cancel := context.WithCancelCause(c.transportContext())
+	defer cancel(nil)
+	dstCtx := dst.transportContext()
+	destinationStopped := make(chan struct{})
+	stopDestination := context.AfterFunc(dstCtx, func() {
+		cancel(dstCtx.Err())
+		close(destinationStopped)
+	})
+	closed := make(chan struct{})
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = c.Close()   //nolint:errcheck // both sockets are owned by this transfer
+		_ = dst.Close() //nolint:errcheck // source cancellation must unblock destination writes
+		close(closed)
+	})
+	defer func() {
+		if !stopDestination() {
+			<-destinationStopped
+		}
+		if !stopClose() {
+			<-closed
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			err = boundaryError("remote_io", "transfer", cause)
+		} else if err != nil {
+			err = boundaryError("remote_io", "transfer", err)
+		}
+	}()
+	if contextErr := ctx.Err(); contextErr != nil {
+		return out, contextErr
+	}
+	if contextErr := dstCtx.Err(); contextErr != nil {
+		cancel(contextErr)
+		return out, contextErr
+	}
+	srcSFTP, err := c.newSFTPClient()
 	if err != nil {
-		return fmt.Errorf("failed to create SFTP client on source host: %w", err)
+		return out, err
 	}
-	defer errutil.HandleCloseError(&err, srcSftp)
-
-	dstSftp, err := sftp.NewClient(dst.client)
+	defer closeSFTP(srcSFTP, &err)
+	dstSFTP, err := dst.newSFTPClient()
 	if err != nil {
-		return fmt.Errorf("failed to create SFTP client on destination host: %w", err)
+		return out, err
 	}
-	defer errutil.HandleCloseError(&err, dstSftp)
-
-	srcStat, err := srcSftp.Stat(srcPath)
+	defer closeSFTP(dstSFTP, &err)
+	out.Phase = "execute"
+	srcInfo, err := srcSFTP.Lstat(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat source path %s: %w", srcPath, err)
+		return out, err
 	}
-
-	// If the destination is an existing directory, place the source inside it.
-	if dstStat, statErr := dstSftp.Stat(dstPath); statErr == nil && dstStat.IsDir() {
+	if dstInfo, statErr := dstSFTP.Lstat(dstPath); statErr == nil && dstInfo.IsDir() {
 		dstPath = remotePathJoin(dstPath, path.Base(srcPath))
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return out, statErr
 	}
-
-	if srcStat.IsDir() {
-		return transferDirectory(srcSftp, dstSftp, srcPath, dstPath)
-	}
-	return transferFile(srcSftp, dstSftp, srcPath, dstPath, srcStat.Mode())
+	out.DestinationPath = dstPath
+	out.directory = srcInfo.IsDir()
+	err = transferEntry(ctx, srcSFTP, dstSFTP, srcPath, dstPath, srcInfo, out)
+	out.operationComplete = err == nil
+	return out, err
 }
 
-// transferDirectory recursively copies a remote directory tree from the
-// source SFTP session to the destination SFTP session.
-func transferDirectory(srcSftp, dstSftp *sftp.Client, srcDir, dstDir string) error {
-	if err := dstSftp.MkdirAll(dstDir); err != nil {
-		return fmt.Errorf("failed to create destination directory %s: %w", dstDir, err)
+func transferEntry(ctx context.Context, source, destination *sftp.Client, srcPath, dstPath string, info os.FileInfo, out *SFTPOutcome) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	entries, err := srcSftp.ReadDir(srcDir)
-	if err != nil {
-		return fmt.Errorf("failed to read source directory %s: %w", srcDir, err)
-	}
-
-	for _, entry := range entries {
-		srcEntry := remotePathJoin(srcDir, entry.Name())
-		dstEntry := remotePathJoin(dstDir, entry.Name())
-
-		switch {
-		case entry.IsDir():
-			if err := transferDirectory(srcSftp, dstSftp, srcEntry, dstEntry); err != nil {
-				return err
-			}
-		case entry.Mode().IsRegular():
-			if err := transferFile(srcSftp, dstSftp, srcEntry, dstEntry, entry.Mode()); err != nil {
-				return err
-			}
-		default:
-			logger.GetLogger().Warning("Skipping non-regular file: %s", srcEntry)
+	if info.IsDir() {
+		entry := FileOutcome{SourcePath: srcPath, Path: dstPath, Type: "directory", ChangeState: "unchanged", Verification: "not_performed"}
+		err := ensureRemoteDirectory(ctx, destination, &entry)
+		out.Entries = append(out.Entries, entry)
+		if err != nil {
+			return err
 		}
+		files, err := source.ReadDir(srcPath)
+		if err != nil {
+			return err
+		}
+		for _, child := range files {
+			if err := transferEntry(ctx, source, destination, remotePathJoin(srcPath, child.Name()), remotePathJoin(dstPath, child.Name()), child, out); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return nil
-}
-
-// transferFile streams a single remote file from the source SFTP session to
-// the destination SFTP session and preserves the file permission bits.
-func transferFile(srcSftp, dstSftp *sftp.Client, srcPath, dstPath string, mode os.FileMode) (err error) {
-	lg := logger.GetLogger()
-
-	srcFile, err := srcSftp.Open(srcPath)
+	entry := FileOutcome{SourcePath: srcPath, Path: dstPath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
+	defer func() { out.Entries = append(out.Entries, entry) }()
+	if !info.Mode().IsRegular() {
+		entry.Type, entry.Verification = "other", "unsupported"
+		return fmt.Errorf("non-regular transfer source is unsupported: %s", srcPath)
+	}
+	file, err := source.Open(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
+		return err
 	}
-	defer errutil.HandleCloseError(&err, srcFile)
-
+	defer func() { _ = file.Close() }() //nolint:errcheck // read-only source handle
 	if dir := path.Dir(dstPath); dir != "." && dir != "/" {
-		if mkErr := dstSftp.MkdirAll(dir); mkErr != nil {
-			return fmt.Errorf("failed to create destination directory %s: %w", dir, mkErr)
+		directory := FileOutcome{Path: dir, Type: "directory", ChangeState: "unchanged", Verification: "not_performed"}
+		err := ensureRemoteDirectory(ctx, destination, &directory)
+		if directory.ChangeState != "unchanged" {
+			out.Entries = append(out.Entries, directory)
+		}
+		if err != nil {
+			return err
 		}
 	}
-
-	dstFile, err := dstSftp.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
-	}
-	defer errutil.HandleCloseError(&err, dstFile)
-
-	lg.Info("Transferring: %s → %s", srcPath, dstPath)
-
-	written, err := io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("failed to transfer file %s: %w", srcPath, err)
-	}
-
-	if chmodErr := dstSftp.Chmod(dstPath, mode.Perm()); chmodErr != nil {
-		lg.Warning("failed to preserve permissions on %s: %v", dstPath, chmodErr)
-	}
-
-	lg.Success("Transferred %d bytes: %s", written, dstPath)
-	return nil
+	mode := info.Mode()
+	return publishRemoteFile(ctx, destination, file, "remote_io", info.Size(), &mode, &entry)
 }

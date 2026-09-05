@@ -66,6 +66,16 @@ func ValidateCommand(command string) error {
 	return nil
 }
 
+// CommandIsDestructive reuses the admission parser without conflating a
+// direct-database-client routing restriction with a destructive operation.
+func CommandIsDestructive(command string) bool {
+	if isForkBomb(command) {
+		return true
+	}
+	_, found := detectDestructiveCommand(strings.TrimSpace(command), 0)
+	return found
+}
+
 // isForkBomb matches the classic `:(){:|:&};:` shape regardless of spacing.
 func isForkBomb(cmd string) bool {
 	var b strings.Builder

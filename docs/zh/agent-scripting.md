@@ -77,8 +77,10 @@ fi
 
 ## 受控文件 Apply
 
-覆盖一个远程正则文件时优先用 `sshx apply`。根据 `changed`、`completion` 和
-`error_kind` 分支。`precondition` 表示文件没有被写入。
+覆盖一个远程正则文件时优先用 `sshx apply`。根据 `change_state`、`executed`、
+`verified`、`verification`、`completion` 和 `error_kind` 分支。错误时原 `changed`
+不能证明没有变更。提交前 `precondition` 表示没有目标写入；写后
+`verification_failed` 必须先检查哈希/备份再考虑重试。
 
 ```bash
 sshx apply --target=prod-web --path=/etc/nginx/nginx.conf \
@@ -130,14 +132,31 @@ sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
 
 用 dry-run 核对主机解析、sudo key、安全检查结果，以及真实执行是否会修改状态。不要把 dry-run 当成远程服务一定能重启成功的证明。
 
+command/run、apply、SQL、SFTP、transfer、inspect 应审核嵌套 `sshx.plan.v1`
+以及外层 `plan_hash`/`risk`。当 `plan.bindable` 为 true 时，以相同输入加
+`--expect-plan="$reviewed_hash"` 执行，在 secret/网络前拒绝本地漂移，但不冻结
+远端状态。未知命令/脚本保持 mutation 风险及未知副作用，不由调用方 intent 降级。
+身份前提、信任记录失效和结果决策表见[计划、结果与安全重试](execution-contract.md)。
+
 ## 超时
 
-无人值守工作流应总是设置 timeout：
+无人值守工作流应总是设置 timeout。未指定 `--timeout` / `SSH_TIMEOUT` 时，
+`sshx run` 默认命令超时为 60s；兼容 `sshx -h=...` 命令模式默认仍不设置。
+SSH 拨号超时独立（30s）。
 
 ```bash
 sshx -h=prod-web --timeout=30s --json "systemctl is-active nginx"
 sshx -h=prod-web --timeout=2m --json "sudo apt-get update"
 ```
+
+`--host-timeout=2m` 限制已准入目标的整个生命周期，
+`--global-timeout=5m` 限制整个操作及排队时间。新期限可选；未覆盖时保留 run
+原推导总预算。取消会关闭本地传输，但不保证远端终止/回滚；原生 secret backend
+调用可能不可中断。
+
+fan-out 支持 `--fail-fast`（`--failure-mode=fail_fast` 别名）和
+`--max-failures=N`。阈值只停止新准入，活跃目标继续完成且可能继续失败。
+必须区分未开始与取消/不确定的工作；不能仅凭传输错误重试变更。
 
 ## 审计事件
 

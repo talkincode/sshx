@@ -2,6 +2,43 @@
 
 `sshx` supports one-shot SFTP actions for common file tasks. It is not an interactive file manager; each invocation performs one clear upload, download, list, mkdir, or remove operation.
 
+## Plans and effect evidence
+
+SFTP and server-to-server transfer accept `--dry-run --json`, `--expect-plan`,
+`--host-timeout` and `--global-timeout`. Dry-run is offline and write-free.
+Binding checks the public endpoints/operation and local upload payload, not
+unread remote content or recursive directory membership.
+
+Use `--json` to consume the CLI operation result, shared execution identity,
+`effects`, `change_state`, nullable `executed`, and verification status.
+Size/metadata evidence is not a content-digest guarantee. Downloads record local
+writes even when the remote operation is `risk=read`; relay reads the source
+and writes the destination.
+
+The operation result includes `entries`, `bytes_transferred`, `partial`, and
+`directory_atomic` (false). Each entry records its path/type/size/mode, copied
+bytes, started/published state and verification; content-checked file copies
+also expose `source_sha256` / `sha256`. Known staging/cleanup evidence is
+retained as `staging_path` / `cleanup_error` on errors. Use the actual entry verification rather than assuming
+every operation (such as listing) has content hashes.
+
+Upload/relay stage each file before publication. Overwriting an existing remote
+destination requires supported atomic replacement; when unavailable, fail
+without deleting that destination. Ordinary SFTP rename can publish a new
+destination. Downloads stage beside the local destination and use the local
+OS's rename semantics; POSIX guarantees are not assumed on Windows.
+After connection loss, remote staging cleanup may be impossible and is reported.
+The publication methods are `posix_rename`, new-file `sftp_rename_no_replace`,
+and download `local_rename`. Successful file verification includes post-copy
+readback SHA-256 and metadata; mkdir verifies type/existence, removal verifies
+absence, and listing supplies metadata only. Earlier published entries remain
+in a partial result if a later directory entry fails.
+
+Single-file staging, where supported, does not provide directory-wide atomicity,
+arbitrary-writer CAS, or automatic rollback. A failed/interrupted recursive
+transfer can have partial destination effects; inspect before retrying.
+See [Plans, Outcomes, and Safe Retries](execution-contract.md).
+
 ## Upload A File
 
 ```bash

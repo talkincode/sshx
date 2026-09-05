@@ -31,10 +31,14 @@ var mysqlHardBlockReasons = map[string]string{
 
 // ClassifyMySQL analyzes sql under the MySQL/MariaDB dialect.
 func ClassifyMySQL(sql string) (*Classification, error) {
+	if mysqlExecutableComment(sql) {
+		return nil, &BlockedError{Reason: "MySQL executable/version comments can hide transaction control or additional writes and are not supported"}
+	}
 	stmts, maskedStmts, err := splitStatements(sql)
 	if err != nil {
 		return nil, &BlockedError{Reason: err.Error()}
 	}
+
 	if len(stmts) > 1 {
 		return nil, &BlockedError{Reason: fmt.Sprintf("multiple statements are not allowed (%d found); submit exactly one statement per invocation", len(stmts))}
 	}
@@ -140,6 +144,39 @@ func ClassifyMySQL(sql string) (*Classification, error) {
 		return nil, &BlockedError{Reason: reason}
 	}
 	return nil, &BlockedError{Reason: fmt.Sprintf("unrecognized statement head %q (fail-closed)", head)}
+}
+
+func mysqlExecutableComment(sql string) bool {
+	for i := 0; i < len(sql); i++ {
+		if sql[i] == '\'' || sql[i] == '"' || sql[i] == '`' {
+			quote := sql[i]
+			for i++; i < len(sql); i++ {
+				if sql[i] == '\\' {
+					i++
+				} else if sql[i] == quote {
+					if i+1 < len(sql) && sql[i+1] == quote {
+						i++
+					} else {
+						break
+					}
+				}
+			}
+		} else if sql[i] == '#' || (i+2 < len(sql) && sql[i:i+2] == "--" && sql[i+2] <= ' ') {
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+		} else if i+2 < len(sql) && sql[i:i+2] == "/*" {
+			if sql[i+2] == '!' || (i+3 < len(sql) && (sql[i+2] == 'M' || sql[i+2] == 'm') && sql[i+3] == '!') {
+				return true
+			}
+			end := strings.Index(sql[i+2:], "*/")
+			if end < 0 {
+				break
+			}
+			i += end + 3
+		}
+	}
+	return false
 }
 
 func mysqlWritableSet(tokens []token) bool {

@@ -86,7 +86,11 @@ func emitSkillResult(config *sshclient.Config, result skillActionResult) error {
 	if config.JSONOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetEscapeHTML(false)
-		return encoder.Encode(result)
+		envelope := struct {
+			skillActionResult
+			localRiskMetadata
+		}{result, localRiskFields("skill", result.Action)}
+		return encoder.Encode(envelope)
 	}
 	if result.Status == "current" {
 		fmt.Printf("Agent skill is current: %s\n", result.Path)

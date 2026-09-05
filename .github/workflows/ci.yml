@@ -78,17 +78,19 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run unit tests (cross-platform packages)
-        # Windows is a first-class target, so the CLI surface (internal/app),
-        # the SSH core (internal/sshclient), and the runtime-root resolver run
-        # here too. Tests resolve the home directory through setTestHome so
-        # USERPROFILE is honored, and POSIX permission assertions are guarded
-        # by runtime.GOOS.
-        #
-        # Still excluded (tracked in issue #50): internal/plugin and
-        # internal/skillinstall assert symlink and permission semantics that
-        # need Windows equivalents, and tests/e2e has not been ported.
-        run: go test -short ./cmd/... ./internal/app/... ./internal/execution/... ./internal/keyringstore/... ./internal/runtimepath/... ./internal/sqlsafe/... ./internal/sshclient/... ./pkg/...
+      - name: Run unit tests (all portable packages)
+        # POSIX shell/mode fixtures skip only their unsupported capability.
+        # Plugin/skill lifecycle, JSON fixtures, drive/UNC/junction confinement,
+        # and read-only replacement recovery run natively on Windows.
+        run: go test -v -short ./cmd/... ./internal/... ./pkg/...
+
+      - name: Run compiled Windows CLI contract and reliability tests
+        # The loopback commands in this subset do not execute local POSIX
+        # scripts. This is native CLI evidence, not a cross-compile check.
+        # Credential Manager is not exercised without an ephemeral OS profile.
+        env:
+          SSHX_E2E_REAL_KEYRING: "0"
+        run: go test -v -count=1 ./tests/e2e -run 'Test(Portable|Reliability|ContractGolden|IsolatedEnvironment|CLICommand|CLIKeyAuthentication|CLIProcess|CLIFailures|CLIPermissions|CLISafety|CLIDryRun|CLISkill)'
 
       - name: Vet
         run: go vet ./...
@@ -119,30 +121,27 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          keychain_path="$RUNNER_TEMP/sshx-e2e.keychain-db"
+          mkdir -p "$GITHUB_WORKSPACE/.e2e-keychain"
+          keychain_path="$GITHUB_WORKSPACE/.e2e-keychain/sshx-e2e.keychain-db"
           keychain_password="sshx-e2e-ci"
           original_keychain="$(security default-keychain -d user | sed 's/^[[:space:]]*\"//; s/\"[[:space:]]*$//')"
-          keychain_list_file="$RUNNER_TEMP/sshx-e2e-original-keychains.txt"
+          keychain_list_file="$GITHUB_WORKSPACE/.e2e-keychain/original-keychains.txt"
           security list-keychains -d user | sed 's/^[[:space:]]*\"//; s/\"[[:space:]]*$//' > "$keychain_list_file"
-          original_keychains=()
-          while IFS= read -r item; do
-            if [ -n "$item" ]; then original_keychains+=("$item"); fi
-          done < "$keychain_list_file"
-          security create-keychain -p "$keychain_password" "$keychain_path"
-          security set-keychain-settings -lut 3600 "$keychain_path"
-          security unlock-keychain -p "$keychain_password" "$keychain_path"
-          security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
-          security default-keychain -d user -s "$keychain_path"
           {
             echo "SSHX_E2E_KEYCHAIN=$keychain_path"
             echo "SSHX_E2E_ORIGINAL_KEYCHAIN=$original_keychain"
             echo "SSHX_E2E_ORIGINAL_KEYCHAIN_LIST=$keychain_list_file"
           } >> "$GITHUB_ENV"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 3600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
 
       - name: Run compiled-binary E2E tests
         env:
           SSHX_E2E_REAL_KEYRING: ${{ runner.os == 'macOS' && '1' || '0' }}
-        run: go test -v ./tests/e2e
+        run: go test -v -count=1 ./tests/e2e
 
       - name: Remove isolated macOS keychain
         if: always() && runner.os == 'macOS'
@@ -164,6 +163,77 @@ jobs:
           if [ -n "${SSHX_E2E_KEYCHAIN:-}" ]; then
             security delete-keychain "$SSHX_E2E_KEYCHAIN" || true
           fi
+
+  sql-native:
+    name: SQL (native PostgreSQL and MySQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sshx
+          POSTGRES_PASSWORD: sshx-postgres-ci
+          POSTGRES_DB: sshx_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sshx -d sshx_e2e"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sshx-mysql-ci
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: sshx_e2e
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psshx-mysql-ci"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.13"
+
+      - name: Verify native SQL prerequisites
+        # ubuntu-latest includes native clients. Missing prerequisites must fail
+        # this lane, not silently turn it into fake-MySQL or skipped evidence.
+        run: |
+          command -v sh
+          psql --version
+          mysql --version
+          sqlite3 --version
+
+      - name: Run real database compiled-CLI reliability tests
+        env:
+          SSHX_E2E_REAL_SQL: "1"
+          SSHX_E2E_PG_PASSWORD: sshx-postgres-ci
+          SSHX_E2E_MYSQL_PASSWORD: sshx-mysql-ci
+        run: go test -v ./tests/e2e -run '^TestSQLRealEngineReliability$' -count=1
+
+      - name: Verify PostgreSQL transactions and SQLite concurrent writers
+        env:
+          SSHX_SQL_INTEGRATION_POSTGRES: "1"
+          SSHX_SQL_INTEGRATION_DATABASE: sshx_e2e
+          SSHX_SQL_INTEGRATION_USER: sshx
+          SSHX_SQL_INTEGRATION_HOST: 127.0.0.1
+          SSHX_SQL_INTEGRATION_PORT: "5432"
+          SSHX_SQL_INTEGRATION_PASSWORD: sshx-postgres-ci
+        run: go test -v ./internal/sqlsafe -run 'TestSQLRealEngine(RollbackAndCommit|ConcurrentWriterExcludedFromPreimage)/(postgres|sqlite)$' -count=1
+
+      - name: Verify MySQL rollback and concurrent writers
+        env:
+          SSHX_SQL_INTEGRATION_MYSQL: "1"
+          SSHX_SQL_INTEGRATION_DATABASE: sshx_e2e
+          SSHX_SQL_INTEGRATION_USER: root
+          SSHX_SQL_INTEGRATION_HOST: 127.0.0.1
+          SSHX_SQL_INTEGRATION_PORT: "3306"
+          SSHX_SQL_INTEGRATION_PASSWORD: sshx-mysql-ci
+        run: go test -v ./internal/sqlsafe -run 'TestSQLRealEngine(RollbackAndCommit|ConcurrentWriterExcludedFromPreimage)/mysql$' -count=1
 
   lint:
     name: Lint

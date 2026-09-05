@@ -315,6 +315,29 @@ sudo-key selection, safety-check result, and whether a real run would connect,
 execute, read a secret, or mutate state. It does **not** prove the remote command
 would succeed.
 
+### Bind review to execution and inspect effects
+
+Remote previews add a nested `sshx.plan.v1` plan, `plan_hash`, and scalar
+`risk` (`read|mutation|privileged|destructive`). After reviewing a bindable
+preview, repeat the same invocation with `--expect-plan="$reviewed_hash"`.
+The hash must be `sha256:` plus 64 lowercase hex characters. This works for
+command/run, apply, SQL, SFTP, transfer and inspect; mismatch fails before
+secrets or network work, even with `--force`.
+
+Binding needs explicit IP targets, usable public-key sidecars when key auth
+is enabled, and strict available host trust. DNS-only targets, missing pins,
+relaxed trust and remotely discovered SQL identities cannot be bound.
+The entire sorted trust-record snapshot is hashed, so unrelated `known_hosts`
+edits conservatively invalidate a plan. A plan does not freeze remote state.
+
+Results add `execution_id`, `parent_execution_id`, `execution_fingerprint`,
+`effects`, `change_state`, nullable `executed`, `verified`, `verification`,
+and condition arrays. Unknown commands/scripts default to mutation with
+unknown effects; caller `intent=read` is not proof. Success is not verification,
+and unknown change state is not “unchanged.” Inspect partial/unknown outcomes
+before retrying. Raw output and secret values are not fingerprinted.
+See [Plans, Outcomes, and Safe Retries](docs/execution-contract.md).
+
 ### Local audit trail
 
 Every non-dry-run invocation writes one JSONL audit event by default:
@@ -337,10 +360,15 @@ stdout/stderr. Command text is included for provenance but redacted for common
 password/token-style arguments. Use `--no-audit` or `SSHX_NO_AUDIT=true` to
 disable audit writing for a single invocation or environment.
 
+Use `sshx audit query --execution-id=<id> --json` to correlate an execution.
+Corrupt-line diagnostics distinguish damaged records from an empty query.
+Audit persistence is best-effort and separate from execution success: a logging
+failure is not a reason to repeat a successful mutation.
+
 ### `--timeout` and `--pty`
 
 ```bash
-# Kill the command if it runs longer than 30 seconds (also accepts 2m, etc.)
+# Limit the command wait to 30 seconds (also accepts 2m, etc.)
 sshx -h=prod-web --timeout=30s "apt-get update"
 
 # Opt back into a PTY for commands that insist on a terminal
@@ -349,6 +377,12 @@ sshx -h=prod-web --pty "top -b -n1"
 ```
 
 The timeout can also be set via the `SSH_TIMEOUT` environment variable.
+Optional `--host-timeout` covers an admitted target; `--global-timeout` also
+covers queue time. Existing `--timeout` semantics and defaults are unchanged.
+For fan-out, `--fail-fast` (alias of `--failure-mode=fail_fast`) and
+`--max-failures=N` stop **new admission only**; active targets finish and may add
+failures. Cancellation/deadlines can stop active local transports, but do not
+guarantee remote process termination or rollback.
 
 ### MCP server (stdio)
 

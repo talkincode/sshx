@@ -20,6 +20,19 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 	if cfg == nil {
 		cfg = &Config{}
 	}
+	if cfg.KnownHostsData != nil {
+		callback, err := snapshotHostKeyCallback(cfg.KnownHostsData)
+		if err != nil {
+			return nil, boundaryError("host_key", "load admitted known_hosts", err)
+		}
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			if err := callback(hostname, remote, key); err != nil {
+				return boundaryError("host_key", "verify admitted host key", err)
+			}
+			cfg.HostKeyFingerprint = ssh.FingerprintSHA256(key)
+			return nil
+		}, nil
+	}
 
 	knownHostsPath := cfg.KnownHostsPath
 	if knownHostsPath == "" {

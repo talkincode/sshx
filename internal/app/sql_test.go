@@ -389,3 +389,70 @@ func TestSQLJSONFailureIncludesRemoteStderr(t *testing.T) {
 		t.Fatalf("JSON stderr missing remote client output: %q", result.Stderr)
 	}
 }
+
+func TestSQLAuditNeverCopiesDatabaseOutput(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "sql", "-h=app1", "--engine=sqlite", "--db-file=/srv/state.db", "--json", "UPDATE users SET name='changed' WHERE id=1",
+	})
+	recorder := newAuditRecorder(config)
+	evidence := sqlsafe.Evidence{
+		StateChange: "unknown", Commit: "unknown", Verification: "unknown", BackupStatus: "ready", OutcomeUncertain: true,
+	}
+	run := &sqlRun{config: config, audit: recorder, start: time.Now(), phase: "backup_execute", evidence: evidence}
+	captureStdout(t, func() {
+		err := run.failWithExit("remote_exit", sshclient.ExecResult{
+			ExitCode: 1, Stdout: "private-row-output", Stderr: "constraint failed: private-customer-identifier",
+		}, nil)
+		if err != ErrReported {
+			t.Fatalf("expected reported failure, got %v", err)
+		}
+	})
+	serialized, err := json.Marshal(recorder.event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"private-row-output", "private-customer-identifier"} {
+		if strings.Contains(string(serialized), private) {
+			t.Fatalf("SQL audit leaked remote output: %s", serialized)
+		}
+	}
+	if recorder.event.SQLEvidence == nil || !recorder.event.SQLEvidence.OutcomeUncertain {
+		t.Fatalf("partial SQL uncertainty was not retained: %s", serialized)
+	}
+}
+
+func TestValidateSQLConfigBoundIdentity(t *testing.T) {
+	base := func() *sshclient.Config {
+		return &sshclient.Config{
+			Host: "127.0.0.1", SQLEngine: "postgres", SQLStatement: "SELECT 1",
+			SQLDatabase: "app", SQLUser: "app_role", SQLHost: "127.0.0.1", SQLPort: "5432",
+			ExpectPlan: "sha256:" + strings.Repeat("0", 64),
+		}
+	}
+	if err := validateSQLConfig(base()); err != nil {
+		t.Fatal(err)
+	}
+	for _, missing := range []string{"database", "role", "host", "port"} {
+		config := base()
+		config.SQLCredFrom = "docker:db"
+		switch missing {
+		case "database":
+			config.SQLDatabase = ""
+		case "role":
+			config.SQLUser = ""
+		case "host":
+			config.SQLHost = ""
+		case "port":
+			config.SQLPort = ""
+		}
+		if err := validateSQLConfig(config); err == nil {
+			t.Fatalf("bound %s must not be filled by discovery", missing)
+		}
+	}
+	config := base()
+	run := &sqlRun{config: config}
+	run.applyCredentials(sqlsafe.Credentials{Database: "other", User: "other_role", Host: "other-host", Port: "99", Password: "fixture-only"})
+	if config.SQLUser != "app_role" || config.SQLDatabase != "app" || config.SQLHost != "127.0.0.1" || config.SQLPort != "5432" {
+		t.Fatal("credential discovery changed the bound database identity")
+	}
+}

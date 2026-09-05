@@ -1,9 +1,12 @@
 package sshclient
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -31,14 +34,31 @@ const (
 
 // Config represents SSH configuration properties for connecting to remote hosts.
 type Config struct {
-	Host         string
-	Port         string
-	User         string
-	Password     string
-	SudoPassword string
-	KeyPath      string
-	UseKeyAuth   bool
-	SudoKey      string
+	// Context owns the complete transport lifetime. Nil means Background.
+	Context          context.Context
+	HostTimeout      time.Duration
+	GlobalTimeout    time.Duration
+	ExpectPlan       string
+	PlanHash         string
+	ExecutionID      string
+	Risk             string
+	MaxFailures      int
+	AuditExecutionID string
+	// KnownHostsData, when nonnil, is the admitted immutable trust snapshot.
+	KnownHostsData         []byte
+	ExpectedKeyFingerprint string
+	// PreparedPayload distinguishes an admitted empty payload from legacy I/O.
+	PreparedPayload     []byte
+	TransferSource      *Config
+	TransferDestination *Config
+	Host                string
+	Port                string
+	User                string
+	Password            string
+	SudoPassword        string
+	KeyPath             string
+	UseKeyAuth          bool
+	SudoKey             string
 	// SudoKeySet is true when -pk/--password-key/--sudo-password-key was
 	// present on the command line, including an explicit empty value.
 	// Host inventory must persist the key only when this is set; the
@@ -228,10 +248,18 @@ type Config struct {
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.
 type SSHClient struct {
-	config         *Config
-	client         *ssh.Client
-	sftpClient     *sftp.Client
-	authMethodUsed AuthMethod
+	config             *Config
+	client             *ssh.Client
+	sftpClient         *sftp.Client
+	authMethodUsed     AuthMethod
+	mu                 sync.Mutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	conn               net.Conn
+	closed             bool
+	connecting         bool
+	peerAddress        string
+	hostKeyFingerprint string
 }
 
 // AuthMethodUsed returns the authentication method used for the current connection.
@@ -239,6 +267,8 @@ func (c *SSHClient) AuthMethodUsed() AuthMethod {
 	if c == nil {
 		return AuthMethodUnknown
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.authMethodUsed == "" {
 		return AuthMethodUnknown
 	}
@@ -251,8 +281,8 @@ func (c *SSHClient) AuthMethodUsed() AuthMethod {
 
 // NewSSHClient 创建SSH客户端
 func NewSSHClient(config *Config) (*SSHClient, error) {
-	if config.Host == "" {
-		return nil, fmt.Errorf("host is required")
+	if config == nil || config.Host == "" {
+		return nil, boundaryError("config", "configure SSH", fmt.Errorf("host is required"))
 	}
 	if config.Port == "" {
 		config.Port = DefaultSSHPort
@@ -276,26 +306,32 @@ func NewSSHClient(config *Config) (*SSHClient, error) {
 
 // Close closes the SFTP and SSH connections.
 func (c *SSHClient) Close() error {
-	var firstErr error
-	if c.sftpClient != nil {
-		if err := c.sftpClient.Close(); err != nil {
-			firstErr = err
-		}
-		c.sftpClient = nil
+	if c == nil {
+		return nil
 	}
-	if c.client != nil {
-		if err := c.client.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		c.client = nil
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
 	}
-	return firstErr
+	c.closed = true
+	cancel, conn, client := c.cancel, c.conn, c.client
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	// Close the socket first: SSH/SFTP channel Close can itself block on a
+	// stalled peer. Published pointers remain stable for existing callers.
+	if conn != nil {
+		return conn.Close()
+	}
+	if client != nil {
+		return client.Close()
+	}
+	return nil
 }
 
 // ForceClose forcefully closes the underlying SSH connection.
 func (c *SSHClient) ForceClose() error {
-	if c.client != nil {
-		return c.client.Close()
-	}
-	return nil
+	return c.Close()
 }

@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,6 +35,14 @@ func Classify(err error) string {
 		return ErrorKindBlocked
 	case errors.Is(err, sshclient.ErrInvalidBind):
 		return ErrorKindConfig
+	case errors.Is(err, context.DeadlineExceeded):
+		return ErrorKindTimeout
+	case errors.Is(err, context.Canceled):
+		return ErrorKindCancelled
+	}
+	var typed interface{ ErrorKind() string }
+	if errors.As(err, &typed) && typed.ErrorKind() != "" {
+		return typed.ErrorKind()
 	}
 	var blocked *sshclient.CommandBlockedError
 	if errors.As(err, &blocked) {
@@ -64,8 +73,8 @@ func Classify(err error) string {
 	}
 }
 
-// BuildError constructs ErrorInfo with retry classification based on action intent
-// and completion certainty.
+// BuildError treats unknown intent as potentially mutating. Callers with a
+// reviewed plan should pass its risk instead of trusting a declared read intent.
 func BuildError(err error, kind, intent, completion string) *ErrorInfo {
 	if err == nil && kind == "" {
 		return nil
@@ -87,20 +96,21 @@ func BuildError(err error, kind, intent, completion string) *ErrorInfo {
 	case ErrorKindTimeout, ErrorKindConnect, ErrorKindProtocol:
 		info.Retryable = true
 		info.RetrySafety = RetryVerifyFirst
-	case ErrorKindAuth, ErrorKindHostKey, ErrorKindBlocked, ErrorKindConfig, ErrorKindLocalIO, ErrorKindPrecondition:
+	case ErrorKindAuth, ErrorKindHostKey, ErrorKindBlocked, ErrorKindConfig, ErrorKindLocalIO, ErrorKindPrecondition,
+		ErrorKindCancelled, "plan_mismatch", "plan_unresolved":
 		info.Retryable = false
 		info.RetrySafety = RetryUnsafe
 	case ErrorKindRemoteExit:
 		info.Retryable = false
 		info.RetrySafety = RetryVerifyFirst
-	case ErrorKindExitMissing:
+	case ErrorKindExitMissing, "verification_failed":
 		info.Retryable = false
 		info.RetrySafety = RetryVerifyFirst
 	}
 
 	switch completion {
 	case CompletionCompletedUnconfirmed, CompletionPartial, CompletionUnknown:
-		if intent == IntentChange {
+		if intent != IntentRead {
 			info.Retryable = false
 			if info.RetrySafety == RetrySafe {
 				info.RetrySafety = RetryVerifyFirst
@@ -129,10 +139,9 @@ func BuildError(err error, kind, intent, completion string) *ErrorInfo {
 		}
 	}
 
-	// Uncertain change actions never report safe automatic retry.
-	if intent == IntentChange && (completion == CompletionPartial ||
-		completion == CompletionCompletedUnconfirmed ||
-		completion == CompletionUnknown) {
+	// Even an observed exit cannot make replaying a mutation safe: collection
+	// may fail after the write completed. Only known not-started work is exempt.
+	if intent != IntentRead && completion != CompletionNotStarted {
 		if info.RetrySafety == RetrySafe {
 			info.RetrySafety = RetryVerifyFirst
 		}
@@ -144,7 +153,7 @@ func BuildError(err error, kind, intent, completion string) *ErrorInfo {
 var (
 	// ErrConfig indicates a request/schema/selector configuration failure.
 	ErrConfig = errors.New("execution config error")
-	// ErrLocalIO indicates a local file/stdin failure before network access.
+	// ErrLocalIO indicates local file, stdin, or result-delivery failure.
 	ErrLocalIO = errors.New("local io error")
 	// ErrRemoteIO indicates a remote filesystem/protocol I/O failure.
 	ErrRemoteIO = errors.New("remote io error")
@@ -156,38 +165,27 @@ var (
 
 // CompletionFor maps phase + error kind onto observed execution certainty.
 func CompletionFor(phase, kind string, remoteStarted bool, exitObserved bool) string {
-	if !remoteStarted {
-		switch phase {
-		case PhaseResolve, PhaseAdmission, PhaseConnect, PhaseAuthenticate:
-			return CompletionNotStarted
-		default:
-			if kind == ErrorKindBlocked || kind == ErrorKindConfig || kind == ErrorKindLocalIO {
-				return CompletionNotStarted
-			}
-		}
-	}
 	if exitObserved {
 		return CompletionCompleted
+	}
+	if !remoteStarted {
+		return CompletionNotStarted
 	}
 	switch kind {
 	case ErrorKindExitMissing:
 		return CompletionCompletedUnconfirmed
-	case ErrorKindTimeout:
-		if remoteStarted {
-			return CompletionPartial
-		}
-		return CompletionNotStarted
-	case ErrorKindProtocol, ErrorKindConnect:
-		if remoteStarted {
-			return CompletionUnknown
-		}
-		return CompletionNotStarted
-	case "":
-		return CompletionCompleted
+	case ErrorKindTimeout, ErrorKindCancelled:
+		return CompletionPartial
 	default:
-		if remoteStarted {
-			return CompletionUnknown
-		}
-		return CompletionNotStarted
+		return CompletionUnknown
 	}
+}
+
+// CompletionForAttempt also accounts for an exec request whose acknowledgement
+// was never received. This is not evidence that remote execution did not start.
+func CompletionForAttempt(phase, kind string, startAttempted, remoteStarted, exitObserved bool) string {
+	if startAttempted && !remoteStarted && !exitObserved {
+		return CompletionUnknown
+	}
+	return CompletionFor(phase, kind, remoteStarted, exitObserved)
 }
