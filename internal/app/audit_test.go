@@ -2,16 +2,19 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/talkincode/sshx/internal/execution"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
@@ -404,4 +407,250 @@ func mustParseDate(t *testing.T, value string) time.Time {
 		t.Fatalf("failed to parse date: %v", err)
 	}
 	return parsed
+}
+
+func TestAuditRecorderPreservesFinalizedEvidenceAndWritesOnce(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	config := &sshclient.Config{
+		AuditEnabled: true, AuditOutput: t.TempDir(),
+		Mode: "sql", Host: "db.example", SQLEngine: "postgres", SQLStatement: "SELECT 1",
+		PlanHash: "sha256:admitted", ExecutionID: "invocation", Risk: "read",
+	}
+	recorder := newAuditRecorder(config)
+	recorder.recordSQLOutcome(config, sshclient.AuthMethodKey, sqlAuditMeta{
+		Class: "read", Mutates: false, Phase: "execute",
+	}, 0, "", nil)
+	if !recorder.completed || recorder.persisted || recorder.persistenceErr != nil {
+		t.Fatal("recording execution facts must not attempt persistence")
+	}
+	executed := true
+	recorder.event.Metadata = execution.Metadata{
+		PlanHash: "sha256:admitted", ExecutionID: "invocation", ParentExecutionID: "parent",
+		ExecutionFingerprint: "sha256:finalized", Risk: execution.Risk("read"),
+		StartedAt: "2026-09-01T00:00:00Z", FinishedAt: "2026-09-01T00:00:01Z",
+		ChangeState: "unchanged", Executed: &executed, Verified: true, Verification: "passed",
+		Postconditions: []execution.Condition{{Kind: "rows", Observed: "1", Status: "passed"}},
+	}
+	recorder.event.PeerAddress = "192.0.2.3:22"
+	recorder.event.HostKeyFingerprint = "SHA256:observed"
+	before := recorder.event
+	config.Host = "mutated.example"
+	config.PlanHash = "sha256:mutated"
+	config.SQLStatement = "DELETE FROM users"
+	recorder.refresh(config)
+	if !reflect.DeepEqual(before, recorder.event) {
+		t.Fatalf("refresh changed finalized evidence:\nbefore=%+v\nafter=%+v", before, recorder.event)
+	}
+	for range 2 {
+		if err := recorder.finish(config, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !recorder.persisted || recorder.persistenceErr != nil {
+			t.Fatal("successful finalization must retain persistence status")
+		}
+	}
+	event := readSingleAuditEvent(t, config.AuditOutput)
+	if event["would_mutate_remote"] != false || event["execution_id"] != "invocation" ||
+		event["parent_execution_id"] != "parent" || event["execution_fingerprint"] != "sha256:finalized" ||
+		event["host_resolved"] != "db.example" || event["plan_hash"] != "sha256:admitted" ||
+		event["change_state"] != "unchanged" || event["verified"] != true {
+		t.Fatalf("persisted evidence was changed: %+v", event)
+	}
+}
+
+func TestAuditRecorderRetainsObservedPluginAndPeer(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	config := &sshclient.Config{
+		AuditEnabled: true, Mode: "inspect", InspectCapability: "system",
+		InspectUseSudo: true, HostKeyFingerprint: "SHA256:configured",
+	}
+	recorder := newAuditRecorder(config)
+	recorder.event.PluginDigest = "sha256:executed-plugin"
+	recorder.event.PluginTrusted = true
+	recorder.event.PeerAddress = "192.0.2.4:2222"
+	recorder.event.HostKeyFingerprint = "SHA256:observed"
+	recorder.event.CacheHit = true
+	recorder.event.ObservationStatus = "ok"
+	recorder.event.DeadlineScope = "host"
+	recorder.event.StopReason = "max_failures"
+	recorder.refresh(config)
+	if recorder.event.PluginDigest != "sha256:executed-plugin" || !recorder.event.PluginTrusted ||
+		recorder.event.PeerAddress != "192.0.2.4:2222" || recorder.event.HostKeyFingerprint != "SHA256:observed" ||
+		!recorder.event.CacheHit || recorder.event.ObservationStatus != "ok" ||
+		recorder.event.DeadlineScope != "host" || recorder.event.StopReason != "max_failures" {
+		t.Fatalf("refresh overwrote observed facts: %+v", recorder.event)
+	}
+	recorder.recordPeer(nil)
+}
+
+func TestAuditCredentialRolesAndKnownSecretRedaction(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	const sshSecret = "SSH_SENTINEL_6be64352"     // #nosec G101 -- redaction test sentinel, not a credential.
+	const sudoSecret = "SUDO_SENTINEL_71fc2e28"   // #nosec G101 -- redaction test sentinel, not a credential.
+	const valueSecret = "VALUE_SENTINEL_9a54d286" // gitleaks:allow -- synthetic redaction test sentinel.
+	config := &sshclient.Config{
+		AuditEnabled: true, AuditOutput: t.TempDir(), Mode: "sql",
+		Host: "database", User: "ssh-principal", SQLUser: "database-principal",
+		SQLHost: "localhost", SQLPort: "5432", SQLPasswordKey: "database-role",
+		SSHPasswordKey: "ssh-role", SudoKey: "sudo-role", SQLUseSudo: true,
+		Password: sshSecret, SudoPassword: sudoSecret, PasswordValue: valueSecret,
+		Command:      "echo " + sshSecret + " " + sudoSecret + " " + valueSecret,
+		SQLStatement: "SELECT '" + sshSecret + "', '" + sudoSecret + "'",
+		BypassReason: "reason " + sudoSecret,
+	}
+	recorder := newAuditRecorder(config)
+	failure := errors.New("remote refused " + sshSecret + " " + sudoSecret + " " + valueSecret)
+	recorder.recordCommandResult(config, sshclient.AuthMethodPassword, sshclient.ExecResult{
+		ExitCode: -1, Stdout: sshSecret, Stderr: sudoSecret,
+	}, time.Second, "auth", failure)
+	if err := recorder.finish(config, failure); err != nil {
+		t.Fatal(err)
+	}
+	event := readSingleAuditEvent(t, config.AuditOutput)
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{sshSecret, sudoSecret, valueSecret} {
+		if bytes.Contains(data, []byte(secret)) {
+			t.Fatalf("audit leaked a known secret: %s", data)
+		}
+	}
+	if event["ssh_password_key"] != "ssh-role" || event["sudo_key"] != "sudo-role" ||
+		event["sql_password_key"] != "database-role" || event["sql_user"] != "database-principal" ||
+		event["user"] != "ssh-principal" {
+		t.Fatalf("credential role identities missing: %+v", event)
+	}
+	for _, key := range []string{"password", "sudo_password", "password_value", "stdout", "stderr"} {
+		if _, exists := event[key]; exists {
+			t.Fatalf("private field %s was persisted", key)
+		}
+	}
+}
+
+func TestAuditCancellationPreservesObservedCompletionAndCause(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			config := &sshclient.Config{AuditEnabled: true, AuditOutput: t.TempDir(), Mode: "ssh"}
+			recorder := newAuditRecorder(config)
+			recorder.event.Completion = "partial"
+			recorder.event.DeadlineScope = "global"
+			recorder.recordCommandResult(config, sshclient.AuthMethodKey, sshclient.ExecResult{
+				ExitCode: -1, Started: true,
+			}, time.Second, classifyError(cause), cause)
+			if recorder.event.CancellationCause == "" || recorder.event.Completion != "partial" ||
+				recorder.event.DeadlineScope != "global" {
+				t.Fatalf("missing cancellation evidence: %+v", recorder.event)
+			}
+			before := recorder.event.CancellationCause
+			recorder.recordCancellation(config, errors.New("different failure"))
+			if recorder.event.CancellationCause != before {
+				t.Fatal("observed cancellation cause changed")
+			}
+		})
+	}
+}
+
+func TestAuditApplyFailurePreservesPartialMutation(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	config := &sshclient.Config{AuditEnabled: true, Mode: "apply"}
+	recorder := newAuditRecorder(config)
+	recorder.recordApplyOutcome(config, sshclient.AuthMethodKey, &sshclient.ApplyOutcome{
+		BeforeSHA256: "before", AfterSHA256: "after", BackupPath: "/backup/original", Changed: true,
+	}, []byte("payload"), "verify", -1, "verification_failed", errors.New("readback failed"))
+	recorder.refresh(config)
+	recorder.recordFailure(config, sshclient.AuthMethodUnknown, "connect", errors.New("cleanup disconnected"))
+	if !recorder.event.ApplyChanged || !recorder.event.WouldMutateRemote ||
+		recorder.event.ApplyBackupPath != "/backup/original" ||
+		recorder.event.ApplyBeforeHash != "before" || recorder.event.ApplyAfterHash != "after" ||
+		recorder.event.Outcome.ErrorKind != "verification_failed" {
+		t.Fatalf("partial apply evidence lost: %+v", recorder.event)
+	}
+}
+
+func TestAuditEventMatchingRejectsNonObjectsAndPreservesLegacyFields(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`null`), json.RawMessage(`[]`), json.RawMessage(`{"unfinished":`),
+	} {
+		if auditEventMatches(raw, auditQueryFilter{}) {
+			t.Fatalf("non-object or malformed record matched: %s", raw)
+		}
+	}
+	if !auditEventMatches(json.RawMessage(`{"event_id":"old","future":1e1000}`), auditQueryFilter{runID: "old"}) {
+		t.Fatal("valid legacy record with unknown field must match")
+	}
+}
+
+func TestAuditAppendFailureIsTypedAndDoesNotChangeOutcome(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	output := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(output, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := &sshclient.Config{AuditEnabled: true, AuditOutput: output, Mode: "ssh"}
+	recorder := newAuditRecorder(config)
+	recorder.recordCommandResult(config, sshclient.AuthMethodKey, sshclient.ExecResult{ExitCode: 0}, time.Second, "", nil)
+	first := recorder.finish(config, nil)
+	if !errors.Is(first, execution.ErrLocalIO) {
+		t.Fatalf("append error = %v", first)
+	}
+	if recorder.persisted || recorder.persistenceErr != first {
+		t.Fatal("failed persistence must retain its error without claiming success")
+	}
+	config.AuditOutput = t.TempDir()
+	if recorder.finish(config, nil) != first {
+		t.Fatal("second finalization must retain the original persistence error")
+	}
+	entries, err := os.ReadDir(config.AuditOutput)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed finalization must not retry persistence: entries=%v err=%v", entries, err)
+	}
+	if recorder.event.Outcome.Status != "success" {
+		t.Fatalf("audit persistence changed execution outcome: %+v", recorder.event.Outcome)
+	}
+	data, err := os.ReadFile(output) // #nosec G304 -- test-owned output path.
+	if err != nil || string(data) != "unchanged" {
+		t.Fatalf("append failure changed existing file: data=%q err=%v", data, err)
+	}
+}
+
+func TestAuditCompletedRunOutcomeIsNotReclassified(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	config := &sshclient.Config{
+		AuditEnabled: true, AuditOutput: t.TempDir(), Mode: "run",
+		Host: "prod-web", HostName: "production", User: "operator",
+		SSHPasswordKey: "ssh-role", SudoKey: "sudo-role",
+	}
+	recorder := newAuditRecorder(config)
+	recorder.event.RunID = "run-existing"
+	recorder.event.Metadata = execution.Metadata{
+		ExecutionID: "invocation", ExecutionFingerprint: "parent-fingerprint",
+		TargetFingerprints: []string{"target-fingerprint"},
+	}
+	recorder.event.Outcome = auditStatus{Status: "failed", ErrorKind: "aggregate"}
+	recorder.completed = true
+	config.Host, config.HostName, config.User = "mutated-host", "mutated-name", "mutated-user"
+	config.SSHPasswordKey, config.SudoKey = "mutated-ssh-role", "mutated-sudo-role"
+	if err := recorder.finish(config, ErrReported); err != nil {
+		t.Fatal(err)
+	}
+	event := readSingleAuditEvent(t, config.AuditOutput)
+	if event["run_id"] != "run-existing" || event["execution_id"] != "invocation" {
+		t.Fatalf("run correlation lost: %+v", event)
+	}
+	if event["host_input"] != "prod-web" || event["host_name"] != "production" ||
+		event["user"] != "operator" || event["ssh_password_key"] != "ssh-role" ||
+		event["sudo_key"] != "sudo-role" {
+		t.Fatalf("initial alias or credential-role snapshot changed: %+v", event)
+	}
+	targetFingerprints, ok := event["target_fingerprints"].([]any)
+	if event["execution_fingerprint"] != "parent-fingerprint" || !ok ||
+		len(targetFingerprints) != 1 || targetFingerprints[0] != "target-fingerprint" {
+		t.Fatalf("parent and target fingerprints changed: %+v", event)
+	}
+	outcome, ok := event["outcome"].(map[string]any)
+	if !ok || outcome["status"] != "failed" || outcome["error_kind"] != "aggregate" {
+		t.Fatalf("completed run outcome overwritten: %+v", event)
+	}
 }

@@ -78,6 +78,7 @@ func (c SQLiteConn) sqliteCommand(readOnly bool) (string, error) {
 	} else {
 		argv = append(argv, c.Path)
 	}
+	argv = append(argv, "-init", "/dev/null")
 	return shellJoin(argv), nil
 }
 
@@ -99,11 +100,18 @@ func (c SQLiteConn) ExplainCommand(stmt string) RemoteCommand {
 func (c SQLiteConn) ExecuteCommand(stmt string) RemoteCommand {
 	cmd, err := c.sqliteCommand(false)
 	if err != nil {
-		return RemoteCommand{Command: "false", Stdin: ""}
+		return protocolFailureCommand()
 	}
+	p := newProtocol(EngineSQLite, stmt, true, false)
+	lines := []string{p.sqlite("start", "1"), statementSQL(stmt)}
+	if p.Affected {
+		lines = append(lines, "SELECT '"+p.prefix()+"affected|' || changes();")
+	}
+	lines = append(lines, p.sqlite("commit", "acknowledged"))
 	return RemoteCommand{
-		Command: cmd,
-		Stdin:   stmt + ";\nSELECT changes();\n",
+		Command:  cmd,
+		Stdin:    strings.Join(lines, "\n") + "\n",
+		Protocol: p,
 	}
 }
 
@@ -111,16 +119,18 @@ func (c SQLiteConn) ExecuteCommand(stmt string) RemoteCommand {
 func (c SQLiteConn) ExecuteReadCommand(stmt string) RemoteCommand {
 	cmd, err := c.sqliteCommand(true)
 	if err != nil {
-		return RemoteCommand{Command: "false", Stdin: ""}
+		return protocolFailureCommand()
 	}
+	p := newProtocol(EngineSQLite, stmt, false, false)
 	return RemoteCommand{
-		Command: cmd,
-		Stdin:   stmt + ";\n",
+		Command:  cmd,
+		Stdin:    p.sqlite("start", "1") + "\n" + statementSQL(stmt) + "\n" + p.sqlite("commit", "acknowledged") + "\n",
+		Protocol: p,
 	}
 }
 
-// ExecuteWithBackupCommand locks the database with BEGIN IMMEDIATE, snapshots
-// either the target table (CSV) or the whole file (.backup), then mutates.
+// ExecuteWithBackupCommand locks the database with BEGIN IMMEDIATE, captures
+// a preimage before sending the mutation, and acknowledges only after COMMIT.
 func (c SQLiteConn) ExecuteWithBackupCommand(stmt, table, where, path string, kind BackupKind) (RemoteCommand, error) {
 	if kind != BackupTable && kind != BackupFile {
 		return RemoteCommand{}, fmt.Errorf("unsupported sqlite backup kind %q", kind)
@@ -133,32 +143,52 @@ func (c SQLiteConn) ExecuteWithBackupCommand(stmt, table, where, path string, ki
 		return RemoteCommand{}, err
 	}
 
-	lines := []string{"BEGIN IMMEDIATE;"}
+	p := newProtocol(EngineSQLite, stmt, true, true)
+	p.BackupForm = "csv"
+	lines := []string{p.sqlite("start", "1"), "BEGIN IMMEDIATE;"}
 	switch kind {
 	case BackupTable:
 		if err := ValidateTableIdent(table); err != nil {
 			return RemoteCommand{}, err
 		}
-		if containsNewline(where) {
-			return RemoteCommand{}, &BlockedError{Reason: "table backup WHERE clause must be single-line"}
-		}
-		filter := ""
-		if strings.TrimSpace(where) != "" {
-			filter = " WHERE " + strings.TrimSpace(where)
-		}
+		// A table backup must contain the entire table, not merely the rows
+		// selected by the mutation. Recheck impact after acquiring the lock.
+		guard := "__sshx_guard_" + p.Token
+		expression := sqliteRelatedEffectsExpression(table, mutationVerb(stmt))
+		literal := "'" + strings.ReplaceAll(tableIdentName(table), "'", "''") + "'"
 		lines = append(lines,
+			"CREATE TEMP TABLE "+guard+" (unsafe INTEGER CHECK (unsafe=0));",
+			"INSERT INTO "+guard+" SELECT CASE WHEN "+expression+
+				" OR NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name COLLATE NOCASE="+literal+
+				" AND upper(sql) NOT LIKE 'CREATE VIRTUAL%') THEN 1 ELSE 0 END;",
+			"DROP TABLE "+guard+";",
+			p.sqlite("copy", "begin"),
 			".headers on",
 			".mode csv",
-			".once "+path,
-			"SELECT * FROM "+table+filter+";",
+			"SELECT * FROM "+table+";",
+			p.sqlite("copy", "end"),
 		)
 	case BackupFile:
-		lines = append(lines, ".backup "+path)
+		p.BackupForm = "sqlite_database"
+		lines = append(lines, p.sqlite("copy", "begin"), p.sqlite("copy", "end"))
 	}
-	lines = append(lines, stmt+";", "SELECT changes();", "COMMIT;")
+	mutation := ".headers off\n.mode list\n" + statementSQL(stmt) + "\n"
+	if p.Affected {
+		mutation += "SELECT '" + p.prefix() + "affected|' || changes();\n"
+	}
+	mutation += "COMMIT;\n" + p.sqlite("commit", "acknowledged") + "\n"
+	prelude := strings.Join(lines, "\n") + "\n"
+	command := streamLockedBackup(cmd, prelude, mutation, path, p)
+	if kind == BackupFile {
+		reader, readerErr := c.sqliteCommand(true)
+		if readerErr != nil {
+			return RemoteCommand{}, readerErr
+		}
+		command = lockedSQLiteFileBackup(cmd, reader, prelude, mutation, path, p)
+	}
 	return RemoteCommand{
-		Command: mkdirPrefix(path) + cmd,
-		Stdin:   strings.Join(lines, "\n") + "\n",
+		Command:  command,
+		Protocol: p,
 	}, nil
 }
 
@@ -179,6 +209,10 @@ func (c SQLiteConn) RelatedEffectsCommand(table, verb string) (RemoteCommand, er
 }
 
 func sqliteRelatedEffectsSQL(table, verb string) string {
+	return "SELECT CASE WHEN " + sqliteRelatedEffectsExpression(table, verb) + " THEN 1 ELSE 0 END;"
+}
+
+func sqliteRelatedEffectsExpression(table, verb string) string {
 	literal := "'" + strings.ReplaceAll(tableIdentName(table), "'", "''") + "'"
 	fkColumn := ""
 	switch verb {
@@ -187,15 +221,14 @@ func sqliteRelatedEffectsSQL(table, verb string) string {
 	case "DELETE":
 		fkColumn = "on_delete"
 	}
-	trigger := "EXISTS (SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name=" + literal + ")"
+	trigger := "EXISTS (SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name COLLATE NOCASE=" + literal + ")"
 	if fkColumn == "" {
-		return "SELECT CASE WHEN " + trigger + " THEN 1 ELSE 0 END;"
+		return trigger
 	}
-	return "SELECT CASE WHEN " + trigger + " OR (" +
-		"(SELECT foreign_keys FROM pragma_foreign_keys) = 1 AND EXISTS (" +
-		"SELECT 1 FROM pragma_foreign_key_list(" + literal + ") " +
-		`WHERE "` + fkColumn + `" IN ('CASCADE','SET NULL','SET DEFAULT')))` +
-		" THEN 1 ELSE 0 END;"
+	return trigger + " OR EXISTS (" +
+		"SELECT 1 FROM sqlite_master AS child, pragma_foreign_key_list(child.name) AS fk " +
+		`WHERE child.type='table' AND fk."table" COLLATE NOCASE=` + literal +
+		` AND fk."` + fkColumn + `" IN ('CASCADE','SET NULL','SET DEFAULT'))`
 }
 
 func tableIdentName(table string) string {

@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": "<port>",
+  "user": "operator",
+  "command": "probe",
+  "exit_code": -1,
+  "success": false,
+  "error_kind": "auth",
+  "error": "<diagnostic>",
+  "duration_ms": 0
+}

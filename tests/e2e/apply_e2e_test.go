@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +17,11 @@ type applyResult struct {
 	Success           bool   `json:"success"`
 	Changed           bool   `json:"changed"`
 	Created           bool   `json:"created"`
+	ChangeState       string `json:"change_state"`
+	Executed          *bool  `json:"executed"`
+	Verified          bool   `json:"verified"`
+	Verification      string `json:"verification"`
+	PayloadBytes      int    `json:"payload_bytes"`
 	Completion        string `json:"completion"`
 	ErrorKind         string `json:"error_kind"`
 	RemotePath        string `json:"remote_path"`
@@ -23,7 +29,14 @@ type applyResult struct {
 	AfterSHA256       string `json:"after_sha256"`
 	PayloadSHA256     string `json:"payload_sha256"`
 	RollbackAvailable bool   `json:"rollback_available"`
-	Backup            *struct {
+	Peers             []struct {
+		Role               string `json:"role"`
+		Address            string `json:"address"`
+		HostKeyFingerprint string `json:"host_key_fingerprint"`
+		AuthMethod         string `json:"auth_method"`
+		User               string `json:"user"`
+	} `json:"peers"`
+	Backup *struct {
 		Kind        string `json:"kind"`
 		Path        string `json:"path"`
 		RestoreHint string `json:"restore_hint"`
@@ -57,6 +70,16 @@ func TestApplyCreatesOverwritesAndProtectsHash(t *testing.T) {
 	assert.True(t, createdResult.Created)
 	assert.True(t, createdResult.Changed)
 	assert.Equal(t, "completed", createdResult.Completion)
+	assert.Equal(t, "changed", createdResult.ChangeState)
+	require.NotNil(t, createdResult.Executed)
+	assert.True(t, *createdResult.Executed)
+	assert.True(t, createdResult.Verified)
+	require.Len(t, createdResult.Peers, 1)
+	assert.Equal(t, "target", createdResult.Peers[0].Role)
+	assert.Equal(t, net.JoinHostPort(server.host, server.port), createdResult.Peers[0].Address)
+	assert.NotEmpty(t, createdResult.Peers[0].HostKeyFingerprint)
+	assert.Equal(t, "password", createdResult.Peers[0].AuthMethod)
+	assert.Equal(t, "operator", createdResult.Peers[0].User)
 	got, err := os.ReadFile(remote) // #nosec G304 -- path is inside this test's temporary SSH root.
 	require.NoError(t, err)
 	assert.Equal(t, "first\n", string(got))
@@ -69,6 +92,10 @@ func TestApplyCreatesOverwritesAndProtectsHash(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(wrong.stdout), &wrongResult))
 	assert.Equal(t, "precondition", wrongResult.ErrorKind)
 	assert.Equal(t, "not_started", wrongResult.Completion)
+	assert.Equal(t, sha256Hex([]byte("first\n")), wrongResult.BeforeSHA256)
+	assert.Equal(t, "unchanged", wrongResult.ChangeState)
+	require.NotNil(t, wrongResult.Executed)
+	assert.False(t, *wrongResult.Executed)
 	got, err = os.ReadFile(remote) // #nosec G304 -- path is inside this test's temporary SSH root.
 	require.NoError(t, err)
 	assert.Equal(t, "first\n", string(got), "hash mismatch must not change the target")
@@ -100,6 +127,10 @@ func TestApplyCreatesOverwritesAndProtectsHash(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(same.stdout), &sameResult))
 	assert.True(t, sameResult.Success)
 	assert.False(t, sameResult.Changed)
+	assert.Equal(t, "unchanged", sameResult.ChangeState)
+	assert.True(t, sameResult.Verified)
+	require.NotNil(t, sameResult.Executed)
+	assert.False(t, *sameResult.Executed)
 }
 
 func TestApplyDryRunDoesNotConnect(t *testing.T) {
@@ -209,6 +240,10 @@ func TestApplySudoInstallsStagedPayload(t *testing.T) {
 	var decoded applyResult
 	require.NoError(t, json.Unmarshal([]byte(result.stdout), &decoded))
 	assert.True(t, decoded.Changed)
+	assert.True(t, decoded.Verified)
+	assert.Equal(t, sha256Hex([]byte("old\n")), decoded.BeforeSHA256)
+	assert.Equal(t, sha256Hex([]byte("new\n")), decoded.AfterSHA256)
+	assert.True(t, decoded.RollbackAvailable)
 	got, err := os.ReadFile(remote) // #nosec G304 -- path is inside this test's temporary SSH root.
 	require.NoError(t, err)
 	assert.Equal(t, "new\n", string(got))
@@ -217,4 +252,77 @@ func TestApplySudoInstallsStagedPayload(t *testing.T) {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func TestApplyZeroByteAndForceParity(t *testing.T) {
+	for _, sudo := range []bool{false, true} {
+		name := "sftp"
+		if sudo {
+			name = "sudo"
+		}
+		t.Run(name, func(t *testing.T) {
+			server := startSSHServer(t, serverOptions{})
+			home := t.TempDir()
+			remote := filepath.Join(server.root, "empty.conf")
+			local := filepath.Join(home, "empty.conf")
+			require.NoError(t, os.WriteFile(local, []byte{}, 0o600))
+			require.NoError(t, os.WriteFile(remote, []byte("before\n"), 0o640)) // #nosec G306 -- fixture verifies preservation of group-readable permissions.
+			env := map[string]string{"SSH_PASSWORD": operatorPassword}
+			base := []string{
+				"apply", "-h=" + server.host, "-p=" + server.port, "-u=operator",
+				"--no-key", "--json", "--accept-unknown-host", "--path=" + filepath.ToSlash(remote), "--from=" + local,
+			}
+			if sudo {
+				env["SSHX_E2E_KEYRING_FILE"] = filepath.Join(home, "keyring.json")
+				set := runSSHXWithTestKeyring(t, home, []string{"--password-set=apply-test:" + operatorPassword, "--no-audit"}, env)
+				require.Equal(t, 0, set.exitCode, set.stderr)
+				base = append(base, "--sudo", "-pk=apply-test")
+			}
+			run := func(extra ...string) applyResult {
+				args := append(append([]string{}, base...), extra...)
+				var result cliResult
+				if sudo {
+					result = runSSHXWithTestKeyring(t, home, args, env)
+				} else {
+					result = runSSHX(t, home, args, env)
+				}
+				require.Equal(t, 0, result.exitCode, result.stderr+result.stdout)
+				var decoded applyResult
+				require.NoError(t, json.Unmarshal([]byte(result.stdout), &decoded))
+				return decoded
+			}
+			changed := run("--expect-sha256=" + sha256Hex([]byte("before\n")))
+			require.Equal(t, "changed", changed.ChangeState)
+			require.True(t, changed.Verified)
+			require.Zero(t, changed.PayloadBytes)
+			require.Equal(t, sha256Hex(nil), changed.PayloadSHA256)
+			require.Equal(t, changed.PayloadSHA256, changed.AfterSHA256)
+			data, err := os.ReadFile(remote) // #nosec G304 -- path is confined to this test's owned SSH root.
+			require.NoError(t, err)
+			require.Empty(t, data)
+			info, err := os.Stat(remote)
+			require.NoError(t, err)
+			require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+			same := run()
+			require.Equal(t, "unchanged", same.ChangeState)
+			require.NotNil(t, same.Executed)
+			require.False(t, *same.Executed)
+			require.True(t, same.Verified)
+			require.NoError(t, os.WriteFile(local, []byte("forced\n"), 0o600))
+			forced := run("--force", "--no-backup", "--expect-sha256="+sha256Hex([]byte("wrong")))
+			require.True(t, forced.Verified)
+			require.Equal(t, "changed", forced.ChangeState)
+			require.False(t, forced.RollbackAvailable)
+			entries, err := os.ReadDir(server.root)
+			require.NoError(t, err)
+			for _, entry := range entries {
+				require.NotContains(t, entry.Name(), ".sshx.", "no owned target temp files remain")
+			}
+			if sudo {
+				staged, readErr := os.ReadDir(filepath.Join(server.root, ".sshx", "apply-staging"))
+				require.NoError(t, readErr)
+				require.Empty(t, staged)
+			}
+		})
+	}
 }

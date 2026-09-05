@@ -1,0 +1,18 @@
+{
+  "schema_version": "sshx.result.v1",
+  "run_id": "<run-id>",
+  "target": {"index": 0, "address": "127.0.0.1", "port": "<port>", "user": "operator", "literal": true},
+  "action": {"kind": "command", "intent": "read", "command": "probe"},
+  "status": "succeeded",
+  "phase": "complete",
+  "completion": "completed",
+  "exit_code": 0,
+  "success": true,
+  "host": "127.0.0.1",
+  "port": "<port>",
+  "user": "operator",
+  "command": "probe",
+  "stdout": "probe-ok\n",
+  "duration_ms": 0,
+  "auth_method": "password"
+}

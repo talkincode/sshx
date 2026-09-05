@@ -73,7 +73,7 @@ test-short: ## Run unit tests (skip integration tests)
 
 test-e2e: ## Run compiled-binary SSH/SFTP E2E tests (native keyring is opt-in)
 	@echo "Running compiled-binary E2E tests..."
-	$(GOTEST) -v ./tests/e2e
+	$(GOTEST) -v -count=1 ./tests/e2e
 
 test-keychain-macos: ## Run real-keyring E2E in an ephemeral macOS Keychain (no GUI prompts)
 	@echo "Running real-keyring E2E tests in an ephemeral macOS Keychain..."

@@ -1,10 +1,17 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 func TestParseArgs_ApplyBasic(t *testing.T) {
@@ -26,6 +33,73 @@ func TestParseArgs_ApplyBasic(t *testing.T) {
 		t.Fatalf("unexpected expect hash: %s", config.ApplyExpectSHA256)
 	}
 }
+
+func TestHandleApplyConsumesPreparedPayload(t *testing.T) {
+	for _, payload := range [][]byte{[]byte("captured bytes"), {}} {
+		t.Run(string(payload), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			config := ParseArgs([]string{"sshx", "apply", "-h=127.0.0.1", "--path=/app.conf", "--from=missing-local-file", "--no-key", "--insecure-hostkey", "--json", "--no-audit"})
+			config.Context, config.Password, config.PreparedPayload = ctx, "fixture", payload
+			raw := captureStdout(t, func() {
+				require.ErrorIs(t, HandleApply(config, nil), ErrReported)
+			})
+			var result applyJSONResult
+			require.NoError(t, json.Unmarshal(raw, &result))
+			require.NotEqual(t, "local_io", result.ErrorKind)
+			require.Equal(t, sshclient.SHA256Hex(payload), result.PayloadSHA256)
+			require.Equal(t, len(payload), result.PayloadBytes)
+		})
+	}
+}
+
+func TestApplyFailurePreservesExecutionAndBackupEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		executed   *bool
+		state      string
+		completion string
+	}{
+		{"before", applyBool(false), "unchanged", "not_started"},
+		{"after", applyBool(true), "changed", "completed"},
+		{"ack-loss", nil, "unknown", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := applyRun{
+				config: &sshclient.Config{JSONOutput: true, RemotePath: "/app.conf"},
+				phase:  "apply", start: time.Now(), payload: []byte{},
+				outcome: &sshclient.ApplyOutcome{
+					BeforeSHA256: strings.Repeat("a", 64), AfterSHA256: strings.Repeat("b", 64),
+					PayloadSHA256: sshclient.SHA256Hex(nil), BackupPath: "/backups/app.conf",
+					BackupVerified: true, ChangeState: tc.state, Executed: tc.executed,
+					Verification: "failed",
+				},
+			}
+			raw := captureStdout(t, func() {
+				require.ErrorIs(t, run.fail("verification_failed", sshclient.ErrApplyVerification), ErrReported)
+			})
+			var result applyJSONResult
+			require.NoError(t, json.Unmarshal(raw, &result))
+			require.Equal(t, tc.completion, result.Completion)
+			require.Equal(t, tc.state, result.ChangeState)
+			require.Equal(t, tc.executed, result.Executed)
+			require.Equal(t, run.outcome.BeforeSHA256, result.BeforeSHA256)
+			require.Equal(t, run.outcome.AfterSHA256, result.AfterSHA256)
+			require.Equal(t, sshclient.SHA256Hex(nil), result.PayloadSHA256)
+			require.True(t, result.RollbackAvail)
+			require.Equal(t, "/backups/app.conf", result.Backup.Path)
+			require.False(t, result.Verified)
+			run.outcome.BackupVerified = false
+			require.False(t, run.baseResult(false, -1, "remote_io", errors.New("backup failed")).RollbackAvail)
+		})
+	}
+}
+
+func TestClassifyApplyTypedVerificationError(t *testing.T) {
+	require.Equal(t, "verification_failed", classifyApplyError(errors.Join(errors.New("transport interrupted"), sshclient.ErrApplyVerification)))
+}
+
+func applyBool(value bool) *bool { return &value }
 
 func TestParseArgs_ApplyUnknownOption(t *testing.T) {
 	config := ParseArgs([]string{"sshx", "apply", "-h=prod", "--path=/tmp/a", "--from=./a", "--bogus"})

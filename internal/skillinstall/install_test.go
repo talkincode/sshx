@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 )
 
@@ -25,21 +26,6 @@ func TestInstallLifecyclePreservesConflictsUntilForced(t *testing.T) {
 	if validationErr := validate(content); validationErr != nil {
 		t.Fatalf("installed invalid skill: %v", validationErr)
 	}
-	info, err := os.Stat(installed.Path)
-	if err != nil {
-		t.Fatalf("stat installed skill: %v", err)
-	}
-	if info.Mode().Perm() != 0o644 {
-		t.Fatalf("installed skill mode = %o, want 644", info.Mode().Perm())
-	}
-	metadataInfo, err := os.Stat(filepath.Join(dir, metadataFileName))
-	if err != nil {
-		t.Fatalf("stat managed metadata: %v", err)
-	}
-	if metadataInfo.Mode().Perm() != 0o644 {
-		t.Fatalf("managed metadata mode = %o, want 644", metadataInfo.Mode().Perm())
-	}
-
 	current, err := Install(Options{Dir: dir})
 	if err != nil {
 		t.Fatalf("reinstall current skill: %v", err)
@@ -47,24 +33,6 @@ func TestInstallLifecyclePreservesConflictsUntilForced(t *testing.T) {
 	if current.Status != "current" {
 		t.Fatalf("reinstall status = %q, want current", current.Status)
 	}
-	if chmodErr := os.Chmod(installed.Path, 0o666); chmodErr != nil { // #nosec G302 -- deliberately exercises permission repair.
-		t.Fatalf("loosen installed skill permissions: %v", chmodErr)
-	}
-	repaired, err := Install(Options{Dir: dir})
-	if err != nil {
-		t.Fatalf("repair installed skill permissions: %v", err)
-	}
-	if repaired.Status != "repaired" {
-		t.Fatalf("permission repair status = %q, want repaired", repaired.Status)
-	}
-	repairedInfo, err := os.Stat(installed.Path)
-	if err != nil {
-		t.Fatalf("stat repaired skill: %v", err)
-	}
-	if repairedInfo.Mode().Perm() != 0o644 {
-		t.Fatalf("repaired skill mode = %o, want 644", repairedInfo.Mode().Perm())
-	}
-
 	custom := []byte("custom local skill\n")
 	if writeErr := os.WriteFile(installed.Path, custom, 0o600); writeErr != nil {
 		t.Fatalf("write custom skill: %v", writeErr)
@@ -93,6 +61,43 @@ func TestInstallLifecyclePreservesConflictsUntilForced(t *testing.T) {
 	}
 	if err := validate(restored); err != nil {
 		t.Fatalf("force update did not restore bundled skill: %v", err)
+	}
+}
+
+func TestInstallPOSIXPermissionsAndRepair(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode enforcement is not a Windows ACL capability; see Windows replacement tests")
+	}
+	dir := filepath.Join(t.TempDir(), "sshx")
+	installed, err := Install(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{installed.Path, filepath.Join(dir, metadataFileName)} {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		if info.Mode().Perm() != 0o644 {
+			t.Fatalf("%s mode = %o, want 644", path, info.Mode().Perm())
+		}
+	}
+	if chmodErr := os.Chmod(installed.Path, 0o666); chmodErr != nil { // #nosec G302 -- deliberately exercises permission repair.
+		t.Fatal(chmodErr)
+	}
+	repaired, err := Install(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Status != "repaired" {
+		t.Fatalf("permission repair status = %q, want repaired", repaired.Status)
+	}
+	info, err := os.Stat(installed.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("repaired skill mode = %o, want 644", info.Mode().Perm())
 	}
 }
 
@@ -133,10 +138,6 @@ func TestManagedPreviousVersionUpdatesWithoutForce(t *testing.T) {
 }
 
 func TestInstallRejectsSymlinkedTargetDirectoryAndFile(t *testing.T) {
-	if _, err := os.Lstat("/"); err != nil {
-		t.Skip("filesystem does not support expected path operations")
-	}
-
 	root := t.TempDir()
 	realDir := filepath.Join(root, "real")
 	if err := os.Mkdir(realDir, 0o750); err != nil {
@@ -144,7 +145,10 @@ func TestInstallRejectsSymlinkedTargetDirectoryAndFile(t *testing.T) {
 	}
 	symlinkDir := filepath.Join(root, "linked")
 	if err := os.Symlink(realDir, symlinkDir); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		if runtime.GOOS == "windows" && (errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.Errno(1314))) {
+			t.Skipf("Windows symlink privilege unavailable: %v", err)
+		}
+		t.Fatal(err)
 	}
 	if _, err := Install(Options{Dir: symlinkDir, Force: true}); !errors.Is(err, ErrUnsafeTarget) {
 		t.Fatalf("symlink directory error = %v, want ErrUnsafeTarget", err)
@@ -223,6 +227,26 @@ func TestResolveDirDefaultAndHomeExpansion(t *testing.T) {
 	}
 	if explicit != filepath.Join(home, "explicit") {
 		t.Fatalf("explicit directory = %q", explicit)
+	}
+	for _, path := range []string{"~", `~\explicit`, filepath.Join(home, "space 目录", "sshx")} {
+		got, resolveErr := ResolveDir(path)
+		if resolveErr != nil {
+			t.Fatal(resolveErr)
+		}
+		want := path
+		switch path {
+		case "~":
+			want = home
+		case `~\explicit`:
+			want = filepath.Join(home, "explicit")
+		}
+		if got != want {
+			t.Fatalf("ResolveDir(%q) = %q, want %q", path, got, want)
+		}
+	}
+	root := filepath.VolumeName(home) + string(filepath.Separator)
+	if _, err := ResolveDir(root); !errors.Is(err, ErrUnsafeTarget) {
+		t.Fatalf("filesystem root %q: %v", root, err)
 	}
 }
 

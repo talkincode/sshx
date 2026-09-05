@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/talkincode/sshx/internal/execution"
 	"github.com/talkincode/sshx/internal/keyringstore"
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sqlsafe"
@@ -20,8 +21,12 @@ type dryRunStatus struct {
 }
 
 type dryRunPlan struct {
-	DryRun bool `json:"dry_run"`
-	Valid  bool `json:"valid"`
+	resolvedPlugin *pluginpkg.Resolved
+	Plan           *execution.Plan `json:"plan,omitempty"`
+	PlanHash       string          `json:"plan_hash,omitempty"`
+	Risk           execution.Risk  `json:"risk,omitempty"`
+	DryRun         bool            `json:"dry_run"`
+	Valid          bool            `json:"valid"`
 
 	Mode   string `json:"mode"`
 	Action string `json:"action,omitempty"`
@@ -129,6 +134,9 @@ type sqlDryRunPlan struct {
 
 func emitDryRunPlan(config *sshclient.Config) error {
 	plan := buildDryRunPlan(config)
+	if prepared := preparedFrom(config); prepared != nil {
+		plan = prepared.preview
+	}
 	if config.JSONOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -271,7 +279,9 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	settings, err := LoadSettings()
 	if err != nil {
 		plan.HostResolved = config.Host
-		plan.HostResolution = dryRunStatus{Status: "error_used_direct", ErrorKind: "config", Message: err.Error()}
+		plan.HostResolution = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.ConfigCheck = plan.HostResolution
+		plan.Valid = false
 		return
 	}
 	hostConfig, err := GetHost(settings, config.Host)
@@ -530,6 +540,7 @@ func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
 			return
 		}
 		plan.PluginPath = resolved.Path
+		plan.resolvedPlugin = resolved
 		plan.PluginDigest = resolved.Digest
 		plan.PluginTrusted = resolved.Trusted
 		plan.PluginRunner = resolved.Manifest.Runner.Type
@@ -779,7 +790,12 @@ func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
 	if config.ApplyNoBackup {
 		applyPlan.Backup = "none"
 	}
-	if data, err := os.ReadFile(config.LocalPath); err == nil {
+	data := config.PreparedPayload
+	var readErr error
+	if data == nil {
+		data, readErr = os.ReadFile(config.LocalPath)
+	}
+	if readErr == nil {
 		if len(data) > sshclient.MaxApplyBytes {
 			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: fmt.Sprintf("payload exceeds %d-byte apply limit", sshclient.MaxApplyBytes)}
 			plan.Valid = false
@@ -787,8 +803,9 @@ func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
 		}
 		applyPlan.PayloadBytes = len(data)
 		applyPlan.PayloadSHA256 = sshclient.SHA256Hex(data)
+		config.PreparedPayload = data
 	} else {
-		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "local_io", Message: fmt.Sprintf("read --from=%s: %v", config.LocalPath, err)}
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "local_io", Message: fmt.Sprintf("read --from=%s: %v", config.LocalPath, readErr)}
 		plan.Valid = false
 		return
 	}

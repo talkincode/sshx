@@ -124,6 +124,48 @@ Dry-run reports host resolution, mode/action, sudo key selection, safety-check
 status, and whether a real run would connect, execute, read a secret, or mutate
 state. It does not simulate remote command success.
 
+Remote command/run/apply/sql/SFTP/transfer/inspect previews add nested
+`plan.schema_version: sshx.plan.v1`, `plan_hash`, and scalar
+`risk: read|mutation|privileged|destructive`. Unknown commands/scripts are
+mutation risk with `effects.unknown=true`; `--intent=read` is not proof.
+Inspect `effects.local_write`, `remote_write`, `privileged`, and `destructive`.
+
+After reviewing a bindable plan, repeat **the same inputs** with
+`--expect-plan="$reviewed_hash"` (`sha256:` plus 64 lowercase hex digits).
+Check `plan.bindable` / `plan.unresolved` first. DNS-only targets, missing
+public-key sidecars, unavailable/relaxed trust and remotely discovered SQL
+identity cannot be bound offline. Do not relax trust to force binding.
+The entire sorted known_hosts record snapshot is hashed; even unrelated trust
+changes can invalidate review. `--force` never bypasses plan comparison.
+Errors are `config` (bad hash), `plan_mismatch`, or `plan_unresolved`.
+Ordinary dry-run does not write audit/cache/spool files or read secret values.
+Binding freezes local payload/identity/policy, not remote files, rows or roles.
+
+## Execution evidence and safe retries
+
+Use `execution_id` / `parent_execution_id` for correlation and
+`execution_fingerprint` for finalized redacted evidence. Fingerprints exclude
+raw stdout/stderr and secrets; they are not signatures or anti-replay tokens.
+Shared `peers` contains actual public peer/auth facts collected after successful
+connection/authentication and is fingerprint-bound; a run parent binds sorted
+target fingerprints. Do not expect observed peers on earlier connection/auth
+failures or substitute planned addresses for missing observations.
+Read `change_state` (`changed|unchanged|unknown`), nullable `executed`,
+`verified`, `verification`, and `preconditions` / `postconditions` alongside
+legacy `completion`. Null execution and unknown change state are not false.
+Success does not prove effect verification; an error may follow a completed write.
+On `verification_failed`, cancellation, timeout, or uncertain completion,
+inspect remote state and known backups before retrying mutations.
+An attempted exec request with a lost acknowledgement is unknown
+(`executed=null`), not proof of `not_started`, including timeout/cancel/disconnect.
+
+Keep `--timeout` for the existing command/session limit. Opt into
+`--host-timeout` for setup/execution/verification and `--global-timeout` for the
+whole operation including queue time. `--fail-fast` aliases
+`--failure-mode=fail_fast`; `--max-failures=N` stops new admission only.
+Already admitted targets finish and may add failures. Cancellation closes local
+transports; it does not guarantee remote termination or rollback.
+
 ## Audit trail
 
 Every non-dry-run invocation writes one JSONL audit event by default:
@@ -142,6 +184,10 @@ They do not record plaintext passwords, private key contents, or stdout/stderr.
 Command text is included but best-effort redacted for password/token-style
 arguments. Use `--no-audit` only when the user explicitly wants no local audit
 event for that invocation.
+Query by `sshx audit query --execution-id=<id> --json`. Corrupt records produce
+visible diagnostics instead of silently looking like no matches. Persistence
+is best-effort and distinct from execution success: do not replay a successful
+mutation to repair an audit write failure.
 
 ## Exit codes (and how to read failures)
 
@@ -159,7 +205,9 @@ In `--json` mode an sshx-level failure has `exit_code: -1` and a non-empty
 `impact_check_failed`, `remote_exit`, and
 `cred_source_failed`. A missing remote `psql`/`sqlite3` client reports
 `config` (not `remote_exit` 127). Apply mode adds `precondition` when
-`--expect-sha256` does not match the current remote file.
+`--expect-sha256` does not match the current remote file. Execution hardening
+also adds `plan_mismatch`, `plan_unresolved`, `cancelled`, and
+`verification_failed`; use their evidence rather than matching error text.
 
 ## Command execution
 
@@ -177,7 +225,7 @@ sshx -h=10.0.0.5 -u=root -p=2222 -i=~/.ssh/prod.pem "ps aux | grep nginx"
 # Bind the local source address (literal IP or interface name).
 sshx -h=prod-web --bind=en0 "uptime"
 
-# Bound the runtime; kills the command after the timeout (accepts 30s, 2m, or 30).
+# Bound the command wait, not a promise of remote termination (30s, 2m, or 30).
 sshx -h=prod-web --timeout=30s "apt-get update"
 
 # Stream output live (human use). Add --pty only when a TTY is required
@@ -299,7 +347,37 @@ Safety contract (what an agent must expect):
   `statement_sha256`, `estimated_rows`, `affected_rows`, `backup.kind`,
   `backup.path`.
 
+Execution acknowledgement, commit acknowledgement, row counts, and verified
+changes are separate. PostgreSQL processed rows, SQLite changes and MySQL
+affected rows differ; positive counts do not universally prove changed values,
+and zero does not universally prove no side effects. Inspect `change_state` /
+`verification` rather than assuming a count is a postcondition. Do not retry an
+uncertain commit. MySQL backup/mutation atomicity requires a supported, proven
+single-session strategy and real-engine evidence; separate sessions and
+implicit-commit backup DDL are not atomic.
+Read nested `evidence.commit`, `state_change`, `affected_rows_semantics`,
+`verification`, `effect_verification`, `backup_status`, `backup_consistency`,
+`backup_format`, and `outcome_uncertain`. `protocol_verified` means the
+nonce-bound client acknowledgements were validated, not that actual changed
+values were verified. Generic mutation effect verification remains unsupported.
+All SQL mutations retain `state_change=unknown`, including zero affected rows;
+reads are unchanged. Missing/malformed required protocol evidence reports
+`protocol_error` / `verification_failed`, not proof of rollback.
+
+Guarded MySQL supports simple single-table InnoDB UPDATE/DELETE under an
+explicit write lock; unsupported related effects, engines, complex sources and
+guarded-backup DDL are rejected. Backups use lossless `SSHX_MYSQL_HEX_ROWS_V1`
+(hex column/type headers and NULL/binary-aware row values), not CSV or plain
+TSV. No server backup table/DDL is created; the data preimage must finish
+persisting before mutation. It is not a schema dump or automatic restore.
+Artifacts use `.mysql-hex` with `evidence.backup_format=mysql_hex_rows_v1`.
+Only plain unqualified table names are supported: no aliases, joins, subqueries
+or RETURNING. InnoDB/related-effect checks occur after the table write lock.
+
 ### Dockerized production databases
+
+These discovery workflows are unbound. `--expect-plan` rejects remote/container
+identity discovery; an offline preview cannot pin the discovered role/endpoint.
 
 When PostgreSQL runs in a container and its credentials live in the production
 environment (container env or a deploy `.env`) rather than any local keyring:
@@ -356,7 +434,13 @@ sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --sudo --json \
 - Reads open `file:<path>?mode=ro`. DML does not use EXPLAIN row estimates:
   a bounded `UPDATE`/`DELETE` snapshots the table to CSV; overwrites
   (`REPLACE`, `INSERT OR REPLACE`, UPSERT) and unbounded changes take a
-  whole-file `sqlite3 .backup` under `BEGIN IMMEDIATE`.
+  whole-file `sqlite3 .backup` from a second read-only client while the mutation
+  client holds `BEGIN IMMEDIATE`. Only after the snapshot succeeds is mutation
+  sent. `.backup` on the same active write connection can return
+  `database is locked` and is not the strategy.
+  Table CSV is a full-table snapshot. PostgreSQL native/Docker CSV backups
+  likewise keep the preimage and mutation in one locked transaction; volatile
+  or parenthesized predicates escalate row snapshots to full-table backups.
 - Always blocked: sqlite3 dot-commands (`.shell`, `.read`, `.once`),
   `ATTACH`/`DETACH`, `load_extension`, writable `PRAGMA`, `VACUUM INTO`,
   URI or `:memory:` identities, and relative paths.
@@ -384,18 +468,33 @@ sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
 
 - `--path` must be a clean absolute file path. Symlinks, directories, and
   device nodes are blocked (`error_kind: "blocked"`).
-- `--expect-sha256` is optional CAS. Mismatch is `error_kind: "precondition"`
-  with `completion: "not_started"` and no write.
+- `--expect-sha256` is an optional hash precondition, not arbitrary-writer CAS.
+  A pre-commit mismatch is `error_kind: "precondition"` with no target write.
 - Backups default to `~/.sshx/file-backups/`. `--no-backup` requires `--force`.
 - `--sudo` stages the payload over SFTP, then installs with a privileged
   stdin script. Use it when the SSH user cannot write the target.
 - `/etc/passwd`, `/etc/shadow`, and `/etc/sudoers` require
   `--force --bypass-reason=`.
-- JSON fields to branch on: `success`, `changed`, `created`, `completion`,
+- JSON fields to branch on: `success`, `change_state`, `executed`, `verified`,
+  `verification`, `completion` (legacy `changed` / `created` remain),
   `error_kind`, `before_sha256`, `after_sha256`, `backup.path`,
   `rollback_available`. Identical content is success with `changed=false`.
+  A post-write `verification_failed` may follow a real change; inspect first.
+  `backup.verified` confirms backup readback/hash verification;
+  `rollback_available` requires it, but is not automatic rollback or a tested
+  restore. `cleanup_pending` identifies uncertain owned leftovers;
+  inspect them before cleanup. Rename fallback never deletes the old target first.
+  A verified no-op has `executed=false`; acknowledged publication followed by
+  readback failure remains `executed=true` / `change_state=changed`.
+  Missing rename acknowledgement leaves both execution and change uncertain.
+  `replace_method` names the actual publication primitive.
 
 ## SFTP file operations
+
+Use `--json` for the real CLI operation/effect result. A size check is not
+content equality; recursive transfer can leave partial progress and has no
+directory-wide atomic rollback. Download records local writes; relay writes
+the destination, not the source.
 
 ```bash
 sshx -h=host --upload=local.txt --to=/tmp/remote.txt     # upload
@@ -489,7 +588,8 @@ sshx --help      # full reference
 ## Agent checklist
 
 1. Use `--json` and branch on `success` / `error_kind`, not on stdout text.
-2. Add `--timeout=` to anything that can hang (package installs, network ops).
+2. Bound unattended work with `--timeout=` and optional whole-target/global
+   budgets; cancellation is not proof that remote work stopped.
 3. Prefer named hosts; store secrets in the keyring or the explicit local
    vault, never inline in shared scripts. Don't assume the sudo key is
    `master` — named hosts resolve their own `password_key`; for ad-hoc IPs
@@ -505,6 +605,8 @@ sshx --help      # full reference
    the SSH user cannot open the database file. Direct `psql` /
    `sqlite3` invocations are blocked — rework as `sshx sql`, do not `--force`.
 7. For remote file edits use `sshx apply`, never `sed -i` or upload-then-`install`.
-   Preview with `--dry-run --json`. Branch on `changed` and `error_kind`
-   (`precondition` means the file was not written). Validate or reload with a
-   separate `sshx run` after apply succeeds.
+   Preview with `--dry-run --json`; bind reviewed inputs with `--expect-plan`
+   when bindable. Branch on `change_state`, `verified`, and `error_kind`.
+   A post-write verification error may follow a change. SFTP hash rechecks
+   are not arbitrary-writer CAS. Validate or reload with a separate `sshx run`
+   only after interpreting apply's evidence.

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/talkincode/sshx/skills"
@@ -58,6 +59,7 @@ func Install(options Options) (Result, error) {
 }
 
 func installContent(options Options, content []byte) (Result, error) {
+	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 	if err := validate(content); err != nil {
 		return Result{}, fmt.Errorf("invalid bundled skill: %w", err)
 	}
@@ -150,7 +152,7 @@ func ensureTargetDir(dir string) error {
 	info, err := os.Lstat(dir)
 	switch {
 	case err == nil:
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || !info.IsDir() {
 			return fmt.Errorf("%w: %s must be a real directory", ErrUnsafeTarget, dir)
 		}
 		return nil
@@ -165,7 +167,7 @@ func ensureTargetDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("verify skill directory %s: %w", dir, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || !info.IsDir() {
 		return fmt.Errorf("%w: %s must be a real directory", ErrUnsafeTarget, dir)
 	}
 	return nil
@@ -182,7 +184,7 @@ func installationStatus(destination, metadataPath string, content []byte, force 
 		return "installed", false, nil
 	case err != nil:
 		return "", false, fmt.Errorf("inspect existing skill %s: %w", destination, err)
-	case info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular():
+	case info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || !info.Mode().IsRegular():
 		return "", false, fmt.Errorf("%w: %s must be a regular file", ErrUnsafeTarget, destination)
 	}
 	if info.Size() > maxSkillSize {
@@ -200,7 +202,8 @@ func installationStatus(destination, metadataPath string, content []byte, force 
 	desiredDigest := digest(content)
 	metadataCurrent := metadataExists && metadata.SchemaVersion == metadataSchema && metadata.SHA256 == desiredDigest
 	if bytes.Equal(existing, content) {
-		if info.Mode().Perm() != 0o644 {
+		// Windows mode bits do not represent POSIX owner/group permissions.
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 			return "repaired", metadataCurrent, nil
 		}
 		return "current", metadataCurrent, nil
@@ -222,7 +225,7 @@ func readMetadata(path string) (managedMetadata, bool, error) {
 		return managedMetadata{}, false, nil
 	case err != nil:
 		return managedMetadata{}, false, fmt.Errorf("inspect skill metadata %s: %w", path, err)
-	case info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular():
+	case info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || !info.Mode().IsRegular():
 		return managedMetadata{}, false, fmt.Errorf("%w: %s must be a regular file", ErrUnsafeTarget, path)
 	case info.Size() > maxMetadataSize:
 		return managedMetadata{}, true, nil
@@ -277,6 +280,7 @@ func writeAtomic(destination string, content []byte) error {
 }
 
 func validate(content []byte) error {
+	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 	if len(content) == 0 {
 		return fmt.Errorf("content is empty")
 	}

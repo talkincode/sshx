@@ -165,7 +165,11 @@ func emitPluginResult(config *sshclient.Config, result pluginpkg.ActionResult) e
 	if config.JSONOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetEscapeHTML(false)
-		if err := encoder.Encode(result); err != nil {
+		envelope := struct {
+			pluginpkg.ActionResult
+			localRiskMetadata
+		}{result, localRiskFields("plugin", result.Action)}
+		if err := encoder.Encode(envelope); err != nil {
 			return fmt.Errorf("encode plugin result: %w", err)
 		}
 		return nil

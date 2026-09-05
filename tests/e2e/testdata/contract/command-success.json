@@ -1,0 +1,12 @@
+{
+  "host": "127.0.0.1",
+  "port": "<port>",
+  "user": "operator",
+  "command": "bothstreams",
+  "exit_code": 0,
+  "success": true,
+  "stdout": "to-out\n",
+  "stderr": "to-err\n",
+  "duration_ms": 0,
+  "auth_method": "password"
+}

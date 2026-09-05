@@ -82,6 +82,8 @@ Read [Security Guidelines](security-guidelines.md) before using `sshx` in produc
 - [Host Management](host-management.md) explains named hosts and key selection.
 - [Usage Scenarios](usage-scenarios.md) gives practical examples for daily operations.
 - [Agent and Script Mode](agent-scripting.md) explains JSON output, exit codes, timeouts, and audit logs.
+- [Plans, Outcomes, and Safe Retries](execution-contract.md) covers reviewed plan
+  binding, risk/effect evidence, cancellation, and backend/platform limits.
 - [Inspection Capabilities and Local Plugins](inspection-plugins.md) explains built-ins, `plugin create`, trust, and observations.
 - [SFTP Workflows](sftp.md) covers upload, download, list, mkdir, and remove.
 - [Guarded File Apply](apply.md) replaces one remote file with backup and hash checks.

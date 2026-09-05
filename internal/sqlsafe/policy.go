@@ -1,6 +1,9 @@
 package sqlsafe
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Options carries the caller-controlled safety levers for one execution.
 type Options struct {
@@ -118,12 +121,32 @@ func DecideBackup(cls *Classification, estimatedRows int64, opts Options) (Backu
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
 			Reason: "WHERE clause spans multiple lines; taking a full-table CSV snapshot instead of a row snapshot"}, nil
 	}
+	if !stableBackupPredicate(cls.WhereClause) {
+		return BackupPlan{Kind: BackupTable, Table: cls.Table,
+			Reason: "predicate may be evaluated differently during backup and mutation; taking a full-table snapshot"}, nil
+	}
 	if estimatedRows >= 0 && estimatedRows > opts.rowThreshold() {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
 			Reason: fmt.Sprintf("estimated %d affected rows exceeds the row-backup threshold (%d); taking a full-table CSV snapshot", estimatedRows, opts.rowThreshold())}, nil
 	}
 	return BackupPlan{Kind: BackupRows, Table: cls.Table,
 		Reason: "snapshotting affected rows selected by the statement's WHERE clause"}, nil
+}
+
+func stableBackupPredicate(where string) bool {
+	if strings.Contains(where, "--") || strings.Contains(where, "#") {
+		return false
+	}
+	masked, err := maskNonCode(where)
+	if err != nil {
+		return false
+	}
+	for _, ch := range masked {
+		if ch == '(' || ch == '@' {
+			return false
+		}
+	}
+	return !containsKeyword(masked, "SELECT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "SYSDATE")
 }
 
 func containsNewline(s string) bool {

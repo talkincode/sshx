@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-05
+
+### Security
+
+- Upgrade x/crypto to v0.56.0 to fix reachable SSH channel deadlocks
+  GO-2026-6354 and GO-2026-6355. Raise the Go build baseline to 1.26.8
+  because the fixed dependency requires Go 1.26.
+
+### Fixed
+
+- Process relayed directory entries in name order so partial execution is
+  reproducible across SFTP servers and host filesystems.
+
+### Added
+
+- Additive `sshx.plan.v1` previews, `plan_hash` and risk/effects metadata;
+  optional `--expect-plan=sha256:...` for command/run, apply, SQL, SFTP,
+  transfer and inspect. Local admission rejects changed or unresolved public
+  inputs before secrets/network, without changing ordinary offline dry-run.
+- Shared execution/parent IDs, redacted execution fingerprints, tri-state
+  change evidence, nullable execution observation and verification conditions
+  alongside existing domain-specific JSON fields.
+- Optional whole-target `--host-timeout` and operation `--global-timeout`;
+  `--fail-fast` alias and `--max-failures` admission thresholds.
+- Audit execution-ID filtering and visible corrupt-record diagnostics, with
+  audit persistence reported separately from the remote execution outcome.
+- English/Chinese execution-contract and evidence-matrix documentation, plus
+  updated help and bundled agent skill guidance for safe retries.
+- Additive-safe compiled-CLI contract fixtures, native Windows portable
+  plugin/skill and CLI reliability coverage, and opt-in real PostgreSQL/MySQL
+  CI lanes. Cross-builds and unavailable native-engine runs are not presented
+  as passed native acceptance.
+
+### Changed
+
+- Unknown command/script effects conservatively receive mutation risk;
+  existing intent and force meanings remain unchanged. Force cannot bypass
+  plan binding. Entire trust-record snapshots are hashed, so unrelated trust
+  changes can conservatively invalidate reviewed plans.
+- Failure thresholds stop new admission only; already admitted work finishes.
+  Cancellation/deadlines do not promise remote termination or rollback.
+- File and SQL guidance distinguishes execution acknowledgement, observed
+  changes and verification. SFTP is not arbitrary-writer CAS, and MySQL
+  transaction claims require supported strategies and real-engine evidence.
+- Acceptance documentation no longer treats simulated database clients or
+  cross-builds as proof of real-engine or native-platform guarantees.
+
 ## [0.13.0] - 2026-09-01
 
 ### Added

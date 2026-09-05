@@ -58,7 +58,11 @@ func emitSecretsJSON(result secretsJSONResult) error {
 	if result.Backend == "" {
 		result.Backend = secretBackendName()
 	}
-	if err := encodeJSON(result); err != nil {
+	envelope := struct {
+		secretsJSONResult
+		localRiskMetadata
+	}{result, localRiskFields("password", result.Action)}
+	if err := encodeJSON(envelope); err != nil {
 		return fmt.Errorf("encode secrets result: %w", err)
 	}
 	return nil

@@ -34,8 +34,8 @@ Claude Desktop / generic MCP client entry:
 | Tool | Maps to | Notes |
 | --- | --- | --- |
 | `sshx_run` | `sshx run --json` | Selectors, command or byte-preserving script (shebang or `shell` selects the interpreter), bounded fan-out, dry-run, force + bypass_reason |
-| `sshx_sql` | `sshx sql --json` | Guarded single-statement SQL via remote psql/sqlite3 |
-| `sshx_apply` | `sshx apply --json` | Guarded single-file replace; accepts `from_path` or inline `content` |
+| `sshx_sql` | `sshx sql --json` | Guarded single-statement SQL via remote psql/sqlite3/mysql |
+| `sshx_apply` | `sshx apply --json` | Guarded single-file replace; accepts `from_path` or inline `content` (including an empty string) |
 | `sshx_inspect` | `sshx inspect --json` | Built-in capabilities and trusted local plugins |
 | `sshx_sftp` | SFTP flags | upload / download / list / mkdir / remove |
 | `sshx_transfer` | `--transfer` | Server-to-server streaming through the local machine |
@@ -48,8 +48,8 @@ non-zero child exit marks the MCP result as a tool error while preserving the
 structured payload.
 
 When the MCP client supplies a `progressToken` on `sshx_run`, the server runs
-the child with `--jsonl` and forwards each `target_finished` event as an MCP
-`notifications/progress` notification. Progress `total` is the selected target
+the child with `--jsonl` and offers `target_finished` events as bounded,
+best-effort MCP `notifications/progress` notifications. Progress `total` is the selected target
 count. The final tool document stays the CLI result: a single-target call still
 returns `sshx.result.v1`; multi-target calls still return the JSONL stream.
 
@@ -57,12 +57,52 @@ returns `sshx.result.v1`; multi-target calls still return the JSONL stream.
 and is incompatible with `--json`. Agents should keep using `sshx_run` /
 `sshx_sql` / `sshx_apply` rather than an interactive terminal.
 
+## Bound plans, deadlines, and delivery
+
+Remote tools accept `expect_plan`, `host_timeout_seconds`, and
+`global_timeout_seconds`, matching the CLI flags. `timeout_seconds` keeps its
+command/session meaning. Run also accepts `fail_fast` and `max_failures`;
+these stop new admission only, not already active targets. Opaque
+commands/scripts remain mutation risk regardless of caller intent.
+SQL accepts optional `bypass_reason` to record existing policy approvals;
+this does not introduce a new mandatory reason for old SQL invocations.
+Run's optional `request_id` is caller correlation, not the unique
+`execution_id`. Inspection supports the same `dry_run` preview flow.
+
+Preview with `dry_run: true`, inspect `plan.bindable` / `plan.unresolved`, and
+execute the same inputs with the reviewed `expect_plan`. Inline payload staging
+paths are not payload identity; bytes are. Public IP/key/trust requirements,
+conservative whole-trust-store invalidation, and remote SQL discovery
+restrictions are the same as the CLI. Common execution IDs, fingerprint,
+change state and verification are CLI facts, not an MCP-specific schema.
+
+The adapter has a separate 30-minute process watchdog. A shorter explicit
+global timeout receives two minutes of reporting grace, capped by that
+watchdog; a command timeout is not multiplied into a new fan-out limit.
+Cancellation requests cooperative child shutdown with bounded escalation.
+Platform-specific local process shutdown does not prove remote termination.
+Escalation follows a three-second grace period and targets the owned process
+tree (Unix process group or Windows job object), not unrelated processes.
+
+Progress delivery is bounded independently of stdout draining; progress
+notifications are not the authoritative completion record. Malformed,
+oversized or truncated JSONL, missing final completion, or output-delivery
+failures are adapter errors, not successful synthesized results. Keep the
+execution outcome separate from an adapter failure before deciding to retry.
+See [Plans, Outcomes, and Safe Retries](execution-contract.md).
+Current adapter caps are 64 MiB stdout/individual event records, 1 MiB stderr,
+100,000 retained events, and a 64-entry progress queue. Progress write/delivery
+has a 250 ms grace; a stalled stdio session closes instead of leaving a blocked
+SDK writer. These are delivery limits, not remote output or effect verification
+guarantees.
+
 ## Security Model
 
 - **Same gates, same evidence.** Safety checks, host-key verification, keyring
   credential roles, and audit all run in the child process exactly as in
-  direct CLI use. `force` / `no_safety_check` require an explicit
-  `bypass_reason` argument.
+  direct CLI use. Run's `force` / `no_safety_check` require explicit
+  `bypass_reason`; apply retains its critical-path reason requirement and SQL
+  retains its existing approval flags with an optional recorded reason.
 - **Audit attribution.** Child invocations carry `entry: "mcp"` in their audit
   events, so MCP-originated executions are distinguishable from interactive
   CLI use. The marker is metadata only — it never changes trust or safety

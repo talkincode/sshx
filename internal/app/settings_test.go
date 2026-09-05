@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,39 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestLoadSettingsMalformedAndTruncatedPreservesOriginal(t *testing.T) {
+	for _, content := range []string{"", "{", `{"hosts":[`, `{"hosts":[{"name":"prod"`, `{"hosts":"wrong"}`, `{"hosts":[]}{"hosts":[]}`, "\x00"} {
+		t.Run(content, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("SSHX_HOME", root)
+			path := filepath.Join(root, SettingsFile)
+			original := []byte(content)
+			if err := os.WriteFile(path, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings, err := LoadSettings()
+			if err == nil || settings != nil {
+				t.Fatalf("corrupt settings were treated as empty/default: %#v, %v", settings, err)
+			}
+			after, err := os.ReadFile(path) // #nosec G304 -- isolated malformed settings fixture.
+			if err != nil || !bytes.Equal(after, original) {
+				t.Fatalf("failed load modified settings: %v", err)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil || len(entries) != 1 || entries[0].Name() != SettingsFile {
+				t.Fatalf("failed load produced artifacts: %v, %v", entries, err)
+			}
+			if saveErr := SaveSettings(&Settings{Hosts: []HostConfig{{Name: "repaired", Host: "127.0.0.1"}}}); saveErr != nil {
+				t.Fatal(saveErr)
+			}
+			recovered, err := LoadSettings()
+			if err != nil || len(recovered.Hosts) != 1 || recovered.Hosts[0].Name != "repaired" {
+				t.Fatalf("explicit repair did not recover: %#v, %v", recovered, err)
+			}
+		})
+	}
+}
 
 func TestLoadSettings_NotExist(t *testing.T) {
 	// Create a temporary directory

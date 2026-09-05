@@ -156,7 +156,8 @@ func TestSQLiteCommands(t *testing.T) {
 		assert.Contains(t, rc.Command, "file:/var/lib/app/app.db?mode=ro")
 		assert.NotContains(t, rc.Command, "-readonly")
 		assert.NotContains(t, rc.Command, "-uri")
-		assert.Equal(t, "SELECT 1;\n", rc.Stdin)
+		assert.Contains(t, rc.Stdin, "SELECT 1;\n")
+		require.NotNil(t, rc.Protocol)
 		assert.NotContains(t, rc.Command, "PGPASSWORD")
 	})
 	t.Run("explain query plan", func(t *testing.T) {
@@ -171,12 +172,12 @@ func TestSQLiteCommands(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, rc.Command, "umask 077")
 		assert.Contains(t, rc.Command, "sqlite3 -batch -bail /var/lib/app/app.db")
-		assert.Contains(t, rc.Stdin, "BEGIN IMMEDIATE;")
-		assert.Contains(t, rc.Stdin, ".once .sshx/sql-backups/f.csv")
-		assert.Contains(t, rc.Stdin, "SELECT * FROM t WHERE id=1;")
-		assert.Contains(t, rc.Stdin, "UPDATE t SET x=1 WHERE id=1;")
-		assert.Contains(t, rc.Stdin, "SELECT changes();")
-		assert.Contains(t, rc.Stdin, "COMMIT;")
+		assert.Contains(t, rc.Command, "BEGIN IMMEDIATE;")
+		assert.Contains(t, rc.Command, "SELECT * FROM t;")
+		assert.NotContains(t, rc.Command, "SELECT * FROM t WHERE")
+		assert.Contains(t, rc.Command, "UPDATE t SET x=1 WHERE id=1;")
+		assert.Contains(t, rc.Command, "changes();")
+		assert.Contains(t, rc.Command, "COMMIT;")
 	})
 	t.Run("file backup uses .backup", func(t *testing.T) {
 		rc, err := conn.ExecuteWithBackupCommand(
@@ -184,8 +185,9 @@ func TestSQLiteCommands(t *testing.T) {
 			".sshx/sql-backups/f.db", BackupFile,
 		)
 		require.NoError(t, err)
-		assert.Contains(t, rc.Stdin, ".backup .sshx/sql-backups/f.db")
-		assert.NotContains(t, rc.Stdin, "SELECT * FROM")
+		assert.Contains(t, rc.Command, ".backup .sshx/sql-backups/f.db")
+		assert.NotContains(t, rc.Command, "SELECT * FROM")
+		assert.Equal(t, 2, strings.Count(rc.Command, "sqlite3 -batch -bail"))
 	})
 	t.Run("rejects unsafe backup path", func(t *testing.T) {
 		_, err := conn.ExecuteWithBackupCommand("UPDATE t SET x=1", "t", "", "bad path.csv", BackupTable)
@@ -253,9 +255,12 @@ func TestSQLiteBackupRoundTrip(t *testing.T) {
 	cmd.Stdin = strings.NewReader(rc.Stdin)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
-	n, ok := ParseChangesOutput(string(out))
-	require.True(t, ok)
-	assert.Equal(t, int64(1), n)
+	observed, parseErr := rc.Protocol.Parse(string(out))
+	require.NoError(t, parseErr)
+	require.NotNil(t, observed.AffectedRows)
+	assert.Equal(t, int64(1), *observed.AffectedRows)
+	assert.True(t, observed.Committed)
+	assert.True(t, observed.BackupReady)
 
 	got, err := exec.Command("sqlite3", db, "SELECT x FROM t WHERE id=1;").Output() // #nosec G204 -- fixed test fixture
 	require.NoError(t, err)
@@ -282,7 +287,9 @@ func TestSQLiteReadCommandRunsWithoutReadonlyFlag(t *testing.T) {
 	cmd.Stdin = strings.NewReader(rc.Stdin)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
-	assert.Equal(t, "1\n", string(out))
+	observed, parseErr := rc.Protocol.Parse(string(out))
+	require.NoError(t, parseErr)
+	assert.Equal(t, "1\n", observed.Stdout)
 
 	write := exec.Command("sh", "-c", rc.Command) // #nosec G204 -- same generated read-only command
 	write.Stdin = strings.NewReader("INSERT INTO t VALUES (2);\n")

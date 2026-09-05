@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,8 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/talkincode/sshx/internal/execution"
 	"github.com/talkincode/sshx/internal/keyringstore"
-	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
 )
@@ -38,6 +39,8 @@ type auditRedaction struct {
 }
 
 type auditEvent struct {
+	execution.Metadata
+
 	SchemaVersion string `json:"schema_version"`
 	EventID       string `json:"event_id"`
 	Timestamp     string `json:"timestamp"`
@@ -50,15 +53,17 @@ type auditEvent struct {
 	Mode   string `json:"mode"`
 	Action string `json:"action,omitempty"`
 
-	HostInput      string `json:"host_input,omitempty"`
-	HostResolved   string `json:"host_resolved,omitempty"`
-	Port           string `json:"port,omitempty"`
-	User           string `json:"user,omitempty"`
-	HostName       string `json:"host_name,omitempty"`
-	HostType       string `json:"host_type,omitempty"`
-	HostDescSet    bool   `json:"host_description_set"`
-	HostResolvedBy string `json:"host_resolved_by,omitempty"`
-	Bind           string `json:"bind,omitempty"`
+	HostInput          string `json:"host_input,omitempty"`
+	HostResolved       string `json:"host_resolved,omitempty"`
+	Port               string `json:"port,omitempty"`
+	User               string `json:"user,omitempty"`
+	HostName           string `json:"host_name,omitempty"`
+	HostType           string `json:"host_type,omitempty"`
+	HostDescSet        bool   `json:"host_description_set"`
+	HostResolvedBy     string `json:"host_resolved_by,omitempty"`
+	Bind               string `json:"bind,omitempty"`
+	PeerAddress        string `json:"peer_address,omitempty"`
+	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
 
 	Command    string `json:"command,omitempty"`
 	SftpAction string `json:"sftp_action,omitempty"`
@@ -81,6 +86,11 @@ type auditEvent struct {
 	PasswordKey           string `json:"password_key,omitempty"`
 	UsesSudo              bool   `json:"uses_sudo"`
 	SudoKey               string `json:"sudo_key,omitempty"`
+	SSHPasswordKey        string `json:"ssh_password_key,omitempty"`
+	SQLPasswordKey        string `json:"sql_password_key,omitempty"`
+	SQLUser               string `json:"sql_user,omitempty"`
+	SQLHost               string `json:"sql_host,omitempty"`
+	SQLPort               string `json:"sql_port,omitempty"`
 
 	Timeout              string `json:"timeout,omitempty"`
 	JSONOutput           bool   `json:"json_output"`
@@ -118,41 +128,51 @@ type auditEvent struct {
 	TargetIndex    *int   `json:"target_index,omitempty"`
 	Completion     string `json:"completion,omitempty"`
 	Phase          string `json:"phase,omitempty"`
+	StopReason     string `json:"stop_reason,omitempty"`
 
 	// Guarded SQL execution fields (Mode == "sql", additive). Literal values
 	// and comments are removed; the digest correlates the exact input without
 	// persisting credentials or personal data embedded in SQL.
-	SQLEngine        string `json:"sql_engine,omitempty"`
-	SQLDatabase      string `json:"sql_database,omitempty"`
-	SQLStatement     string `json:"sql_statement,omitempty"`
-	SQLStatementHash string `json:"sql_statement_sha256,omitempty"`
-	SQLClass         string `json:"sql_class,omitempty"`
-	SQLVerb          string `json:"sql_verb,omitempty"`
-	SQLTable         string `json:"sql_table,omitempty"`
-	SQLHasWhere      bool   `json:"sql_has_where,omitempty"`
-	SQLEstimatedRows *int64 `json:"sql_estimated_rows,omitempty"`
-	SQLAffectedRows  *int64 `json:"sql_affected_rows,omitempty"`
-	SQLBackupKind    string `json:"sql_backup_kind,omitempty"`
-	SQLBackupPath    string `json:"sql_backup_path,omitempty"`
-	SQLBackupRows    *int64 `json:"sql_backup_rows,omitempty"`
-	SQLPhase         string `json:"sql_phase,omitempty"`
-	SQLDocker        string `json:"sql_docker,omitempty"`
-	SQLCredSource    string `json:"sql_cred_source,omitempty"`
-	SQLCredCache     string `json:"sql_cred_cache,omitempty"`
+	SQLEngine        string            `json:"sql_engine,omitempty"`
+	SQLDatabase      string            `json:"sql_database,omitempty"`
+	SQLStatement     string            `json:"sql_statement,omitempty"`
+	SQLStatementHash string            `json:"sql_statement_sha256,omitempty"`
+	SQLClass         string            `json:"sql_class,omitempty"`
+	SQLVerb          string            `json:"sql_verb,omitempty"`
+	SQLTable         string            `json:"sql_table,omitempty"`
+	SQLHasWhere      bool              `json:"sql_has_where,omitempty"`
+	SQLEstimatedRows *int64            `json:"sql_estimated_rows,omitempty"`
+	SQLAffectedRows  *int64            `json:"sql_affected_rows,omitempty"`
+	SQLBackupKind    string            `json:"sql_backup_kind,omitempty"`
+	SQLBackupPath    string            `json:"sql_backup_path,omitempty"`
+	SQLBackupRows    *int64            `json:"sql_backup_rows,omitempty"`
+	SQLPhase         string            `json:"sql_phase,omitempty"`
+	SQLDocker        string            `json:"sql_docker,omitempty"`
+	SQLCredSource    string            `json:"sql_cred_source,omitempty"`
+	SQLCredCache     string            `json:"sql_cred_cache,omitempty"`
+	SQLEvidence      *sqlsafe.Evidence `json:"sql_evidence,omitempty"`
 
-	ApplyExpectSHA256 string `json:"apply_expect_sha256,omitempty"`
-	ApplyPayloadHash  string `json:"apply_payload_sha256,omitempty"`
-	ApplyBeforeHash   string `json:"apply_before_sha256,omitempty"`
-	ApplyAfterHash    string `json:"apply_after_sha256,omitempty"`
-	ApplyBackupPath   string `json:"apply_backup_path,omitempty"`
-	ApplyChanged      bool   `json:"apply_changed,omitempty"`
-	ApplyCreated      bool   `json:"apply_created,omitempty"`
+	ApplyExpectSHA256   string   `json:"apply_expect_sha256,omitempty"`
+	ApplyPayloadHash    string   `json:"apply_payload_sha256,omitempty"`
+	ApplyBeforeHash     string   `json:"apply_before_sha256,omitempty"`
+	ApplyAfterHash      string   `json:"apply_after_sha256,omitempty"`
+	ApplyBackupPath     string   `json:"apply_backup_path,omitempty"`
+	ApplyChanged        bool     `json:"apply_changed,omitempty"`
+	ApplyCreated        bool     `json:"apply_created,omitempty"`
+	ApplyBackupVerified *bool    `json:"apply_backup_verified,omitempty"`
+	ApplyMode           string   `json:"apply_mode,omitempty"`
+	ApplyUID            *uint32  `json:"apply_uid,omitempty"`
+	ApplyGID            *uint32  `json:"apply_gid,omitempty"`
+	ApplyCleanupPending []string `json:"apply_cleanup_pending,omitempty"`
+	ApplyReplaceMethod  string   `json:"apply_replace_method,omitempty"`
 }
 
 type auditRecorder struct {
-	started   time.Time
-	event     auditEvent
-	completed bool
+	started        time.Time
+	event          auditEvent
+	completed      bool
+	persisted      bool
+	persistenceErr error
 }
 
 var (
@@ -168,9 +188,10 @@ func newAuditRecorder(config *sshclient.Config) *auditRecorder {
 	}
 
 	started := time.Now()
-	return &auditRecorder{
+	recorder := &auditRecorder{
 		started: started,
 		event: auditEvent{
+			Metadata:      execution.NewMetadata(nil, config.ExecutionID),
 			SchemaVersion: auditSchemaVersion,
 			EventID:       newAuditEventID(),
 			Timestamp:     started.UTC().Format(time.RFC3339Nano),
@@ -188,6 +209,8 @@ func newAuditRecorder(config *sshclient.Config) *auditRecorder {
 			},
 		},
 	}
+	recorder.refresh(config)
+	return recorder
 }
 
 func (r *auditRecorder) recordCommandResult(config *sshclient.Config, authMethod sshclient.AuthMethod, res sshclient.ExecResult, dur time.Duration, errKind string, execErr error) {
@@ -198,11 +221,12 @@ func (r *auditRecorder) recordCommandResult(config *sshclient.Config, authMethod
 	r.event.AuthMethod = string(authMethod)
 	r.event.DurationMs = dur.Milliseconds()
 	r.event.ExitCode = intPtr(res.ExitCode)
+	r.recordCancellation(config, execErr)
 	if execErr != nil {
 		r.event.Outcome = auditStatus{
 			Status:    "failure",
 			ErrorKind: errKind,
-			Message:   redactSensitiveText(execErr.Error()),
+			Message:   redactAuditText(config, execErr.Error()),
 		}
 		r.completed = true
 		return
@@ -221,12 +245,12 @@ func (r *auditRecorder) recordCommandResult(config *sshclient.Config, authMethod
 }
 
 func (r *auditRecorder) recordFailure(config *sshclient.Config, authMethod sshclient.AuthMethod, kind string, err error) {
-	if r == nil {
+	if r == nil || r.completed {
 		return
 	}
 	r.refresh(config)
 	switch kind {
-	case "blocked", "config":
+	case "blocked", "config", "plan_mismatch", "plan_unresolved":
 		r.event.WouldReadSecret = false
 		r.event.WouldMutateRemote = false
 		r.event.MayMutateKnownHosts = false
@@ -234,17 +258,19 @@ func (r *auditRecorder) recordFailure(config *sshclient.Config, authMethod sshcl
 		r.event.WouldMutateRemote = false
 	}
 	r.event.AuthMethod = string(authMethod)
+	r.recordCancellation(config, err)
 	r.event.ExitCode = intPtr(-1)
 	r.event.Outcome = auditStatus{
 		Status:    "failure",
 		ErrorKind: kind,
-		Message:   redactError(err),
+		Message:   redactAuditText(config, redactError(err)),
 	}
 	r.completed = true
 }
 
 // sqlAuditMeta captures the guarded-SQL pipeline facts for one invocation.
 type sqlAuditMeta struct {
+	Evidence      *sqlsafe.Evidence `json:"evidence,omitempty"`
 	Class         string
 	Verb          string
 	Table         string
@@ -280,14 +306,19 @@ func (r *auditRecorder) recordSQLOutcome(config *sshclient.Config, authMethod ss
 	r.event.SQLDocker = config.SQLDockerContainer
 	r.event.SQLCredSource = meta.CredSource
 	r.event.SQLCredCache = meta.CredCache
+	if meta.Evidence != nil {
+		evidence := *meta.Evidence
+		r.event.SQLEvidence = &evidence
+	}
 	r.event.WouldMutateRemote = meta.Mutates
 	r.event.DurationMs = time.Since(r.started).Milliseconds()
 	r.event.ExitCode = intPtr(exitCode)
+	r.recordCancellation(config, execErr)
 	if execErr != nil {
 		r.event.Outcome = auditStatus{
 			Status:    "failure",
 			ErrorKind: errKind,
-			Message:   redactError(execErr),
+			Message:   redactAuditText(config, redactError(execErr)),
 		}
 	} else {
 		r.event.Outcome = auditStatus{Status: "success"}
@@ -303,26 +334,47 @@ func (r *auditRecorder) recordApplyOutcome(config *sshclient.Config, authMethod 
 	r.event.AuthMethod = string(authMethod)
 	r.event.Phase = phase
 	r.event.ActionIntent = "change"
-	if len(payload) > 0 {
+	if payload != nil {
 		r.event.ApplyPayloadHash = sshclient.SHA256Hex(payload)
 		r.event.PayloadSHA256 = r.event.ApplyPayloadHash
 	}
 	r.event.ApplyExpectSHA256 = config.ApplyExpectSHA256
 	if outcome != nil {
+		if outcome.PayloadSHA256 != "" {
+			r.event.ApplyPayloadHash = outcome.PayloadSHA256
+			r.event.PayloadSHA256 = outcome.PayloadSHA256
+		}
+		if outcome.ExpectSHA256 != "" {
+			r.event.ApplyExpectSHA256 = outcome.ExpectSHA256
+		}
 		r.event.ApplyBeforeHash = outcome.BeforeSHA256
 		r.event.ApplyAfterHash = outcome.AfterSHA256
 		r.event.ApplyBackupPath = outcome.BackupPath
 		r.event.ApplyChanged = outcome.Changed
 		r.event.ApplyCreated = outcome.Created
+		backupVerified := outcome.BackupVerified
+		r.event.ApplyBackupVerified = &backupVerified
+		r.event.ApplyMode = outcome.Mode
+		if outcome.UID != nil {
+			uid := *outcome.UID
+			r.event.ApplyUID = &uid
+		}
+		if outcome.GID != nil {
+			gid := *outcome.GID
+			r.event.ApplyGID = &gid
+		}
+		r.event.ApplyCleanupPending = append([]string(nil), outcome.CleanupPending...)
+		r.event.ApplyReplaceMethod = outcome.ReplaceMethod
 	}
-	r.event.WouldMutateRemote = failErr == nil && outcome != nil && outcome.Changed
+	r.event.WouldMutateRemote = outcome != nil && outcome.Changed
 	r.event.DurationMs = time.Since(r.started).Milliseconds()
 	r.event.ExitCode = intPtr(exitCode)
+	r.recordCancellation(config, failErr)
 	if failErr != nil {
 		r.event.Outcome = auditStatus{
 			Status:    "failure",
 			ErrorKind: kind,
-			Message:   redactError(failErr),
+			Message:   redactAuditText(config, redactError(failErr)),
 		}
 	} else {
 		r.event.Outcome = auditStatus{Status: "success"}
@@ -334,41 +386,53 @@ func (r *auditRecorder) finish(config *sshclient.Config, err error) error {
 	if r == nil {
 		return nil
 	}
+	if r.persisted || r.persistenceErr != nil {
+		return r.persistenceErr
+	}
+	if r.event.ExecutionFingerprint != "" {
+		switch r.event.Outcome.Status {
+		case "success", "failure", "succeeded", "failed", "skipped":
+			r.completed = true
+		}
+	}
 	if !r.completed {
 		r.refresh(config)
+		r.recordCancellation(config, err)
 		r.event.DurationMs = time.Since(r.started).Milliseconds()
 		var exitErr *ExitError
 		switch {
-		case err == nil:
-			r.event.Outcome = auditStatus{Status: "success"}
 		case errors.As(err, &exitErr):
 			r.event.ExitCode = intPtr(exitErr.Code)
 			r.event.Outcome = auditStatus{
 				Status:    "failure",
 				ErrorKind: "remote_exit",
-				Message:   exitErr.Error(),
+				Message:   redactAuditText(config, exitErr.Error()),
 			}
-		case config.ReportedErrorKind != "":
+		case config != nil && config.ReportedErrorKind != "":
 			r.event.ExitCode = intPtr(-1)
 			r.event.Outcome = auditStatus{
 				Status:    "failure",
 				ErrorKind: config.ReportedErrorKind,
-				Message:   redactSensitiveText(config.ReportedError),
+				Message:   redactAuditText(config, config.ReportedError),
 			}
+		case err == nil:
+			r.event.Outcome = auditStatus{Status: "success"}
 		default:
 			r.event.Outcome = auditStatus{
 				Status:    "failure",
 				ErrorKind: classifyError(err),
-				Message:   redactError(err),
+				Message:   redactAuditText(config, redactError(err)),
 			}
 		}
 		r.completed = true
 	}
-	return writeAuditEvent(config, r.event, r.started)
+	r.persistenceErr = writeAuditEvent(config, r.event, r.started)
+	r.persisted = r.persistenceErr == nil
+	return r.persistenceErr
 }
 
 func (r *auditRecorder) refresh(config *sshclient.Config) {
-	if r == nil || config == nil {
+	if r == nil || config == nil || r.completed {
 		return
 	}
 	r.event.Mode = config.Mode
@@ -383,7 +447,23 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	if r.event.HostInput != "" && r.event.HostResolved != "" && r.event.HostResolved != r.event.HostInput {
 		r.event.HostResolvedBy = "settings"
 	}
-	r.event.Command = redactSensitiveText(config.Command)
+	r.event.Command = redactAuditText(config, config.Command)
+	if r.event.PlanHash == "" {
+		r.event.PlanHash = config.PlanHash
+	}
+	if r.event.ExecutionID == "" {
+		r.event.ExecutionID = config.ExecutionID
+	}
+	if r.event.Risk == "" {
+		r.event.Risk = execution.Risk(config.Risk)
+		if risk, effects, local := auditLocalManagementEffects(config); local && r.event.Risk == "" {
+			r.event.Risk, r.event.Effects = risk, effects
+		}
+	}
+	if r.event.HostKeyFingerprint == "" {
+		r.event.HostKeyFingerprint = config.HostKeyFingerprint
+	}
+	r.event.BypassReason = redactAuditText(config, config.BypassReason)
 	if config.Mode == "sql" {
 		r.event.SQLEngine = config.SQLEngine
 		r.event.SQLDatabase = config.SQLDatabase
@@ -397,9 +477,9 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	if config.Mode == "inspect" {
 		r.event.PluginID = config.InspectCapability
 		r.event.CacheMode = config.InspectCacheMode
-		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
-			r.event.PluginDigest = resolved.Digest
-			r.event.PluginTrusted = resolved.Trusted
+		if prepared := preparedFrom(config); prepared != nil && prepared.plugin != nil {
+			r.event.PluginDigest = prepared.plugin.Digest
+			r.event.PluginTrusted = prepared.plugin.Trusted
 		}
 	}
 	r.event.SftpAction = config.SftpAction
@@ -414,6 +494,11 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.PasswordProvided = config.Password != ""
 	r.event.PasswordValueProvided = config.PasswordValue != ""
 	r.event.PasswordKey = config.PasswordKey
+	r.event.SSHPasswordKey = config.SSHPasswordKey
+	r.event.SQLPasswordKey = config.SQLPasswordKey
+	r.event.SQLUser = config.SQLUser
+	r.event.SQLHost = config.SQLHost
+	r.event.SQLPort = config.SQLPort
 	r.event.UsesSudo = sshclient.CommandUsesSudo(config.Command)
 	if config.Mode == "apply" {
 		r.event.UsesSudo = config.ApplyUseSudo
@@ -422,25 +507,23 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 		r.event.UsesSudo = config.SQLUseSudo
 	}
 	if config.Mode == "inspect" {
-		if resolved, resolveErr := pluginpkg.Resolve(config.InspectCapability); resolveErr == nil {
-			if useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest); privilegeErr == nil {
+		r.event.UsesSudo = config.InspectUseSudo
+		if prepared := preparedFrom(config); prepared != nil && prepared.plugin != nil {
+			if useSudo, _, privilegeErr := inspectionPrivilege(config, prepared.plugin.Manifest); privilegeErr == nil {
 				r.event.UsesSudo = useSudo
 			}
-		} else {
-			r.event.UsesSudo = config.InspectUseSudo
 		}
 	}
 	if config.Mode == "login" {
 		r.event.UsesSudo = config.LoginUseSudo
 		r.event.Command = ""
-		r.event.UsePTY = true
 	}
 	r.event.SudoKey = config.SudoKey
 	if config.Timeout > 0 {
 		r.event.Timeout = config.Timeout.String()
 	}
 	r.event.JSONOutput = config.JSONOutput
-	r.event.UsePTY = config.UsePTY
+	r.event.UsePTY = config.UsePTY || config.Mode == "login"
 	r.event.SafetyCheckEnabled = config.SafetyCheck
 	r.event.Force = config.Force
 	r.event.AcceptUnknownHost = config.AcceptUnknownHost
@@ -461,6 +544,50 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	}
 }
 
+func (r *auditRecorder) recordPeer(client *sshclient.SSHClient) {
+	if r == nil || client == nil {
+		return
+	}
+	r.event.PeerAddress = client.PeerAddress()
+	r.event.HostKeyFingerprint = client.HostKeyFingerprint()
+	r.event.AuthMethod = string(client.AuthMethodUsed())
+}
+
+func (r *auditRecorder) recordCancellation(config *sshclient.Config, err error) {
+	if r == nil || err == nil {
+		return
+	}
+	kind := classifyError(err)
+	if errors.Is(err, context.Canceled) {
+		kind = execution.ErrorKindCancelled
+	} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sshclient.ErrCommandTimeout) {
+		kind = "timeout"
+	}
+	if kind != execution.ErrorKindCancelled && kind != "timeout" {
+		return
+	}
+	if r.event.CancellationCause != "" {
+		return
+	}
+	r.event.CancellationCause = kind
+	// Scope is supplied by the owner of the budget; Config alone cannot
+	// distinguish nested host/global deadlines reliably.
+	if config != nil && config.Context != nil && config.Context.Err() != nil {
+		r.event.CancellationCause = redactAuditText(config, context.Cause(config.Context).Error())
+	}
+}
+
+func redactAuditText(config *sshclient.Config, value string) string {
+	if config != nil {
+		for _, secret := range []string{config.Password, config.SudoPassword, config.PasswordValue} {
+			if secret != "" {
+				value = strings.ReplaceAll(value, secret, "<redacted>")
+			}
+		}
+	}
+	return redactSensitiveText(value)
+}
+
 func sqlStatementDigest(statement string) string {
 	sum := sha256.Sum256([]byte(statement))
 	return fmt.Sprintf("%x", sum)
@@ -469,24 +596,23 @@ func sqlStatementDigest(statement string) string {
 func writeAuditEvent(config *sshclient.Config, event auditEvent, now time.Time) error {
 	dir, err := auditOutputDir(config)
 	if err != nil {
-		return err
+		return auditIOError("resolve audit directory", "", err)
 	}
 	if mkdirErr := os.MkdirAll(dir, 0o700); mkdirErr != nil {
-		return fmt.Errorf("failed to create audit directory %s: %w", dir, mkdirErr)
+		return auditIOError("create audit directory", dir, mkdirErr)
 	}
 	path := filepath.Join(dir, fmt.Sprintf("sshx-%s.jsonl", now.Format("2006-01-02")))
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- audit path is user-configurable by design.
 	if err != nil {
-		return fmt.Errorf("failed to open audit log %s: %w", path, err)
+		return auditIOError("open audit log", path, err)
 	}
-	defer func() { _ = file.Close() }() //nolint:errcheck // best effort after append
-
 	enc := json.NewEncoder(file)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(event); err != nil {
-		return fmt.Errorf("failed to write audit event: %w", err)
+	writeErr := enc.Encode(event)
+	if writeErr == nil {
+		writeErr = file.Sync()
 	}
-	return nil
+	return auditIOError("persist audit event", path, errors.Join(writeErr, file.Close()))
 }
 
 func auditOutputDir(config *sshclient.Config) (string, error) {
@@ -557,6 +683,9 @@ func formatTransferEndpoint(host, path string) string {
 }
 
 func auditWouldReadSecret(config *sshclient.Config) bool {
+	if modeUsesSSHConnection(config) && config.SSHPasswordKey != "" {
+		return true
+	}
 	switch config.Mode {
 	case "ssh":
 		return sshclient.CommandUsesSudo(config.Command) && config.SudoKey != ""
@@ -565,8 +694,8 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 	case "host":
 		return config.HostAction == "test" || config.HostAction == "test-all"
 	case "inspect":
-		if resolved, err := pluginpkg.Resolve(config.InspectCapability); err == nil {
-			useSudo, _, privilegeErr := inspectionPrivilege(config, resolved.Manifest)
+		if prepared := preparedFrom(config); prepared != nil && prepared.plugin != nil {
+			useSudo, _, privilegeErr := inspectionPrivilege(config, prepared.plugin.Manifest)
 			return privilegeErr == nil && useSudo && config.SudoKey != ""
 		}
 		return config.InspectUseSudo && config.SudoKey != ""
@@ -582,18 +711,12 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 }
 
 func auditWouldWriteLocalState(config *sshclient.Config) bool {
-	switch config.Mode {
-	case "password":
-		return config.PasswordAction == "set" || config.PasswordAction == "delete"
-	case "host":
-		return config.HostAction == "add" || config.HostAction == "update" || config.HostAction == "remove" || config.HostAction == "import"
-	case "plugin":
-		return config.PluginAction == "create" || config.PluginAction == "trust" || config.PluginAction == "remove"
-	case "skill":
-		return config.SkillAction == "install"
-	default:
-		return false
-	}
+	_, effects, local := auditLocalManagementEffects(config)
+	return local && effects.LocalWrite
+}
+
+func auditLocalManagementEffects(config *sshclient.Config) (execution.Risk, execution.Effects, bool) {
+	return execution.ClassifyLocalRisk(config.Mode, auditAction(config))
 }
 
 func auditWouldMutateRemote(config *sshclient.Config) bool {

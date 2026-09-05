@@ -18,6 +18,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,10 +60,14 @@ type cliResult struct {
 }
 
 type serverOptions struct {
-	root          string
-	sftpReadOnly  bool
-	authorizedKey ssh.PublicKey
-	reportedUID   string
+	root             string
+	sftpReadOnly     bool
+	authorizedKey    ssh.PublicKey
+	reportedUID      string
+	hostSigner       ssh.Signer
+	execHandler      func(ssh.Channel, string, string)
+	operatorPassword string
+	readerPassword   string
 }
 
 type testSSHServer struct {
@@ -76,13 +81,16 @@ type testSSHServer struct {
 	reportedUID   string
 	stateMu       sync.Mutex
 	state         string
+	execHandler   func(ssh.Channel, string, string)
 }
 
+// The CLI is built in a subprocess, so its sources are not Go test-cache
+// dependencies. Compiled-binary suites must use -count=1 (including in CI).
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if !testing.Short() {
 		var err error
-		testRoot, err = os.MkdirTemp("", "sshx-e2e-")
+		testRoot, err = os.MkdirTemp(repositoryRoot(), ".sshx-e2e-")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create E2E temp directory: %v\n", err)
 			os.Exit(1)
@@ -137,14 +145,23 @@ func startSSHServer(t *testing.T, options serverOptions) *testSSHServer {
 		t.Skip("skipping compiled-binary E2E in short mode")
 	}
 
-	signer := newHostSigner(t)
+	signer := options.hostSigner
+	if signer == nil {
+		signer = newHostSigner(t)
+	}
+	if options.operatorPassword == "" {
+		options.operatorPassword = operatorPassword
+	}
+	if options.readerPassword == "" {
+		options.readerPassword = readerPassword
+	}
 
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(metadata ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 			switch {
-			case metadata.User() == "operator" && string(password) == operatorPassword:
+			case metadata.User() == "operator" && string(password) == options.operatorPassword:
 				return &ssh.Permissions{Extensions: map[string]string{"role": "operator"}}, nil
-			case metadata.User() == "reader" && string(password) == readerPassword:
+			case metadata.User() == "reader" && string(password) == options.readerPassword:
 				return &ssh.Permissions{Extensions: map[string]string{"role": "reader"}}, nil
 			}
 			return nil, fmt.Errorf("invalid E2E credentials")
@@ -175,6 +192,7 @@ func startSSHServer(t *testing.T, options serverOptions) *testSSHServer {
 	server := &testSSHServer{
 		host: host, port: port, listener: listener,
 		root: options.root, sftpReadOnly: options.sftpReadOnly, reportedUID: options.reportedUID,
+		execHandler: options.execHandler,
 	}
 	t.Cleanup(func() { _ = listener.Close() }) //nolint:errcheck // best-effort E2E teardown
 
@@ -276,6 +294,10 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 			return
 		}
 		_ = request.Reply(true, nil) //nolint:errcheck // test protocol response
+		if server.execHandler != nil {
+			server.execHandler(channel, payload.Command, role)
+			return
+		}
 
 		exitCode := uint32(0)
 		switch {
@@ -522,9 +544,29 @@ func runSSHXBinary(t *testing.T, binary, home string, args []string, extraEnv ma
 
 func runSSHXWithNativeKeyring(t *testing.T, workDir string, args []string, extraEnv map[string]string) cliResult {
 	t.Helper()
-	nativeHome := os.Getenv("HOME")
-	require.NotEmpty(t, nativeHome, "native keyring E2E requires the platform user HOME")
+	requireIsolatedNativeKeyring(t)
+	nativeHome, err := os.UserHomeDir()
+	require.NoError(t, err)
 	return runSSHXBinaryWithHome(t, testBinary, workDir, nativeHome, args, extraEnv)
+}
+
+func requireIsolatedNativeKeyring(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("native keyring requires an isolated OS provider; only ephemeral macOS Keychain is configured")
+	}
+	path := os.Getenv("SSHX_E2E_KEYCHAIN")
+	require.NotEmpty(t, path, "native keyring requires an explicit ephemeral SSHX_E2E_KEYCHAIN")
+	require.Equal(t, "sshx-e2e.keychain-db", filepath.Base(path), "refusing non-fixture keychain")
+	output, err := exec.Command("security", "default-keychain", "-d", "user").Output()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Clean(path), filepath.Clean(strings.Trim(strings.TrimSpace(string(output)), `"`)),
+		"refusing native keyring outside the explicit ephemeral default keychain")
+	searchList, err := exec.Command("security", "list-keychains", "-d", "user").Output()
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(searchList)), "\n")
+	require.Len(t, lines, 1, "native keyring search list must exclude the user's existing keychains")
+	require.Equal(t, filepath.Clean(path), filepath.Clean(strings.Trim(strings.TrimSpace(lines[0]), `"`)))
 }
 
 func runSSHXBinaryWithHome(t *testing.T, binary, workDir, environmentHome string, args []string, extraEnv map[string]string) cliResult {
@@ -557,31 +599,50 @@ func runSSHXBinaryWithHome(t *testing.T, binary, workDir, environmentHome string
 }
 
 func isolatedEnvironment(home string, extra map[string]string) []string {
+	return isolatedEnvironmentFrom(os.Environ(), home, extra)
+}
+
+func isolatedEnvironmentFrom(inherited []string, home string, extra map[string]string) []string {
 	blocked := map[string]struct{}{
-		"HOME": {}, "SSH_PASSWORD": {}, "SSH_KEY_PATH": {}, "SSH_SUDO_KEY": {},
+		"HOME": {}, "USERPROFILE": {}, "SSH_PASSWORD": {}, "SSH_KEY_PATH": {}, "SSH_SUDO_KEY": {},
 		"SSH_DISABLE_KEY": {}, "SSH_KNOWN_HOSTS": {}, "SSHX_AUDIT_OUTPUT": {},
 		"SSHX_NO_AUDIT": {}, "SSH_ACCEPT_UNKNOWN_HOST": {}, "SSH_INSECURE_HOST_KEY": {},
 		"SSH_NO_SAFETY_CHECK": {}, "SSH_FORCE": {}, "SSH_TIMEOUT": {}, "SSHX_LOG_LEVEL": {},
 		"SSHX_HOME": {}, "SSHX_SKILLS_DIR": {},
 		"SSHX_SECRET_BACKEND": {}, "SSHX_VAULT_PASSPHRASE": {}, "SSHX_VAULT_KEY_FILE": {},
-	}
-	env := make([]string, 0, len(os.Environ())+len(extra)+3)
-	for _, item := range os.Environ() {
-		name, _, _ := strings.Cut(item, "=")
-		if _, found := blocked[name]; !found {
-			env = append(env, item)
-		}
+		"SSHX_E2E_KEYRING_FILE": {},
 	}
 	values := map[string]string{
 		"HOME":           home,
+		"USERPROFILE":    home,
 		"SSHX_NO_AUDIT":  "true",
 		"SSHX_LOG_LEVEL": "error",
 	}
-	for name, value := range extra {
-		values[name] = value
+	extraNames := make([]string, 0, len(extra))
+	for name := range extra {
+		extraNames = append(extraNames, name)
 	}
-	for name, value := range values {
-		env = append(env, name+"="+value)
+	sort.Strings(extraNames)
+	for _, name := range extraNames {
+		values[strings.ToUpper(name)] = extra[name]
+	}
+	env := make([]string, 0, len(inherited)+len(values))
+	for _, item := range inherited {
+		name, _, _ := strings.Cut(item, "=")
+		normalized := strings.ToUpper(name)
+		_, forbidden := blocked[normalized]
+		_, overridden := values[normalized]
+		if !forbidden && !overridden {
+			env = append(env, item)
+		}
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+values[name])
 	}
 	return env
 }

@@ -256,7 +256,7 @@ func TestEmitCommandJSONContracts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := captureStdout(t, func() {
-				emitCommandJSON(
+				err := emitCommandJSON(
 					&sshclient.Config{Host: "127.0.0.1", Port: "22", User: "tester", Command: "uptime"},
 					sshclient.AuthMethodPassword,
 					tt.result,
@@ -264,6 +264,9 @@ func TestEmitCommandJSONContracts(t *testing.T) {
 					tt.errKind,
 					tt.execErr,
 				)
+				if err != nil {
+					t.Fatalf("emit command result: %v", err)
+				}
 			})
 			var got map[string]any
 			if err := json.Unmarshal(raw, &got); err != nil {

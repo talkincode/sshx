@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,7 +66,7 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 		}
 		return nil, fmt.Errorf("inspect plugin root: %w", rootErr)
 	}
-	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 || rootInfo.Mode().Perm()&0o022 != 0 {
+	if !rootInfo.IsDir() || rootInfo.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 || unsafePOSIXPermissions(rootInfo, 0o022) {
 		return nil, fmt.Errorf("plugin root must be a real directory not writable by group or others: %s", pluginRoot)
 	}
 	info, statErr := os.Lstat(pluginPath)
@@ -75,10 +76,10 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 		}
 		return nil, fmt.Errorf("inspect plugin path: %w", statErr)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return nil, fmt.Errorf("plugin path must be a real directory: %s", pluginPath)
 	}
-	if info.Mode().Perm()&0o022 != 0 {
+	if unsafePOSIXPermissions(info, 0o022) {
 		return nil, fmt.Errorf("plugin directory has unsafe permissions %04o", info.Mode().Perm())
 	}
 
@@ -203,7 +204,7 @@ func validateManifest(manifest Manifest, expectedID string) error {
 }
 
 func safeChild(root, relative string) (string, error) {
-	if relative == "" || filepath.IsAbs(relative) {
+	if relative == "" || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
 		return "", fmt.Errorf("path must be relative")
 	}
 	clean := filepath.Clean(relative)
@@ -225,7 +226,7 @@ func safeChild(root, relative string) (string, error) {
 		if statErr != nil {
 			return "", statErr
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			return "", fmt.Errorf("path contains symlink %s", current)
 		}
 	}
@@ -237,13 +238,13 @@ func readRegularFile(path string, limit int64, forbiddenPerm os.FileMode) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.Mode().IsRegular() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	if info.Size() > limit {
 		return nil, fmt.Errorf("%s exceeds %d-byte limit", path, limit)
 	}
-	if info.Mode().Perm()&forbiddenPerm != 0 {
+	if unsafePOSIXPermissions(info, forbiddenPerm) {
 		return nil, fmt.Errorf("%s has unsafe permissions %04o", path, info.Mode().Perm())
 	}
 	file, err := os.Open(path) // #nosec G304 -- path is constrained below the sshx plugin root.
@@ -259,6 +260,12 @@ func readRegularFile(path string, limit int64, forbiddenPerm os.FileMode) ([]byt
 		return nil, fmt.Errorf("%s exceeds %d-byte limit", path, limit)
 	}
 	return data, nil
+}
+
+func unsafePOSIXPermissions(info os.FileInfo, forbidden os.FileMode) bool {
+	// Windows reports synthetic mode bits, not the file's ACL. OS access checks
+	// still apply when opening/replacing files; this check is POSIX-only.
+	return runtime.GOOS != "windows" && info.Mode().Perm()&forbidden != 0
 }
 
 func decodeStrictJSON(data []byte, dst any) error {

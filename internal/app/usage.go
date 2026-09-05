@@ -48,9 +48,12 @@ SSH Options:
   --ssh-password-key=KEY   SSH login password keyring key (never used for sudo)
   --bind=ADDR              Local source IP or interface (e.g. 192.0.2.10 or en0)
   --dry-run                Print the local execution plan without side effects
+  --expect-plan=HASH       Require the reviewed sha256:<64 lowercase hex> plan
   --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
   --no-audit               Disable local audit event writing for this invocation
   --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
+  --host-timeout=DURATION  Optional total admitted-target budget (setup + verify)
+  --global-timeout=DURATION Optional operation budget, including queued targets
   --json                   Emit a single structured JSON result on stdout
   --pty                    Request a PTY (merges stderr into stdout; off by default)
   --version                Show version information (alias: -v)
@@ -78,9 +81,17 @@ Run Contract (preferred for Agents):
   Limits / policy:
     --concurrency=N          default 4, hard max 32
     --failure-mode=continue|fail_fast   default continue
+    --fail-fast              Alias of --failure-mode=fail_fast
+    --max-failures=N          Stop new admission at this failure threshold
     --intent=read|change|unknown
     --force / --no-safety-check require --bypass-reason=TEXT
     --jsonl                  stream run_started/target_*/run_finished events
+
+  Failure thresholds stop admission only; already admitted targets finish and
+  can add failures. Conflicting failure policies are configuration errors.
+  New time budgets are opt-in; --timeout keeps its existing meaning/defaults.
+  Cancellation closes local transport work, not guaranteed remote termination
+  or rollback. Treat unacknowledged changes as uncertain before retrying.
 
   Multi-target exit codes:
     0    all selected targets succeeded
@@ -98,6 +109,17 @@ Agent / Scripting Mode:
      error_kind, error}
   sshx run --json adds versioned fields (schema_version, run_id, status,
   phase, completion, structured error).
+
+  Shared Execution Evidence:
+    plan_hash, risk, effects, execution_id, parent_execution_id,
+    execution_fingerprint, change_state, executed (nullable), verified,
+    verification, preconditions, postconditions.
+  change_state is changed|unchanged|unknown; null executed is not false.
+  Success, execution acknowledgement, change, and verification are distinct.
+  Unknown commands/scripts default to mutation risk with unknown effects;
+  --intent=read is not proof of read-only behavior. Risk is
+  read|mutation|privileged|destructive, not an authorization grant.
+  Raw stdout/stderr and secret values are not execution-fingerprinted.
 
   Exit codes (single-host compatibility mode):
     0          command succeeded
@@ -136,6 +158,19 @@ Dry-run Plan Preview:
   Dry-run is a local plan preview only. It does not prove the remote command
   would succeed.
 
+  Bound Plan Admission:
+  Remote command/run/apply/sql/SFTP/transfer/inspect previews add a nested
+  sshx.plan.v1 plan plus plan_hash and risk. Run keeps sshx.request.v1 outside.
+  Repeat reviewed inputs with --expect-plan=sha256:<64 lowercase hex>.
+  Local mismatch fails before secret lookup or network work; --force cannot
+  bypass it. Errors: config (format), plan_mismatch, plan_unresolved.
+  Check plan.bindable and plan.unresolved: DNS-only addresses, unavailable
+  public-key sidecars, missing/relaxed trust, and remotely discovered SQL
+  identity cannot bind offline. The entire sorted known_hosts record snapshot
+  is hashed, so unrelated trust changes can conservatively invalidate a plan.
+  Dry-run never connects, reads secrets, or writes state. A plan hash is not
+  a lock on remote files, rows, permissions, or recursive directory membership.
+
 Audit Trail:
   sshx writes one structured JSONL audit event per non-dry-run invocation to
   ~/.sshx/audit/sshx-YYYY-MM-DD.jsonl by default. Use --audit-output=<dir> to
@@ -150,8 +185,12 @@ Audit Trail:
   Read-only consumption:
     sshx audit query --since=2026-09-01 --target=prod-web --json
     sshx audit query --run-id=<id> --error-kind=blocked --bypass-only
+    sshx audit query --execution-id=<id> --json
     sshx audit export --to=./incident.jsonl --since=2026-09-01
   Empty query results exit 0. JSON mode emits {schema_version, success, count, events}.
+  Corrupt/partial records have visible diagnostics; valid records are retained.
+  Audit writes are best-effort, with persistence status separate from execution.
+  Do not repeat a successful mutation just because audit writing failed.
 
 Safety Options:
   -f, --force           Force execution, bypass safety checks (use with caution!)
@@ -175,6 +214,10 @@ SFTP Options:
   --list=<path>         List directory contents (alias: --ls)
   --mkdir=<path>        Create remote directory
   --rm=<path>           Remove remote file or directory
+
+  Add --json for structured operation/effect evidence. Size-only verification
+  does not prove content equality. Partial recursive progress is not rolled
+  back as one atomic directory operation.
 
 Server-to-Server Transfer:
   --transfer=<src-host>:<src-path> --to=<dst-host>:<dst-path>
@@ -301,14 +344,28 @@ Guarded SQL Execution:
   policy, then snapshot and execute. PostgreSQL runs EXPLAIN (FORMAT JSON)
   and snapshots rows or the table under one transaction plus a SHARE ROW
   EXCLUSIVE lock. SQLite skips row estimates and snapshots the table (CSV)
-  or the whole file (sqlite3 .backup) under BEGIN IMMEDIATE. This closes the
-  backup-to-mutation race. SELECT and other reads skip EXPLAIN and backups.
+  or the whole file under BEGIN IMMEDIATE. Whole-file .backup uses a second
+  read-only client while the mutation client holds the writer lock; mutation
+  is sent only after snapshot completion. SELECT and other reads skip EXPLAIN
+  and backups.
   Catalog preflight blocks automatic execution when triggers, rewrite rules,
   partitions, or cascading referential actions can affect related tables;
   proceed only after an independent backup with --force --no-backup. Automatic
   backups are not claimed for destructive DDL, which also requires
   --force --no-backup. Backup directories/files are owner-only. --dry-run
   previews the local plan without connecting; runtime catalog checks may block.
+  Row counts are engine-specific evidence, not universal proof of value changes.
+  Commit acknowledgement and verification are separate; uncertain commits need
+  inspection before retry. MySQL atomicity requires a supported, proven strategy:
+  separate-session backup/mutation and implicit-commit DDL are not atomic.
+  Bound SQL cannot depend on remote credential/container identity discovery.
+  SQL evidence.verification=protocol_verified acknowledges the client protocol,
+  not actual changed values; effect_verification remains separate.
+  Mutation state_change stays unknown, including zero affected rows.
+  Missing/malformed evidence reports protocol_error or verification_failed.
+  Guarded MySQL supports simple InnoDB single-table UPDATE/DELETE with a write
+  lock. Its SSHX_MYSQL_HEX_ROWS_V1 backup preserves NULL/binary values and is
+  not CSV, a schema dump, or automatic restore; no backup table/DDL is created.
 
   sshx sql -h=db1 --db=app "SELECT count(*) FROM users"
   sshx sql -h=db1 --db=app --db-user=app --db-password-key=app-db \
@@ -345,10 +402,13 @@ Guarded File Apply:
   --bypass-reason=TEXT    Required with --force to overwrite /etc/passwd,
                           /etc/shadow, or /etc/sudoers
 
-  JSON fields to branch on: success, changed, created, completion, error_kind
+  JSON fields to branch on: success, change_state, executed, verified,
+  verification, completion, error_kind (legacy changed/created remain)
   (precondition/blocked/remote_io/config/...), before_sha256, after_sha256,
   backup.path, rollback_available. Identical content is success with
   changed=false and does not write a backup.
+  Post-write verification_failed can mean the target already changed; inspect
+  hashes/backup before retry. SFTP hash rechecks are not arbitrary-writer CAS.
 
   sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
       --expect-sha256=<current> --sudo --json
@@ -452,7 +512,7 @@ SSH Examples:
   # Save audit events for this project
   sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
 
-  # Bound a command with a timeout (kills it after 30s)
+  # Bound the command wait (does not guarantee remote termination)
   sshx -h=192.168.1.100 --timeout=30s "apt-get update"
 
   # Dangerous command will be blocked

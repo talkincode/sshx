@@ -82,6 +82,8 @@ sshx inspect -h=prod-web system.baseline --json
 - [主机管理](host-management.md)说明命名主机和密钥选择。
 - [使用场景](usage-scenarios.md)提供大量日常运维例子。
 - [Agent 与脚本模式](agent-scripting.md)说明 JSON、退出码、timeout 和审计日志。
+- [计划、结果与安全重试](execution-contract.md)说明审核计划绑定、风险/副作用、
+  取消以及后端/平台边界。
 - [主机探测能力与本地插件](inspection-plugins.md)说明内置能力、`plugin create`、信任和观察快照。
 - [SFTP 工作流](sftp.md)覆盖上传、下载、列目录、创建目录和删除。
 - [受控文件 Apply](apply.md)用备份和哈希检查替换一个远程文件。

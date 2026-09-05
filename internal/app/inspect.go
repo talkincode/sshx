@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	"github.com/talkincode/sshx/internal/execution"
 	pluginpkg "github.com/talkincode/sshx/internal/plugin"
 	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/pkg/errutil"
@@ -45,7 +46,12 @@ func HandleInspection(config *sshclient.Config, audit *auditRecorder) (err error
 	if config.InspectCapability == "" {
 		return reportInspectFailure(config, "config", fmt.Errorf("inspection capability is required"))
 	}
-	resolved, err := pluginpkg.Resolve(config.InspectCapability)
+	var resolved *pluginpkg.Resolved
+	if prepared := preparedFrom(config); prepared != nil && prepared.plugin != nil {
+		resolved = prepared.plugin
+	} else {
+		resolved, err = pluginpkg.Resolve(config.InspectCapability)
+	}
 	if err != nil {
 		return reportInspectFailure(config, classifyPluginError(err), err)
 	}
@@ -96,7 +102,9 @@ func HandleInspection(config *sshclient.Config, audit *auditRecorder) (err error
 		return reportInspectFailure(config, "config", fmt.Errorf("create SSH client: %w", err))
 	}
 	defer errutil.HandleCloseError(&err, client)
-	if err = client.ConnectDirect(); err != nil {
+	err = client.ConnectDirect()
+	recordConnectedPeer(config, client, "target")
+	if err != nil {
 		return reportInspectFailure(config, classifyError(err), fmt.Errorf("connect for inspection: %w", err))
 	}
 	if audit != nil {
@@ -351,10 +359,29 @@ func isSFTPNotExist(err error) bool {
 }
 
 func emitObservation(config *sshclient.Config, observation pluginpkg.Observation) error {
+	executed := !observation.Cache.Hit && observation.Status != "unsupported"
+	verification := "passed"
+	if observation.Status == "unsupported" {
+		verification = "unsupported"
+	}
+	result := struct {
+		pluginpkg.Observation
+		ExitCode       int                   `json:"exit_code"`
+		Success        bool                  `json:"success"`
+		Phase          string                `json:"phase"`
+		Completion     string                `json:"completion"`
+		Executed       *bool                 `json:"executed"`
+		Verified       bool                  `json:"verified"`
+		Verification   string                `json:"verification"`
+		Postconditions []execution.Condition `json:"postconditions"`
+	}{observation, 0, true, "complete", execution.CompletionCompleted, &executed,
+		verification == "passed", verification,
+		[]execution.Condition{{Kind: "observation_schema", Status: verification}}}
 	if config.JSONOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetEscapeHTML(false)
-		return encoder.Encode(observation)
+		return emitLifecycleJSON(config, result)
+	}
+	if _, err := finalizeLifecycle(config, result); err != nil {
+		return err
 	}
 	fmt.Printf("%s: %s (cache_hit=%t stale=%t)\n", observation.Capability.ID, observation.Status, observation.Cache.Hit, observation.Cache.Stale)
 	data, err := json.MarshalIndent(observation.Facts, "", "  ")
@@ -368,12 +395,17 @@ func emitObservation(config *sshclient.Config, observation pluginpkg.Observation
 func reportInspectFailure(config *sshclient.Config, kind string, err error) error {
 	config.ReportedErrorKind = kind
 	config.ReportedError = redactError(err)
+	if prepared := preparedFrom(config); prepared != nil && prepared.audit != nil {
+		prepared.audit.recordFailure(config, sshclient.AuthMethodUnknown, kind, err)
+	}
+	result := inspectFailure{Success: false, Capability: config.InspectCapability, ErrorKind: kind, Error: redactError(err)}
 	if !config.JSONOutput {
+		if _, finalizeErr := finalizeLifecycle(config, result); finalizeErr != nil {
+			return finalizeErr
+		}
 		return err
 	}
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetEscapeHTML(false)
-	if encodeErr := encoder.Encode(inspectFailure{Success: false, Capability: config.InspectCapability, ErrorKind: kind, Error: redactError(err)}); encodeErr != nil {
+	if encodeErr := emitLifecycleJSON(config, result); encodeErr != nil {
 		return encodeErr
 	}
 	return ErrReported

@@ -392,7 +392,8 @@ func TestPostgresCommands(t *testing.T) {
 	})
 	t.Run("execute command", func(t *testing.T) {
 		rc := conn.ExecuteCommand("SELECT 1")
-		assert.Equal(t, "SELECT 1;\n", rc.Stdin)
+		assert.Contains(t, rc.Stdin, "SELECT 1;\n")
+		require.NotNil(t, rc.Protocol)
 	})
 	t.Run("read command uses read only transaction", func(t *testing.T) {
 		rc := conn.ExecuteReadCommand("SELECT side_effecting_function()")
@@ -412,12 +413,13 @@ func TestPostgresCommands(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Contains(t, rc.Command, "umask 077; mkdir -p .sshx/sql-backups && chmod 700 .sshx/sql-backups && ")
-		assert.Contains(t, rc.Stdin, "BEGIN;")
-		assert.Contains(t, rc.Stdin, "LOCK TABLE t IN SHARE ROW EXCLUSIVE MODE;")
-		assert.Contains(t, rc.Stdin, "pg_catalog.pg_class")
-		assert.Contains(t, rc.Stdin, `\copy (SELECT * FROM t WHERE id=1)`)
-		assert.Contains(t, rc.Stdin, "UPDATE t SET x=1 WHERE id=1;")
-		assert.Contains(t, rc.Stdin, "COMMIT;")
+		assert.Contains(t, rc.Command, "BEGIN;")
+		assert.Contains(t, rc.Command, "LOCK TABLE t IN SHARE ROW EXCLUSIVE MODE;")
+		assert.Contains(t, rc.Command, "pg_catalog.pg_class")
+		assert.Contains(t, rc.Command, `COPY (SELECT * FROM t WHERE id=1)`)
+		assert.Contains(t, rc.Command, "UPDATE t SET x=1 WHERE id=1;")
+		assert.Contains(t, rc.Command, "COMMIT;")
+		require.NotNil(t, rc.Protocol)
 	})
 	t.Run("transactional backup rejects unsafe input", func(t *testing.T) {
 		_, err := conn.ExecuteWithBackupCommand("UPDATE t SET x=1", "t; DROP TABLE x", "", "f.csv", BackupTable)
@@ -435,7 +437,7 @@ func TestPostgresCommands(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, rc.Command, "docker exec -i -e PGPASSWORD pg-prod")
 		assert.Contains(t, rc.Command, "mkfifo")
-		assert.Contains(t, rc.Command, ".sshx/sql-backups/f.csv.stdin")
+		assert.Contains(t, rc.Command, ".sshx/sql-backups/f.csv.stream-")
 		assert.Contains(t, rc.Command, "COPY (SELECT * FROM t WHERE id=1) TO STDOUT")
 		assert.Empty(t, rc.Stdin)
 		if runtime.GOOS != "windows" {

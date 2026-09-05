@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal mysql stand-in for sshx compiled-binary E2E."""
+"""Protocol-only mysql stand-in; NOT evidence of real MySQL transaction semantics."""
 from __future__ import annotations
 
 import json
@@ -8,117 +8,139 @@ import re
 import sys
 
 STATE_PATH = os.path.join(os.environ.get("HOME", "."), "mysql-fixture.json")
+OPTIONS_PATH = os.path.join(os.environ.get("HOME", "."), "mysql-fixture-options.json")
 
 
-def load_state():
-    if not os.path.exists(STATE_PATH):
-        return {"users": [{"id": "1", "name": "old"}]}
-    with open(STATE_PATH, encoding="utf-8") as fh:
+def load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 
 
 def save_state(state):
-    tmp = STATE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
+    staging = STATE_PATH + ".staging"
+    with open(staging, "w", encoding="utf-8") as fh:
         json.dump(state, fh)
-    os.replace(tmp, STATE_PATH)
-
-
-def collect_sql(argv):
-    sql = []
-    i = 0
-    while i < len(argv):
-        if argv[i] == "-e" and i + 1 < len(argv):
-            sql.append(argv[i + 1])
-            i += 2
-            continue
-        i += 1
-    if not sql:
-        sql.append(sys.stdin.read())
-    return "\n".join(sql)
-
-
-def skip_names(argv):
-    return "-N" in argv or "--skip-column-names" in argv
-
-
-def emit_rows(columns, rows, no_header):
-    if not no_header:
-        sys.stdout.write("\t".join(columns) + "\n")
-    for row in rows:
-        sys.stdout.write("\t".join(row.get(col, "") for col in columns) + "\n")
+    os.replace(staging, STATE_PATH)
 
 
 def match_where(row, where):
     if not where:
         return True
-    m = re.search(r"(?i)(\w+)\s*=\s*'([^']*)'", where)
-    if m:
-        return str(row.get(m.group(1), "")) == m.group(2)
-    m = re.search(r"(?i)(\w+)\s*=\s*(\d+)", where)
-    if m:
-        return str(row.get(m.group(1), "")) == m.group(2)
-    return True
+    match = re.search(r"(?i)(\w+)\s*=\s*(?:'([^']*)'|(\d+))", where)
+    return match is None or str(row.get(match.group(1), "")) == (match.group(2) or match.group(3))
+
+
+def statements(argv):
+    if "-e" in argv:
+        yield argv[argv.index("-e") + 1]
+        return
+    pending = ""
+    # Streaming is essential: sshx deliberately withholds mutation SQL until
+    # it has consumed and persisted this client's complete preimage output.
+    for line in sys.stdin:
+        pending += line
+        if pending.rstrip().endswith(";"):
+            yield pending.strip().rstrip(";")
+            pending = ""
 
 
 def main():
-    argv = sys.argv[1:]
-    sql = collect_sql(argv)
-    no_header = skip_names(argv)
-    state = load_state()
-    statements = [part.strip() for part in sql.split(";") if part.strip()]
+    state = load_json(STATE_PATH, {"users": [{"id": "1", "name": "old"}]})
+    options = load_json(OPTIONS_PATH, {})
     last_count = 0
-    for stmt in statements:
+    transactional = False
+    snapshot_table, snapshot_where = "users", ""
+    for stmt in statements(sys.argv[1:]):
         upper = stmt.upper()
+        marker = re.fullmatch(r"SELECT '(__SSHX_SQL_V1_[^']+)'", stmt)
+        if marker:
+            frame = marker.group(1)
+            if not (options.get("omit_commit_ack") and "|commit|" in frame):
+                print(frame, flush=True)
+            continue
+        count = re.fullmatch(r"SELECT CONCAT\('(__SSHX_SQL_V1_[^']+affected\|)', ROW_COUNT\(\)\)", stmt)
+        if count:
+            print(count.group(1) + ("bad" if options.get("bad_count") else str(last_count)), flush=True)
+            continue
         if upper.startswith("EXPLAIN"):
-            sys.stdout.write('{"query_block":{"table":{"table_name":"users","rows":1}}}\n')
+            table_plan = {"table_name": "users", "access_type": "ALL"}
+            if "INSERT" in upper:
+                table_plan["insert"] = True
+            elif not options.get("omit_row_estimate"):
+                table_plan["rows"] = 1
+            plan = json.dumps({"query_block": {"table": table_plan}}, indent=2)
+            if "--raw" not in sys.argv:
+                plan = plan.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+            print(plan, flush=True)
             continue
-        if "SELECT CASE WHEN" in upper:
-            sys.stdout.write("0\n")
+        if upper.startswith("SELECT CASE WHEN"):
+            print("0", flush=True)
             continue
-        created = re.match(
-            r"(?is)CREATE TABLE\s+(\w+)\s+AS\s+SELECT\s+\*\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?",
-            stmt,
-        )
-        if created:
-            dest, src, where = created.group(1), created.group(2), created.group(3)
-            rows = [dict(row) for row in state.get(src, []) if match_where(row, where)]
-            state[dest] = rows
-            save_state(state)
+        if upper.startswith("SET AUTOCOMMIT=0"):
+            transactional = True
             continue
-        updated = re.match(
-            r"(?is)UPDATE\s+(\w+)\s+SET\s+(\w+)\s*=\s*'([^']*)'\s+WHERE\s+(.+)",
-            stmt,
-        )
+        if upper.startswith("SET @SSHX_SNAPSHOT_SQL"):
+            source = re.search(r"FROM (\w+)'", stmt)
+            encoded = re.search(r"CONVERT\(0x([0-9a-f]+)", stmt)
+            snapshot_table = source.group(1) if source else "users"
+            snapshot_where = bytes.fromhex(encoded.group(1)).decode() if encoded else ""
+            continue
+        if upper.startswith("SELECT 'SSHX_MYSQL_HEX_ROWS_V1'"):
+            print("SSHX_MYSQL_HEX_ROWS_V1", flush=True)
+            continue
+        if upper.startswith("SELECT CONCAT('C|'"):
+            print("C|1|6964|696e74\nC|2|6e616d65|74657874", flush=True)
+            continue
+        if upper == "EXECUTE SSHX_SNAPSHOT":
+            for row in state.get(snapshot_table, []):
+                if match_where(row, snapshot_where):
+                    fields = ["N" if row.get(col) is None else "H" + str(row[col]).encode().hex() for col in ("id", "name")]
+                    print("R|" + "|".join(fields), flush=True)
+            continue
+        if upper == "EXECUTE SSHX_GUARD":
+            if options.get("unsupported_engine"):
+                print("fake mysql: unsupported table engine", file=sys.stderr)
+                return 2
+            continue
+        inserted = re.match(r"(?is)INSERT\s+INTO\s+(\w+)\s*(?:\(\s*id\s*,\s*name\s*\))?\s*VALUES\s*\(\s*(\d+)\s*,\s*'([^']*)'\s*\)", stmt)
+        if inserted:
+            table, identifier, value = inserted.groups()
+            state.setdefault(table, []).append({"id": identifier, "name": value})
+            last_count = 1
+            if not transactional:
+                save_state(state)
+            continue
+        updated = re.match(r"(?is)UPDATE\s+(\w+)\s+SET\s+(\w+)\s*=\s*'([^']*)'\s+WHERE\s+(.+)", stmt)
         if updated:
-            table, col, value, where = updated.group(1), updated.group(2), updated.group(3), updated.group(4)
-            count = 0
+            if options.get("fail_mutation"):
+                print("fake mysql: rejected mutation private-row-value", file=sys.stderr)
+                return 2
+            table, col, value, where = updated.groups()
+            last_count = 0
+            for row in state.get(table, []):
+                if match_where(row, where) and row.get(col) != value:
+                    row[col] = value
+                    last_count += 1
+            if not transactional:
+                save_state(state)
+            continue
+        selected = re.match(r"(?is)SELECT\s+(\*|\w+)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?", stmt)
+        if selected:
+            cols, table, where = selected.groups()
             for row in state.get(table, []):
                 if match_where(row, where):
-                    row[col] = value
-                    count += 1
-            last_count = count
-            save_state(state)
+                    names = list(row) if cols == "*" else [cols]
+                    print("\t".join(str(row.get(col, "")) for col in names), flush=True)
             continue
-        if upper.startswith("SELECT ROW_COUNT()"):
-            emit_rows(["ROW_COUNT()"], [{"ROW_COUNT()": str(last_count)}], no_header)
+        if upper == "COMMIT":
+            if transactional:
+                save_state(state)
             continue
-        selected = re.match(
-            r"(?is)SELECT\s+(\*|\w+)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?",
-            stmt,
-        )
-        if selected:
-            cols, table, where = selected.group(1), selected.group(2), selected.group(3)
-            rows = [row for row in state.get(table, []) if match_where(row, where)]
-            if cols == "*":
-                columns = list(rows[0].keys()) if rows else ["id", "name"]
-            else:
-                columns = [cols]
-            emit_rows(columns, rows, no_header)
+        if upper.startswith(("SET ", "START ", "LOCK ", "UNLOCK ", "PREPARE ", "DEALLOCATE ", "SELECT GROUP_CONCAT")):
             continue
-        if upper.startswith("SET ") or upper.startswith("START ") or upper.startswith("COMMIT"):
-            continue
-        sys.stderr.write("fake mysql: unsupported statement: %s\n" % stmt)
+        print("fake mysql: unsupported protocol statement", file=sys.stderr)
         return 2
     return 0
 

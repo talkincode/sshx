@@ -67,6 +67,32 @@ func applySudoKeyFlag(config *sshclient.Config, arg string) bool {
 	}
 }
 
+func applyLifecycleFlag(config *sshclient.Config, arg string) bool {
+	key, value, found := strings.Cut(arg, "=")
+	if !found {
+		return false
+	}
+	switch key {
+	case "--expect-plan":
+		config.ExpectPlan = value
+		if value == "" {
+			config.ArgumentError = "--expect-plan requires a digest"
+		}
+	case "--host-timeout", "--global-timeout":
+		duration, err := parseTimeout(value)
+		if err != nil {
+			config.ArgumentError = fmt.Sprintf("invalid %s: %v", key, err)
+		} else if key == "--host-timeout" {
+			config.HostTimeout = duration
+		} else {
+			config.GlobalTimeout = duration
+		}
+	default:
+		return false
+	}
+	return true
+}
+
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
@@ -162,6 +188,7 @@ func ParseArgs(args []string) *sshclient.Config {
 		}
 
 		switch {
+		case applyLifecycleFlag(config, arg):
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
@@ -421,6 +448,16 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 			break
 		}
 		switch {
+		case applyLifecycleFlag(config, arg):
+		case arg == "--fail-fast":
+			config.FailureMode = "fail_fast"
+		case strings.HasPrefix(arg, "--max-failures="):
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-failures="))
+			if err != nil || n <= 0 {
+				config.ArgumentError = "--max-failures requires a positive integer"
+			} else {
+				config.MaxFailures = n
+			}
 		case strings.HasPrefix(arg, "--target="):
 			name := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
 			if name != "" {
@@ -579,6 +616,9 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			break
 		}
 		switch {
+		case applyLifecycleFlag(config, arg):
+		case strings.HasPrefix(arg, "--bypass-reason="):
+			config.BypassReason = strings.TrimPrefix(arg, "--bypass-reason=")
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
@@ -702,6 +742,7 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 			return
 		}
 		switch {
+		case applyLifecycleFlag(config, arg):
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--target="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
@@ -784,6 +825,7 @@ func parseInspectArgs(config *sshclient.Config, args []string) {
 	config.InspectCacheMode = "off"
 	for _, arg := range args {
 		switch {
+		case applyLifecycleFlag(config, arg):
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
@@ -858,6 +900,8 @@ func parseAuditArgs(config *sshclient.Config, args []string) {
 	config.AuditAction = args[0]
 	for _, arg := range args[1:] {
 		switch {
+		case strings.HasPrefix(arg, "--execution-id="):
+			config.AuditExecutionID = strings.TrimPrefix(arg, "--execution-id=")
 		case arg == "--json":
 			config.JSONOutput = true
 		case arg == "--bypass-only":

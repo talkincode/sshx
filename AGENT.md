@@ -4,7 +4,7 @@ Operating guide for humans and AI coding agents working on **sshx**. It defines
 what this project is, what it deliberately is *not*, how it is built, and how to
 make changes that fit. Read this before making non-trivial changes.
 
-Module: `github.com/talkincode/sshx` · Language: Go 1.25.13 · License: MIT
+Module: `github.com/talkincode/sshx` · Language: Go 1.26.8 · License: MIT
 
 ---
 
@@ -198,7 +198,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 
 ## 5. Tech Stack
 
-- **Language:** Go (module directive pinned to **`go 1.25.13`** — see constraint below).
+- **Language:** Go (module directive pinned to **`go 1.26.8`** — see constraint below).
 - **SSH/crypto:** `golang.org/x/crypto/ssh`
 - **SFTP:** `github.com/pkg/sftp`
 - **Keyring:** `github.com/zalando/go-keyring`
@@ -206,8 +206,12 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 - **Dotenv:** `github.com/joho/godotenv`
 - **Tests:** `github.com/stretchr/testify`
 
-> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.25.13**.
-> The `go` directive in `go.mod` must stay at `1.25.13` unless a deliberate
+> Security baseline reviewed for v0.14.0: x/crypto v0.56.0 fixes reachable
+> SSH channel deadlocks GO-2026-6354 and GO-2026-6355 and requires Go 1.26.
+> Go 1.26.8 is the patched build baseline; CI and releases use the same version.
+>
+> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.26.8**.
+> The `go` directive in `go.mod` must stay at `1.26.8` unless a deliberate
 > security or compatibility review changes the baseline. New dependencies must
 > support that toolchain; do not let `go get` silently bump the directive.
 
@@ -245,19 +249,25 @@ Notes:
 
 ### CI (`.github/workflows/`)
 
-- `ci.yml`: **Test** (ubuntu + macOS, Go 1.25.13, `-race -cover`),
+- `ci.yml`: **Test** (ubuntu + macOS, Go 1.26.8, `-race -cover`),
   **Test (windows-latest)** (`-short`, build + vet), **Lint** (golangci-lint),
   **Security Scan** (`gosec` plus `govulncheck`), **Analyze** (CodeQL, Go),
-  and **E2E** (ubuntu + macOS).
-- Windows is a first-class target, so its job covers `cmd`, `internal/app`,
-  `internal/execution`, `internal/keyringstore`, `internal/runtimepath`,
-  `internal/sqlsafe`, `internal/sshclient`, and `pkg`. When adding a test that
+  **E2E** (ubuntu + macOS), and **SQL (native PostgreSQL and MySQL)** with
+  disposable PostgreSQL 16 / MySQL 8.4 services and installed native clients.
+  The SQL lane runs compiled-CLI read/update/no-op/permission/backup tests plus
+  engine rollback/concurrent-writer tests. Opt-in prerequisites must fail the
+  enabled lane when absent, not silently substitute mock evidence.
+- Windows is a first-class target, so its job covers all portable
+  `cmd`, `internal`, and `pkg` packages plus a compiled-CLI contract/reliability
+  E2E subset, including plugin/skill lifecycle. When adding a test that
   touches the home directory, use the package's `setTestHome` helper rather
   than `t.Setenv("HOME", …)`: Go reads `USERPROFILE` on Windows. Guard POSIX
-  permission assertions with `runtime.GOOS != "windows"`. `internal/plugin`,
-  `internal/skillinstall`, and `tests/e2e` are still excluded pending Windows
-  symlink/permission equivalents (issue #50).
-- `release.yml`: builds release artifacts with Go 1.25.13 and bundles the matching
+  permission assertions with `runtime.GOOS != "windows"`. POSIX shell/mode
+  fixtures skip their unsupported capability, not entire portable packages.
+  Windows Credential Manager needs an isolated OS profile and is not proved
+  by the test-only secret backend. Native CI results are required; a Windows
+  cross-build on macOS/Linux is not execution evidence.
+- `release.yml`: builds release artifacts with Go 1.26.8 and bundles the matching
   Agent skill in every archive.
 
 All `ci.yml` checks must be green before merge.
@@ -345,6 +355,33 @@ verification for it:
 - **Local plugin code vs remote observation data.** Collectors may be streamed
   for one session but are never installed remotely. Remote cache entries contain
   only normalized and redacted observation JSON.
+- **Reviewed plan vs mutable inputs.** `sshx.plan.v1` is nested inside existing
+  previews; `--expect-plan` compares canonical public semantic inputs before
+  secrets/network. Ordinary dry-run stays offline, secret-free and write-free.
+  Bound execution consumes admitted payload/trust snapshots. The entire sorted
+  trust-record store is currently hashed, so unrelated trust changes can
+  conservatively invalidate plans. DNS-only, missing public identity, relaxed
+  trust and remotely discovered SQL identities are not silently bound.
+- **Intent vs observed effects.** `risk` is read/mutation/privileged/destructive;
+  unknown command/script effects default to mutation. Preserve legacy intent
+  and force meanings. New consumers use nullable `executed`, tri-state
+  `change_state`, `verified`, `verification`, and condition evidence, not a
+  zero-value boolean as proof that a failed write did nothing.
+- **Execution outcome vs evidence delivery.** Finalize invocation/target identity
+  and redacted `execution_fingerprint` without raw stdout/stderr/secrets.
+  Audit persistence and output-delivery failures must not overwrite the remote
+  outcome or invite blind retries. Query/export expose corrupt-record diagnostics.
+- **Cancellation vs remote termination.** `--host-timeout` and
+  `--global-timeout` are opt-in; `--timeout` keeps its meaning. Fail-fast and
+  max-failures stop queued admission only, while external cancellation/deadlines
+  can close active transports. Neither proves remote termination or rollback.
+- **Backend primitive vs universal atomicity.** SFTP hash rechecks are not a
+  general compare-and-swap against arbitrary writers. SQL row counts are
+  engine-specific; MySQL atomicity requires supported strategy and real-engine
+  evidence, not a mocked client or separate-session backup.
+
+The full public contract and safe-retry decision table are in
+[docs/execution-contract.md](docs/execution-contract.md).
 
 ## 9. Testing Strategy
 
@@ -391,6 +428,12 @@ make test-e2e    # compiled sshx process across real SSH/SFTP protocol boundarie
 The E2E source of evidence is `tests/e2e`. Native OS-keyring lifecycle tests are
 opt-in locally and run against an ephemeral macOS Keychain in CI; never enable
 them against a keyring that cannot be safely isolated and cleaned up.
+The native-keyring helper requires both the default keychain and the sole
+search-list entry to match the explicitly isolated fixture. Native SQL tests
+likewise require disposable databases: see `tests/e2e/reliability_sql_native_e2e_test.go`
+and `internal/sqlsafe/real_engine_integration_test.go`, not `fake_mysql.py`,
+for real-engine evidence. Windows cross-builds and missing-client skips do not
+satisfy those native execution gates.
 
 ## 10. Roadmap
 
@@ -453,9 +496,9 @@ When working in this repo:
 1. **Stay within the mission.** Re-read §3 before adding features. Default to a
    smaller change. Never introduce a daemon, a connection pool, an HTTP/SSE
    protocol server, tunneling, or a GUI.
-2. **Hold the toolchain line.** Keep `go.mod` at `go 1.25.13`. If a dependency
+2. **Hold the toolchain line.** Keep `go.mod` at `go 1.26.8`. If a dependency
    forces a newer directive, pin an older compatible version instead of bumping
-   the directive (CI runs Go 1.25.13).
+   the directive (CI runs Go 1.26.8).
 3. **Verify before declaring done.** Run `make check` (and `golangci-lint run`)
    locally; reproduce the original symptom and confirm it is gone. For PR work,
    watch CI to green (`gh pr checks <n> --watch`).

@@ -2,10 +2,13 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -34,9 +37,14 @@ func TestCreateProducesRestrictiveCompleteScaffold(t *testing.T) {
 		if relative == "collectors/linux.sh" {
 			wantMode = 0o700
 		}
-		if info.Mode().Perm() != wantMode {
-			t.Fatalf("%s mode = %04o, want %04o", relative, info.Mode().Perm(), wantMode)
-		}
+		t.Run("POSIX mode "+relative, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("Windows synthetic mode bits are not ACL evidence")
+			}
+			if info.Mode().Perm() != wantMode {
+				t.Fatalf("%s mode = %04o, want %04o", relative, info.Mode().Perm(), wantMode)
+			}
+		})
 	}
 }
 
@@ -105,7 +113,7 @@ func TestTrustInvalidatesWhenCollectorChanges(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsSymlinkEntrypointAndMultipleJSONDocuments(t *testing.T) {
+func TestValidateRejectsSymlinkEntrypoint(t *testing.T) {
 	t.Setenv("SSHX_HOME", t.TempDir())
 	created, err := Create(CreateOptions{ID: "demo"})
 	if err != nil {
@@ -115,21 +123,33 @@ func TestValidateRejectsSymlinkEntrypointAndMultipleJSONDocuments(t *testing.T) 
 	if removeErr := os.Remove(entrypoint); removeErr != nil {
 		t.Fatal(removeErr)
 	}
-	if symlinkErr := os.Symlink("/bin/sh", entrypoint); symlinkErr != nil {
+	outside := filepath.Join(t.TempDir(), "outside.sh")
+	if writeErr := os.WriteFile(outside, []byte("outside"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if symlinkErr := os.Symlink(outside, entrypoint); symlinkErr != nil {
+		if runtime.GOOS == "windows" && (errors.Is(symlinkErr, os.ErrPermission) || errors.Is(symlinkErr, syscall.Errno(1314))) {
+			t.Skipf("Windows symlink privilege unavailable: %v", symlinkErr)
+		}
 		t.Fatal(symlinkErr)
 	}
 	if _, resolveErr := Resolve("demo"); resolveErr == nil || !strings.Contains(resolveErr.Error(), "symlink") {
 		t.Fatalf("Resolve() error = %v, want symlink rejection", resolveErr)
 	}
+}
 
+func TestValidateRejectsMultipleJSONDocuments(t *testing.T) {
 	resolved, _ := resolveBuiltin("system.identity")
-	_, err = ValidateResult(resolved, []byte(completeFixture+completeFixture))
+	_, err := ValidateResult(resolved, []byte(completeFixture+completeFixture))
 	if err == nil || !strings.Contains(err.Error(), "multiple JSON documents") {
 		t.Fatalf("ValidateResult() error = %v", err)
 	}
 }
 
 func TestResolveRejectsWritablePluginDirectoryAndUnsafeLock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX writable-group modes are not Windows ACLs; portable trust tests still run")
+	}
 	root := t.TempDir()
 	t.Setenv("SSHX_HOME", root)
 	created, err := Create(CreateOptions{ID: "demo"})
@@ -261,6 +281,7 @@ func TestCacheReusableRejectsIdentityDriftAndClassifiesStale(t *testing.T) {
 }
 
 func TestDockerTemplateDiscoversComposeMetadataWithoutEnvironmentValues(t *testing.T) {
+	requirePOSIXCollector(t)
 	root := t.TempDir()
 	t.Setenv("SSHX_HOME", root)
 	secretFixture := "registry-secret-fixture" // #nosec G101 -- verifies that collectors do not expose secret-bearing inputs.
@@ -342,10 +363,18 @@ esac
 	}
 }
 
-func TestDockerTemplateDistinguishesAbsentFromPermissionLimited(t *testing.T) {
+func requirePOSIXCollector(t *testing.T) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("shell plugin tests require a POSIX shell")
+		t.Skip("fixture requires POSIX shell shebangs and executable modes, not Windows collector execution")
 	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Fatalf("POSIX collector prerequisite missing: %v", err)
+	}
+}
+
+func TestDockerTemplateDistinguishesAbsentFromPermissionLimited(t *testing.T) {
+	requirePOSIXCollector(t)
 	t.Run("absent", func(t *testing.T) {
 		root := t.TempDir()
 		t.Setenv("SSHX_HOME", root)
@@ -353,6 +382,7 @@ func TestDockerTemplateDistinguishesAbsentFromPermissionLimited(t *testing.T) {
 		if err := os.MkdirAll(emptyPath, 0o700); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.Symlink("/bin/sh", filepath.Join(emptyPath, "sh")); err != nil {
 			t.Fatal(err)
 		}

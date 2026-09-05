@@ -1,12 +1,14 @@
 package app
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/talkincode/sshx/internal/execution"
 	"github.com/talkincode/sshx/internal/sqlsafe"
 	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/pkg/errutil"
@@ -25,33 +27,41 @@ type sqlBackupJSON struct {
 
 // sqlJSONResult is the machine-readable result of one sql-mode invocation.
 type sqlJSONResult struct {
-	Host          string         `json:"host"`
-	Port          string         `json:"port"`
-	User          string         `json:"user"`
-	Engine        string         `json:"engine"`
-	Database      string         `json:"database"`
-	Statement     string         `json:"statement"`
-	StatementHash string         `json:"statement_sha256"`
-	Class         string         `json:"class,omitempty"`
-	Verb          string         `json:"verb,omitempty"`
-	Table         string         `json:"table,omitempty"`
-	HasWhere      bool           `json:"has_where"`
-	Phase         string         `json:"phase"`
-	EstimatedRows *int64         `json:"estimated_rows,omitempty"`
-	ExplainPlan   string         `json:"explain_plan,omitempty"`
-	Backup        *sqlBackupJSON `json:"backup,omitempty"`
-	AffectedRows  *int64         `json:"affected_rows,omitempty"`
-	Stdout        string         `json:"stdout,omitempty"`
-	Stderr        string         `json:"stderr,omitempty"`
-	ExitCode      int            `json:"exit_code"`
-	Success       bool           `json:"success"`
-	DurationMs    int64          `json:"duration_ms"`
-	AuthMethod    string         `json:"auth_method,omitempty"`
-	CredSource    string         `json:"cred_source,omitempty"`
-	CredCache     string         `json:"cred_cache,omitempty"`
-	Sudo          bool           `json:"sudo,omitempty"`
-	ErrorKind     string         `json:"error_kind,omitempty"`
-	Error         string         `json:"error,omitempty"`
+	Host           string                `json:"host"`
+	Port           string                `json:"port"`
+	User           string                `json:"user"`
+	Engine         string                `json:"engine"`
+	Database       string                `json:"database"`
+	Statement      string                `json:"statement"`
+	StatementHash  string                `json:"statement_sha256"`
+	Class          string                `json:"class,omitempty"`
+	Verb           string                `json:"verb,omitempty"`
+	Table          string                `json:"table,omitempty"`
+	HasWhere       bool                  `json:"has_where"`
+	Phase          string                `json:"phase"`
+	EstimatedRows  *int64                `json:"estimated_rows,omitempty"`
+	ExplainPlan    string                `json:"explain_plan,omitempty"`
+	Backup         *sqlBackupJSON        `json:"backup,omitempty"`
+	AffectedRows   *int64                `json:"affected_rows,omitempty"`
+	Stdout         string                `json:"stdout,omitempty"`
+	Stderr         string                `json:"stderr,omitempty"`
+	ExitCode       int                   `json:"exit_code"`
+	Success        bool                  `json:"success"`
+	DurationMs     int64                 `json:"duration_ms"`
+	AuthMethod     string                `json:"auth_method,omitempty"`
+	CredSource     string                `json:"cred_source,omitempty"`
+	CredCache      string                `json:"cred_cache,omitempty"`
+	Sudo           bool                  `json:"sudo,omitempty"`
+	ErrorKind      string                `json:"error_kind,omitempty"`
+	Error          string                `json:"error,omitempty"`
+	Evidence       sqlsafe.Evidence      `json:"evidence"`
+	ChangeState    string                `json:"change_state"`
+	Executed       *bool                 `json:"executed"`
+	Verified       bool                  `json:"verified"`
+	Verification   string                `json:"verification"`
+	Completion     string                `json:"completion"`
+	Preconditions  []execution.Condition `json:"preconditions,omitempty"`
+	Postconditions []execution.Condition `json:"postconditions,omitempty"`
 }
 
 // sqlRun carries the evolving state of one guarded SQL pipeline execution.
@@ -77,6 +87,7 @@ type sqlRun struct {
 	// audit trail and JSON result ("hit", "stored", "resolved").
 	credSource string
 	credCache  string
+	evidence   sqlsafe.Evidence
 }
 
 func sqlOptions(config *sshclient.Config) sqlsafe.Options {
@@ -92,7 +103,7 @@ func sqlOptions(config *sshclient.Config) sqlsafe.Options {
 // classify → policy → connect → EXPLAIN gate → backup → execute → report.
 // Every phase is fail-closed and the full pipeline is audited.
 func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
-	run := &sqlRun{config: config, audit: audit, start: time.Now(), phase: "classify", opts: sqlOptions(config)}
+	run := &sqlRun{config: config, audit: audit, start: time.Now(), phase: "classify", opts: sqlOptions(config), evidence: sqlsafe.InitialEvidence()}
 
 	if cfgErr := validateSQLConfig(config); cfgErr != nil {
 		return run.fail("config", cfgErr)
@@ -175,10 +186,13 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 		return run.fail("config", fmt.Errorf("failed to create SSH client: %w", cliErr))
 	}
 	defer errutil.HandleCloseError(&err, client)
-	if connErr := client.ConnectDirect(); connErr != nil {
+	run.client = client
+	connErr := client.ConnectDirect()
+	run.audit.recordPeer(run.client)
+	recordConnectedPeer(config, client, "target")
+	if connErr != nil {
 		return run.fail(classifyError(connErr), fmt.Errorf("failed to connect: %w", connErr))
 	}
-	run.client = client
 
 	if needExtract {
 		if credErr := run.resolveCredentials(credSource, credBestEffort); credErr != nil {
@@ -252,6 +266,12 @@ func validateSQLConfig(config *sshclient.Config) error {
 	}
 	if config.SQLEngine == sqlsafe.EngineSQLite {
 		return validateSQLiteConfig(config)
+	}
+	if config.ExpectPlan != "" && (config.SQLDatabase == "" || config.SQLUser == "" || config.SQLHost == "" || config.SQLPort == "") {
+		return fmt.Errorf("bound SQL requires explicit --db, --db-user, --db-host and --db-port; credential discovery and client defaults cannot determine the target identity")
+	}
+	if err := sqlsafe.ValidateBackupDir(config.SQLBackupDir); err != nil {
+		return err
 	}
 	if config.SQLFile != "" {
 		return fmt.Errorf("--db-file is only valid with --engine=sqlite")
@@ -460,6 +480,11 @@ func (r *sqlRun) explainPhase() error {
 	if parseErr != nil {
 		return r.fail("explain_failed", fmt.Errorf("cannot parse EXPLAIN output: %w", parseErr))
 	}
+	if rows < 0 {
+		r.estimatedRows = nil
+		logger.GetLogger().Info("EXPLAIN does not provide a row estimate")
+		return nil
+	}
 	r.estimatedRows = &rows
 	logger.GetLogger().Info("EXPLAIN estimates %d affected row(s)", rows)
 	return nil
@@ -499,6 +524,9 @@ func (r *sqlRun) backupPhase() error {
 	}
 
 	path := sqlsafe.BackupPath(r.config.SQLBackupDir, r.config.SQLDatabase, plan.Table, plan.Kind)
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineMySQL {
+		path = strings.TrimSuffix(path, ".csv") + ".mysql-hex"
+	}
 	r.backup.Path = path
 	r.backup.RestoreHint = sqlsafe.RestoreHintFor(r.config.SQLEngine, plan, path)
 	return nil
@@ -548,40 +576,58 @@ func (r *sqlRun) executePhase() error {
 			return r.fail("blocked", buildErr)
 		}
 		r.phase = "backup_execute"
-		logger.GetLogger().Info("Backing up (%s) %s -> %s in the mutation transaction",
+		logger.GetLogger().Info("Backing up (%s) %s -> %s under the mutation lock",
 			r.backup.Kind, r.cls.Table, r.backup.Path)
 	}
 	res, execErr := r.runRemote(command)
+	var evidenceErr error
+	if command.Protocol != nil {
+		observed, parseErr := command.Protocol.Parse(res.Stdout)
+		r.affectedRows = observed.AffectedRows
+		r.evidence = command.Protocol.Summarize(observed, parseErr == nil)
+		res.Stdout = observed.Stdout
+		evidenceErr = parseErr
+	}
 	if execErr != nil {
-		return r.fail(classifyError(execErr), fmt.Errorf("execution failed: %w", execErr))
+		return r.failWithExit(classifyError(execErr), res, fmt.Errorf("execution failed: %w", execErr))
 	}
 	if res.ExitCode != 0 {
 		return r.failWithExit("remote_exit", res,
 			fmt.Errorf("statement exited with status %d", res.ExitCode))
 	}
-	if r.cls.Class == sqlsafe.ClassDML {
-		if rows, ok := sqlsafe.ParseCommandTag(res.Stdout); ok {
-			r.affectedRows = &rows
-		} else if rows, ok := sqlsafe.ParseChangesOutput(res.Stdout); ok {
-			r.affectedRows = &rows
+	if evidenceErr != nil {
+		kind := "protocol_error"
+		var verificationErr *sqlsafe.VerificationError
+		if errors.As(evidenceErr, &verificationErr) {
+			kind = "verification_failed"
 		}
+		r.evidence.Verification = "failed"
+		return r.failWithExit(kind, res, evidenceErr)
+	}
+	if command.Protocol == nil {
+		return r.failWithExit("protocol_error", res, &sqlsafe.ProtocolError{Reason: "missing execution protocol"})
 	}
 	r.phase = "complete"
 	r.recordAudit(0, "", nil)
 
+	result := r.baseResult()
+	result.Stdout = res.Stdout
+	result.ExitCode = 0
+	result.Success = true
 	if r.config.JSONOutput {
-		result := r.baseResult()
-		result.Stdout = res.Stdout
-		result.ExitCode = 0
-		result.Success = true
-		emitSQLJSON(result)
-		return nil
+		return emitSQLJSON(r.config, result)
+	}
+	if finalErr := finalizeSQLHuman(r.config, result); finalErr != nil {
+		return finalErr
 	}
 
 	if strings.TrimSpace(res.Stdout) != "" {
-		fmt.Print(res.Stdout)
-		if !strings.HasSuffix(res.Stdout, "\n") {
-			fmt.Println()
+		output := res.Stdout
+		if !strings.HasSuffix(output, "\n") {
+			output += "\n"
+		}
+		if _, writeErr := fmt.Fprint(os.Stdout, output); writeErr != nil {
+			return fmt.Errorf("%w: deliver SQL output: %w", execution.ErrLocalIO, writeErr)
 		}
 	}
 	if r.affectedRows != nil {
@@ -597,15 +643,19 @@ func (r *sqlRun) executePhase() error {
 func (r *sqlRun) reportExplainOnly() error {
 	r.phase = "explain_only"
 	r.recordAudit(0, "", nil)
+	result := r.baseResult()
+	result.ExplainPlan = r.explainPlan
+	result.ExitCode = 0
+	result.Success = true
 	if r.config.JSONOutput {
-		result := r.baseResult()
-		result.ExplainPlan = r.explainPlan
-		result.ExitCode = 0
-		result.Success = true
-		emitSQLJSON(result)
-		return nil
+		return emitSQLJSON(r.config, result)
 	}
-	fmt.Println(r.explainPlan)
+	if finalErr := finalizeSQLHuman(r.config, result); finalErr != nil {
+		return finalErr
+	}
+	if _, writeErr := fmt.Fprintln(os.Stdout, r.explainPlan); writeErr != nil {
+		return fmt.Errorf("%w: deliver SQL plan: %w", execution.ErrLocalIO, writeErr)
+	}
 	if r.estimatedRows != nil {
 		logger.GetLogger().Info("Estimated affected rows: %d", *r.estimatedRows)
 	}
@@ -620,9 +670,16 @@ func (r *sqlRun) fail(kind string, failErr error) error {
 
 func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr error) error {
 	safeErr := failErr
+	auditErr := failErr
 	if res.ExitCode >= 0 {
 		safeErr = fmt.Errorf("database operation failed during %s with status %d", r.phase, res.ExitCode)
-		if detail := firstNonEmptyLine(res.Stderr, res.Stdout); detail != "" {
+		auditErr = safeErr
+		if kind == "protocol_error" || kind == "verification_failed" {
+			safeErr = failErr
+			auditErr = failErr
+		} else if detail := firstNonEmptyLine(res.Stderr, res.Stdout); detail != "" {
+			// Preserve legacy CLI diagnostics, but never copy arbitrary
+			// database data or client stderr into the audit error field.
 			safeErr = fmt.Errorf("%s: %s", safeErr.Error(), redactSensitiveText(detail))
 		}
 	}
@@ -634,21 +691,29 @@ func (r *sqlRun) failWithExit(kind string, res sshclient.ExecResult, failErr err
 		safeErr = fmt.Errorf(
 			"%s is not available on the remote host%s: install the client, or use --docker=<container> to run it inside the database container",
 			missing, r.clientLocationHint())
+		auditErr = safeErr
 	}
-	r.recordAudit(res.ExitCode, kind, safeErr)
+	r.recordAudit(res.ExitCode, kind, auditErr)
+	result := r.baseResult()
+	result.ExitCode = res.ExitCode
+	result.ErrorKind = kind
+	result.Error = redactError(safeErr)
+	result.Stdout = res.Stdout
+	result.Stderr = res.Stderr
 	if r.config.JSONOutput {
-		result := r.baseResult()
-		result.ExitCode = res.ExitCode
-		result.ErrorKind = kind
-		result.Error = redactError(safeErr)
-		result.Stdout = res.Stdout
-		result.Stderr = res.Stderr
-		emitSQLJSON(result)
+		if outputErr := emitSQLJSON(r.config, result); outputErr != nil {
+			return outputErr
+		}
 		return ErrReported
+	}
+	if finalErr := finalizeSQLHuman(r.config, result); finalErr != nil {
+		return finalErr
 	}
 	if res.ExitCode > 0 {
 		if strings.TrimSpace(res.Stderr) != "" {
-			fmt.Fprint(os.Stderr, res.Stderr)
+			if _, writeErr := fmt.Fprint(os.Stderr, res.Stderr); writeErr != nil {
+				return fmt.Errorf("%w: deliver SQL diagnostic: %w", execution.ErrLocalIO, writeErr)
+			}
 		}
 		return &ExitError{Code: res.ExitCode}
 	}
@@ -667,7 +732,7 @@ func firstNonEmptyLine(chunks ...string) string {
 }
 
 // databaseClientNames are the remote binaries sshx drives for each engine.
-var databaseClientNames = []string{"psql", "sqlite3"}
+var databaseClientNames = []string{"psql", "sqlite3", "mysql", "mariadb"}
 
 // missingDatabaseClient reports the client binary the remote shell could not
 // find. Shells exit 127 for "command not found", so the exit code alone is
@@ -707,6 +772,38 @@ func (r *sqlRun) baseResult() sqlJSONResult {
 		StatementHash: sqlStatementDigest(r.config.SQLStatement),
 		Phase:         r.phase,
 		DurationMs:    time.Since(r.start).Milliseconds(),
+		Evidence:      r.evidence,
+	}
+	if result.Evidence.Commit == "" {
+		result.Evidence = sqlsafe.InitialEvidence()
+	}
+	result.ChangeState = result.Evidence.StateChange
+	result.Completion = "unknown"
+	// Client-protocol validation is not effect verification; Verified stays
+	// false even when the database acknowledged a successful mutation.
+	result.Verification = result.Evidence.EffectVerification
+	if result.Evidence.Verification == "failed" || result.Evidence.Verification == "unknown" {
+		result.Verification = result.Evidence.Verification
+	}
+	switch {
+	case result.Evidence.Commit == "acknowledged" || r.affectedRows != nil:
+		executed := true
+		result.Executed = &executed
+		if result.Evidence.Commit == "acknowledged" {
+			result.Completion = "completed"
+		}
+	case result.Evidence.Commit == "not_started":
+		executed := false
+		result.Executed = &executed
+		result.Completion = "not_started"
+		result.ChangeState = "unchanged"
+	}
+	if r.phase == "explain_only" {
+		executed := true
+		result.Executed = &executed
+		result.Completion = "completed"
+		result.ChangeState = "unchanged"
+		result.Verification = "not_required"
 	}
 	if r.client != nil {
 		result.AuthMethod = string(r.client.AuthMethodUsed())
@@ -723,11 +820,93 @@ func (r *sqlRun) baseResult() sqlJSONResult {
 	result.EstimatedRows = r.estimatedRows
 	result.AffectedRows = r.affectedRows
 	result.Backup = r.backup
+	addSQLEvidenceConditions(&result)
 	return result
+}
+
+func addSQLEvidenceConditions(result *sqlJSONResult) {
+	evidence := result.Evidence
+	engine := sqlsafe.NormalizeEngine(result.Engine)
+	target := engine + ":" + result.Database
+	result.Postconditions = []execution.Condition{
+		{Kind: "sql_commit", Subject: target, Expected: "acknowledged", Observed: evidence.Commit, Status: sqlObservationStatus(evidence.Commit, "acknowledged")},
+		{Kind: "sql_protocol", Subject: target, Expected: "protocol_verified", Observed: evidence.Verification, Status: sqlObservationStatus(evidence.Verification, "protocol_verified")},
+	}
+	if result.AffectedRows != nil || evidence.AffectedRowsSemantics != "" {
+		rows, status := "", "unknown"
+		if result.AffectedRows != nil {
+			rows, status = strconv.FormatInt(*result.AffectedRows, 10), "passed"
+		} else if evidence.Commit == "not_started" {
+			status = "not_performed"
+		}
+		semantics := map[string]string{
+			sqlsafe.EnginePostgres: "postgres_command_tag", sqlsafe.EngineSQLite: "sqlite_changes", sqlsafe.EngineMySQL: "mysql_row_count",
+		}[engine]
+		semanticsStatus := status
+		if status == "passed" {
+			semanticsStatus = sqlObservationStatus(evidence.AffectedRowsSemantics, semantics)
+		}
+		result.Postconditions = append(result.Postconditions,
+			execution.Condition{Kind: "sql_affected_rows", Subject: target + ":" + result.Table, Observed: rows, Status: status},
+			execution.Condition{Kind: "sql_affected_rows_semantics", Subject: target + ":" + result.Table, Expected: semantics, Observed: evidence.AffectedRowsSemantics, Status: semanticsStatus},
+		)
+	}
+	if result.Backup == nil || result.Backup.Kind == string(sqlsafe.BackupNone) {
+		return
+	}
+	backupStatus := evidence.BackupStatus
+	if backupStatus == "" || backupStatus == "not_required" {
+		backupStatus = "planned"
+	}
+	status := sqlObservationStatus(backupStatus, "ready")
+	observedKind := ""
+	if backupStatus == "ready" {
+		observedKind = result.Backup.Kind
+	} else if evidence.Commit == "not_started" {
+		status = "not_performed"
+	}
+	expectedFormat := "csv"
+	switch engine {
+	case sqlsafe.EngineMySQL:
+		expectedFormat = "mysql_hex_rows_v1"
+	case sqlsafe.EngineSQLite:
+		if result.Backup.Kind == string(sqlsafe.BackupFile) {
+			expectedFormat = "sqlite_database"
+		}
+	}
+	consistencyStatus, formatStatus := status, status
+	if status == "passed" {
+		consistencyStatus = sqlObservationStatus(evidence.BackupConsistency, "locked_preimage")
+		formatStatus = sqlObservationStatus(evidence.BackupFormat, expectedFormat)
+	}
+	result.Preconditions = []execution.Condition{
+		{Kind: "sql_backup", Subject: result.Backup.Path, Expected: "ready", Observed: backupStatus, Status: status},
+		{Kind: "sql_backup_kind", Subject: result.Backup.Path, Expected: result.Backup.Kind, Observed: observedKind, Status: status},
+		{Kind: "sql_backup_consistency", Subject: result.Backup.Path, Expected: "locked_preimage", Observed: evidence.BackupConsistency, Status: consistencyStatus},
+		{Kind: "sql_backup_format", Subject: result.Backup.Path, Expected: expectedFormat, Observed: evidence.BackupFormat, Status: formatStatus},
+	}
+}
+
+func sqlObservationStatus(observed, expected string) string {
+	if observed == "" || expected == "" {
+		return "unknown"
+	}
+	switch observed {
+	case expected:
+		return "passed"
+	case "not_started", "not_performed", "not_required":
+		return "not_performed"
+	case "failed":
+		return "failed"
+	default:
+		return "unknown"
+	}
 }
 
 func (r *sqlRun) recordAudit(exitCode int, kind string, failErr error) {
 	meta := sqlAuditMeta{Phase: r.phase, Mutates: false}
+	evidence := r.baseResult().Evidence
+	meta.Evidence = &evidence
 	if r.cls != nil {
 		meta.Class = string(r.cls.Class)
 		meta.Verb = r.cls.Verb
@@ -751,10 +930,11 @@ func (r *sqlRun) recordAudit(exitCode int, kind string, failErr error) {
 	r.audit.recordSQLOutcome(r.config, authMethod, meta, exitCode, kind, failErr)
 }
 
-func emitSQLJSON(result sqlJSONResult) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(result); err != nil {
-		logger.GetLogger().Error("failed to encode JSON result: %v", err)
-	}
+func emitSQLJSON(config *sshclient.Config, result sqlJSONResult) error {
+	return emitLifecycleJSON(config, result)
+}
+
+func finalizeSQLHuman(config *sshclient.Config, result sqlJSONResult) error {
+	_, err := finalizeLifecycle(config, result)
+	return err
 }
