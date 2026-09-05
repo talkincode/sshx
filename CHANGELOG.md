@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.14.0] - 2026-09-05
 
+### Security
+
+- Upgrade x/crypto to v0.56.0 to fix reachable SSH channel deadlocks
+  GO-2026-6354 and GO-2026-6355. Raise the Go build baseline to 1.26.8
+  because the fixed dependency requires Go 1.26.
+
+### Fixed
+
+- Process relayed directory entries in name order so partial execution is
+  reproducible across SFTP servers and host filesystems.
+
 ### Added
 
 - Additive `sshx.plan.v1` previews, `plan_hash` and risk/effects metadata;

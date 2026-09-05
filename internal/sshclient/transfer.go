@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 
 	"github.com/pkg/sftp"
 )
@@ -100,6 +101,8 @@ func transferEntry(ctx context.Context, source, destination *sftp.Client, srcPat
 		if err != nil {
 			return err
 		}
+		// SFTP directory order is server-dependent; keep partial execution reproducible.
+		sort.Slice(files, func(i, j int) bool { return files[i].Name() < files[j].Name() })
 		for _, child := range files {
 			if err := transferEntry(ctx, source, destination, remotePathJoin(srcPath, child.Name()), remotePathJoin(dstPath, child.Name()), child, out); err != nil {
 				return err

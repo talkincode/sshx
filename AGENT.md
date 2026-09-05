@@ -4,7 +4,7 @@ Operating guide for humans and AI coding agents working on **sshx**. It defines
 what this project is, what it deliberately is *not*, how it is built, and how to
 make changes that fit. Read this before making non-trivial changes.
 
-Module: `github.com/talkincode/sshx` · Language: Go 1.25.13 · License: MIT
+Module: `github.com/talkincode/sshx` · Language: Go 1.26.8 · License: MIT
 
 ---
 
@@ -198,7 +198,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 
 ## 5. Tech Stack
 
-- **Language:** Go (module directive pinned to **`go 1.25.13`** — see constraint below).
+- **Language:** Go (module directive pinned to **`go 1.26.8`** — see constraint below).
 - **SSH/crypto:** `golang.org/x/crypto/ssh`
 - **SFTP:** `github.com/pkg/sftp`
 - **Keyring:** `github.com/zalando/go-keyring`
@@ -206,8 +206,12 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 - **Dotenv:** `github.com/joho/godotenv`
 - **Tests:** `github.com/stretchr/testify`
 
-> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.25.13**.
-> The `go` directive in `go.mod` must stay at `1.25.13` unless a deliberate
+> Security baseline reviewed for v0.14.0: x/crypto v0.56.0 fixes reachable
+> SSH channel deadlocks GO-2026-6354 and GO-2026-6355 and requires Go 1.26.
+> Go 1.26.8 is the patched build baseline; CI and releases use the same version.
+>
+> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.26.8**.
+> The `go` directive in `go.mod` must stay at `1.26.8` unless a deliberate
 > security or compatibility review changes the baseline. New dependencies must
 > support that toolchain; do not let `go get` silently bump the directive.
 
@@ -245,7 +249,7 @@ Notes:
 
 ### CI (`.github/workflows/`)
 
-- `ci.yml`: **Test** (ubuntu + macOS, Go 1.25.13, `-race -cover`),
+- `ci.yml`: **Test** (ubuntu + macOS, Go 1.26.8, `-race -cover`),
   **Test (windows-latest)** (`-short`, build + vet), **Lint** (golangci-lint),
   **Security Scan** (`gosec` plus `govulncheck`), **Analyze** (CodeQL, Go),
   **E2E** (ubuntu + macOS), and **SQL (native PostgreSQL and MySQL)** with
@@ -263,7 +267,7 @@ Notes:
   Windows Credential Manager needs an isolated OS profile and is not proved
   by the test-only secret backend. Native CI results are required; a Windows
   cross-build on macOS/Linux is not execution evidence.
-- `release.yml`: builds release artifacts with Go 1.25.13 and bundles the matching
+- `release.yml`: builds release artifacts with Go 1.26.8 and bundles the matching
   Agent skill in every archive.
 
 All `ci.yml` checks must be green before merge.
@@ -492,9 +496,9 @@ When working in this repo:
 1. **Stay within the mission.** Re-read §3 before adding features. Default to a
    smaller change. Never introduce a daemon, a connection pool, an HTTP/SSE
    protocol server, tunneling, or a GUI.
-2. **Hold the toolchain line.** Keep `go.mod` at `go 1.25.13`. If a dependency
+2. **Hold the toolchain line.** Keep `go.mod` at `go 1.26.8`. If a dependency
    forces a newer directive, pin an older compatible version instead of bumping
-   the directive (CI runs Go 1.25.13).
+   the directive (CI runs Go 1.26.8).
 3. **Verify before declaring done.** Run `make check` (and `golangci-lint run`)
    locally; reproduce the original symptom and confirm it is gone. For PR work,
    watch CI to green (`gh pr checks <n> --watch`).
