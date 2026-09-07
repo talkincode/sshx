@@ -68,14 +68,14 @@ Preview without writing anything:
 sshx --host-import=web1 --dry-run --json
 ```
 
-What is imported per entry: `HostName` (or the alias itself when absent), `Port`, `User`, `IdentityFile` (as the per-host `key`), and `BindAddress` / `BindInterface` (as `bind`; first value wins).
+What is imported per entry: `HostName` (or the alias itself when absent), `Port`, `User`, `IdentityFile` (as the per-host `key`), `BindAddress` / `BindInterface` (as `bind`; first value wins), and a single-token `ProxyJump` when that alias is already a named sshx host (as `via`).
 
 Pollution guards — the importer always skips:
 
 - wildcard or negated patterns (`Host *`, `web-?`, `!pattern`) — they are rules, not hosts;
 - aliases that already exist in settings;
 - entries whose `host:port` already exists in settings (or duplicates an earlier entry in the same file);
-- options sshx does not support (`ProxyJump`, `ForwardAgent`, …) — shown as `ignored:` so nothing disappears silently;
+- options sshx does not support (`ForwardAgent`, unmapped `ProxyJump`, …) — shown as `ignored:` so nothing disappears silently;
 - options from other blocks: `Host *` defaults are never merged into imported entries;
 - `IdentityFile` values containing `%` tokens (reported in a note).
 
@@ -98,13 +98,27 @@ Host definitions live in `~/.sshx/settings.json`.
       "key": "/Users/alice/.ssh/prod-web.pem",
       "password_key": "prod-web-sudo",
       "type": "linux",
-      "bind": "en0"
+      "bind": "en0",
+      "via": "edge"
     }
   ]
 }
 ```
 
 The top-level `key` is the default SSH private key. A per-host `key` overrides it for that host only.
+
+## Jump hosts
+
+When the local machine cannot reach `app` but named host `edge` can, persist `via` on the target. sshx opens one SSH session to `edge`, then a `direct-tcpip` channel to `app`, for this invocation only. There is no local listen port and nothing to tear down after the process exits.
+
+```bash
+sshx --host-add --host-name=edge -h=100.64.0.10 -u=jump
+sshx --host-add --host-name=app -h=10.0.0.5 -u=app --via=edge
+sshx -h=app --json "uptime"
+sshx -h=app --via=          # force a direct connection for one run
+```
+
+Each hop verifies its own host key and uses its own key or `ssh_password_key`. Secrets stay local. `--via=name` on a command overrides inventory for that invocation. Removing a host that other hosts still use as `via` is rejected.
 
 ## Daily Host Commands
 

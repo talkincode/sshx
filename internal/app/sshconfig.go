@@ -20,6 +20,7 @@ type sshConfigEntry struct {
 	User         string
 	IdentityFile string
 	Bind         string
+	ProxyJump    string
 	// IgnoredOptions lists option keywords present in the block that sshx
 	// does not import (e.g. ProxyJump, ForwardAgent), so the user can see
 	// exactly what a selective import leaves behind.
@@ -178,6 +179,13 @@ func applySSHConfigOption(entry *sshConfigEntry, key, value string) {
 		if entry.Bind == "" {
 			entry.Bind = value
 		}
+	case "proxyjump":
+		if entry.ProxyJump == "" {
+			entry.ProxyJump = value
+		}
+		if !containsFold(entry.IgnoredOptions, key) {
+			entry.IgnoredOptions = append(entry.IgnoredOptions, key)
+		}
 	default:
 		if !importedConfigKeys[key] && !containsFold(entry.IgnoredOptions, key) {
 			entry.IgnoredOptions = append(entry.IgnoredOptions, key)
@@ -266,7 +274,37 @@ func buildImportPlan(entries []sshConfigEntry, settings *Settings) importPlan {
 		plan.Candidates = append(plan.Candidates, importCandidate{Entry: entry, Host: host})
 	}
 
+	named := make(map[string]bool, len(settings.Hosts)+len(plan.Candidates))
+	for _, host := range settings.Hosts {
+		named[host.Name] = true
+	}
+	for _, candidate := range plan.Candidates {
+		named[candidate.Host.Name] = true
+	}
+	for i := range plan.Candidates {
+		alias := namedJumpAlias(plan.Candidates[i].Entry.ProxyJump)
+		if alias == "" || !named[alias] {
+			continue
+		}
+		plan.Candidates[i].Host.Via = alias
+		filtered := plan.Candidates[i].Entry.IgnoredOptions[:0]
+		for _, option := range plan.Candidates[i].Entry.IgnoredOptions {
+			if !strings.EqualFold(option, "proxyjump") {
+				filtered = append(filtered, option)
+			}
+		}
+		plan.Candidates[i].Entry.IgnoredOptions = filtered
+	}
+
 	return plan
+}
+
+func namedJumpAlias(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "@:, \t") {
+		return ""
+	}
+	return value
 }
 
 // selectCandidatesByName resolves a comma-separated name list against the

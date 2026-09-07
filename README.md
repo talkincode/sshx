@@ -79,6 +79,8 @@ It remains a single binary with one-shot invocations and no resident component o
     shell. Not part of the Agent/MCP contract.
 13. Source address binding (`--bind=<ip|iface>`) matching OpenSSH `-b` /
     `BindAddress` / `BindInterface`.
+14. Session-bound jump hosts (`via` / `--via=`): nested SSH to private targets
+    with per-hop trust and audit, without local tunnels.
 
 ## Installation
 

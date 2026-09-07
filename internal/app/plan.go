@@ -115,6 +115,9 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 			}
 			markPublicResolution(&copyConfig)
 			plan.Targets = append(plan.Targets, publicPlanTarget(&copyConfig, endpoint.host, endpoint.role, plan))
+			if via := appendJumpPlanTargets(plan, &copyConfig); via != "" {
+				plan.Inputs[endpoint.role+"_via"] = via
+			}
 			if endpoint.role == "source" {
 				config.TransferSource = &copyConfig
 			} else {
@@ -125,6 +128,9 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 		plan.Inputs["recursive"] = "source_type"
 	} else {
 		plan.Targets = []execution.PlanTarget{publicPlanTarget(config, p.preview.HostInput, "target", plan)}
+		if via := appendJumpPlanTargets(plan, config); via != "" {
+			plan.Inputs["via"] = via
+		}
 	}
 	switch config.Mode {
 	case "apply":
@@ -227,6 +233,22 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 	p.preview.Plan, p.preview.PlanHash, p.preview.Risk = plan, plan.PlanHash, plan.Risk
 	p.meta = execution.NewMetadata(plan, config.ExecutionID)
 	return p, plan.CheckExpected(config.ExpectPlan)
+}
+
+func appendJumpPlanTargets(plan *execution.Plan, config *sshclient.Config) string {
+	if plan == nil || config == nil || len(config.JumpChain) == 0 {
+		return ""
+	}
+	aliases := make([]string, 0, len(config.JumpChain))
+	for i, hop := range config.JumpChain {
+		if hop == nil {
+			continue
+		}
+		role := fmt.Sprintf("jump.%d", i)
+		plan.Targets = append(plan.Targets, publicPlanTarget(hop, hop.HostAlias, role, plan))
+		aliases = append(aliases, hopAlias(hop))
+	}
+	return strings.Join(aliases, ",")
 }
 
 func publicPlanTarget(config *sshclient.Config, alias, role string, plan *execution.Plan) execution.PlanTarget {

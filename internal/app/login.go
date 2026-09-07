@@ -30,6 +30,12 @@ func HandleLogin(config *sshclient.Config, audit *auditRecorder) (err error) {
 			logger.GetLogger().Info("Note: Could not find host '%s' in settings, using as hostname directly", config.Host)
 		}
 	}
+	if hopErr := ensureJumpChain(config); hopErr != nil {
+		return failLogin(config, audit, sshclient.AuthMethodUnknown, "config", hopErr)
+	}
+	if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
+		return failLogin(config, audit, sshclient.AuthMethodUnknown, "auth", hopSecretErr)
+	}
 	fillLoginSSHPassword(config)
 
 	if config.LoginUseSudo {
@@ -47,11 +53,13 @@ func HandleLogin(config *sshclient.Config, audit *auditRecorder) (err error) {
 			fmt.Errorf("failed to create SSH client: %w", cliErr))
 	}
 	defer errutil.HandleCloseError(&err, client)
-	if connErr := client.ConnectDirect(); connErr != nil {
+	if connErr := client.Connect(); connErr != nil {
 		return failLogin(config, audit, sshclient.AuthMethodUnknown, classifyError(connErr),
 			fmt.Errorf("failed to connect: %w", connErr))
 	}
+	recordConnectedHops(config, client)
 	if audit != nil {
+		audit.recordHops(client)
 		audit.event.AuthMethod = string(client.AuthMethodUsed())
 	}
 
@@ -178,6 +186,7 @@ func parseLoginArgs(config *sshclient.Config, args []string) {
 			config.ArgumentError = fmt.Sprintf("login does not accept %s", arg)
 			return
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case stringsHasPrefixAny(arg, "--timeout="):
 			config.ArgumentError = "login does not accept --timeout (interactive sessions are unbounded)"
 			return

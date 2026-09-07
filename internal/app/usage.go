@@ -47,6 +47,7 @@ SSH Options:
                            Used only when the remote command starts with sudo
   --ssh-password-key=KEY   SSH login password keyring key (never used for sudo)
   --bind=ADDR              Local source IP or interface (e.g. 192.0.2.10 or en0)
+  --via=NAME               Named sshx jump host (session-bound; no local tunnel)
   --dry-run                Print the local execution plan without side effects
   --expect-plan=HASH       Require the reviewed sha256:<64 lowercase hex> plan
   --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
@@ -270,6 +271,7 @@ Host Management:
     -pk=<key>                         Password key name
     --host-type=<type>                System type (linux/windows/macos)
     --bind=<ip|iface>                 Persist a source address for this host
+    --via=<name>                      Named jump host for this target
 
   Configuration file: ~/.sshx/settings.json
 

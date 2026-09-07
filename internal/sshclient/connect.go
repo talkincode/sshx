@@ -23,7 +23,60 @@ func defaultDialTCP(ctx context.Context, addr string, localAddr net.Addr, timeou
 
 // ConnectDirect uses one budget for TCP, SSH negotiation, and any allowed
 // password fallback. The connection remains owned by Config.Context afterward.
-func (c *SSHClient) ConnectDirect() (err error) {
+func (c *SSHClient) ConnectDirect() error {
+	return c.connectThrough(nil)
+}
+
+// Connect establishes any configured jump chain, then the target session.
+// Jump sessions are owned by this client and closed with it.
+func (c *SSHClient) Connect() error {
+	if c == nil || c.config == nil {
+		return boundaryError("config", "connect", fmt.Errorf("client is not configured"))
+	}
+	var parent *ssh.Client
+	for _, hop := range c.config.JumpChain {
+		if hop == nil {
+			c.closeOwnedJumps()
+			return hopError("jump", hop, fmt.Errorf("jump config is required"))
+		}
+		hopCopy := *hop
+		hopCopy.JumpChain = nil
+		if hopCopy.Context == nil {
+			hopCopy.Context = c.config.Context
+		}
+		hopClient, err := NewSSHClient(&hopCopy)
+		if err != nil {
+			c.closeOwnedJumps()
+			return hopError("jump", hop, err)
+		}
+		if hopErr := hopClient.connectThrough(parent); hopErr != nil {
+			_ = hopClient.Close() //nolint:errcheck // failed hop
+			c.closeOwnedJumps()
+			return hopError("jump", hop, hopErr)
+		}
+		c.mu.Lock()
+		c.ownedJumps = append(c.ownedJumps, hopClient)
+		c.mu.Unlock()
+		parent, err = hopClient.sshConnection()
+		if err != nil {
+			c.closeOwnedJumps()
+			return hopError("jump", hop, err)
+		}
+	}
+	return c.connectThrough(parent)
+}
+
+func (c *SSHClient) closeOwnedJumps() {
+	c.mu.Lock()
+	owned := c.ownedJumps
+	c.ownedJumps = nil
+	c.mu.Unlock()
+	for i := len(owned) - 1; i >= 0; i-- {
+		_ = owned[i].Close() //nolint:errcheck // best-effort hop teardown
+	}
+}
+
+func (c *SSHClient) connectThrough(parent *ssh.Client) (err error) {
 	ctx := c.transportContext()
 	if contextErr := ctx.Err(); contextErr != nil {
 		return boundaryError("connect", "connect", contextErr)
@@ -96,9 +149,13 @@ func (c *SSHClient) ConnectDirect() (err error) {
 	if err != nil {
 		return boundaryError("host_key", "configure host key verification", err)
 	}
-	localAddr, err := ResolveBind(c.config.Bind, c.config.Host)
-	if err != nil {
-		return boundaryError("config", "resolve bind", err)
+	var localAddr net.Addr
+	if parent == nil {
+		resolved, bindErr := ResolveBind(c.config.Bind, c.config.Host)
+		if bindErr != nil {
+			return boundaryError("config", "resolve bind", bindErr)
+		}
+		localAddr = resolved
 	}
 	addr := net.JoinHostPort(c.config.Host, c.config.Port)
 	callback := func(host string, remote net.Addr, key ssh.PublicKey) error {
@@ -120,7 +177,13 @@ func (c *SSHClient) ConnectDirect() (err error) {
 			return nil, contextErr
 		}
 		deadline, _ := ctx.Deadline()
-		conn, dialErr := dialTCP(ctx, addr, localAddr, time.Until(deadline))
+		var conn net.Conn
+		var dialErr error
+		if parent == nil {
+			conn, dialErr = dialTCP(ctx, addr, localAddr, time.Until(deadline))
+		} else {
+			conn, dialErr = dialJump(ctx, parent, addr)
+		}
 		if dialErr != nil {
 			return nil, boundaryError("connect", "dial "+addr, dialErr)
 		}
@@ -135,9 +198,11 @@ func (c *SSHClient) ConnectDirect() (err error) {
 		}
 		c.conn = conn
 		c.mu.Unlock()
-		if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
-			_ = conn.Close() //nolint:errcheck // failed setup
-			return nil, deadlineErr
+		if parent == nil {
+			if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
+				_ = conn.Close() //nolint:errcheck // failed setup
+				return nil, deadlineErr
+			}
 		}
 		// The hook is joined before deadline clearing; a late callback must
 		// never close a successfully admitted transport.
@@ -166,9 +231,11 @@ func (c *SSHClient) ConnectDirect() (err error) {
 			_ = conn.Close() //nolint:errcheck // deadline won admission race
 			return nil, cause
 		}
-		if deadlineErr := conn.SetDeadline(time.Time{}); deadlineErr != nil {
-			_ = conn.Close() //nolint:errcheck // failed setup
-			return nil, deadlineErr
+		if parent == nil {
+			if deadlineErr := conn.SetDeadline(time.Time{}); deadlineErr != nil {
+				_ = conn.Close() //nolint:errcheck // failed setup
+				return nil, deadlineErr
+			}
 		}
 		return ssh.NewClient(sshConn, chans, reqs), nil
 	}

@@ -9,6 +9,17 @@ import (
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
+func TestParseArgs_ViaFlag(t *testing.T) {
+	config := ParseArgs([]string{"sshx", "-h=app", "--via=edge", "uptime"})
+	if config.Via != "edge" || !config.ViaSet {
+		t.Fatalf("via flag: %#v", config)
+	}
+	cleared := ParseArgs([]string{"sshx", "-h=app", "--via=", "uptime"})
+	if cleared.Via != "" || !cleared.ViaSet {
+		t.Fatalf("empty via must still set ViaSet: %#v", cleared)
+	}
+}
+
 func TestParseArgs_BasicSSH(t *testing.T) {
 	args := []string{"sshx", "-h=192.168.1.100", "uptime"}
 	config := ParseArgs(args)

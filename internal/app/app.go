@@ -192,6 +192,9 @@ func RunContext(ctx context.Context, args []string) (err error) {
 		if secretErr := resolveSSHCredential(config); secretErr != nil {
 			return reportPlanFailure(config, audit, secretErr)
 		}
+		if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
+			return reportPlanFailure(config, audit, hopSecretErr)
+		}
 	}
 
 	// Guarded SQL execution pipeline (owns its own SSH connection).
@@ -295,6 +298,12 @@ func RunContext(ctx context.Context, args []string) (err error) {
 			logger.GetLogger().Info("Note: Could not find host '%s' in settings, using as hostname directly", config.Host)
 		}
 	}
+	if hopErr := ensureJumpChain(config); hopErr != nil {
+		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", hopErr)
+	}
+	if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
+		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "auth", hopSecretErr)
+	}
 
 	// Auto-fill sudo password if needed
 	if sshclient.CommandUsesSudo(config.Command) && config.SudoKey != "" {
@@ -326,8 +335,8 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	defer errutil.HandleCloseError(&err, client)
 
 	// Connect to remote host (use direct connection for CLI mode, no need for pooling)
-	err = client.ConnectDirect()
-	recordConnectedPeer(config, client, "target")
+	err = client.Connect()
+	recordConnectedHops(config, client)
 	if err != nil {
 		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, classifyError(err),
 			fmt.Errorf("failed to connect: %w", err))
@@ -529,6 +538,10 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 	logger.GetLogger().Success("Found host '%s' in settings", config.Host)
 
 	// Update config with host settings
+	if config.HostAlias == "" {
+		config.HostAlias = config.Host
+	}
+	applyInventoryVia(config, *hostConfig)
 	config.Host = hostConfig.Host
 	if config.Port == "" || config.Port == sshclient.DefaultSSHPort {
 		if hostConfig.Port != "" {
@@ -580,5 +593,8 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 		}
 	}
 
+	if hopErr := materializeJumpChain(config, settings); hopErr != nil {
+		return hopErr
+	}
 	return nil
 }

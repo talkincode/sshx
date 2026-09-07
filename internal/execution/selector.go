@@ -24,6 +24,8 @@ type HostRecord struct {
 	Tags            map[string]string
 	Bind            string
 	BindSet         bool
+	// Via is the named next hop toward the operator. Empty means direct TCP.
+	Via string
 }
 
 // ResolveTargets freezes a deterministic target snapshot from configured hosts.
@@ -71,6 +73,7 @@ func ResolveTargets(hosts []HostRecord, sel TargetSelector, defaults HostRecord)
 			SudoPasswordKey: defaults.SudoPasswordKey,
 			Literal:         true,
 			Bind:            resolvedBind(defaults.Bind, defaults.BindSet, ""),
+			Via:             defaults.Via,
 		}
 		snap := TargetSnapshot{
 			Targets: []ResolvedTarget{target},
@@ -171,6 +174,7 @@ func ResolveTargets(hosts []HostRecord, sel TargetSelector, defaults HostRecord)
 			Groups:          append([]string(nil), h.Groups...),
 			Tags:            copyTags(h.Tags),
 			Bind:            resolvedBind(defaults.Bind, defaults.BindSet, h.Bind),
+			Via:             h.Via,
 		})
 	}
 
@@ -231,6 +235,7 @@ func snapshotDigest(snap TargetSnapshot) string {
 		Port    string `json:"port"`
 		User    string `json:"user"`
 		Bind    string `json:"bind,omitempty"`
+		Via     string `json:"via,omitempty"`
 	}
 	type digSnap struct {
 		Targets []digTarget     `json:"targets"`
@@ -244,6 +249,7 @@ func snapshotDigest(snap TargetSnapshot) string {
 			Port:    t.Port,
 			User:    t.User,
 			Bind:    t.Bind,
+			Via:     t.Via,
 		})
 	}
 	raw, err := json.Marshal(d)

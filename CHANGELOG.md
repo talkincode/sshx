@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Session-bound jump-host (`ProxyJump`-style) access via named `via` hops.
+  Connections use nested SSH channels for the invocation lifetime, with
+  independent host-key and auth decisions per hop, hop-aware dry-run/plan
+  inputs, and audit records. Local port forwarding, SOCKS, and leftover
+  listeners are not added. OpenSSH import maps a single-token `ProxyJump`
+  only when that alias is already a named sshx host.
+
 ## [0.14.0] - 2026-09-05
 
 ### Security

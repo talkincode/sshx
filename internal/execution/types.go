@@ -175,6 +175,10 @@ type ResolvedTarget struct {
 	ExpectedKeyFingerprint string            `json:"-"`
 	Literal                bool              `json:"literal,omitempty"`
 	Bind                   string            `json:"bind,omitempty"`
+	// Via is the named next hop from inventory or --via=. Empty means direct.
+	Via string `json:"via,omitempty"`
+	// Jumps is the resolved bastion chain, outermost first. Nested Jumps are empty.
+	Jumps []ResolvedTarget `json:"jumps,omitempty"`
 }
 
 // SkippedTarget records a selector candidate that was not admitted.

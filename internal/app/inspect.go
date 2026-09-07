@@ -102,8 +102,8 @@ func HandleInspection(config *sshclient.Config, audit *auditRecorder) (err error
 		return reportInspectFailure(config, "config", fmt.Errorf("create SSH client: %w", err))
 	}
 	defer errutil.HandleCloseError(&err, client)
-	err = client.ConnectDirect()
-	recordConnectedPeer(config, client, "target")
+	err = client.Connect()
+	recordConnectedHops(config, client)
 	if err != nil {
 		return reportInspectFailure(config, classifyError(err), fmt.Errorf("connect for inspection: %w", err))
 	}

@@ -41,6 +41,8 @@ type HostConfig struct {
 	Type string            `json:"type,omitempty"` // System type (linux/windows/macos)
 	// Bind is a local source address: a literal IP or a network interface name.
 	Bind string `json:"bind,omitempty"`
+	// Via is a named sshx host used as a session-bound jump hop.
+	Via string `json:"via,omitempty"`
 }
 
 // EffectiveSudoPasswordKey returns the sudo keyring reference, preferring the
@@ -206,6 +208,9 @@ func ValidateHostConfig(host *HostConfig) error {
 	if host.Host == "" {
 		return fmt.Errorf("host address is required")
 	}
+	if host.Via == host.Name && host.Via != "" {
+		return fmt.Errorf("via cannot refer to the same host")
+	}
 	return nil
 }
 
@@ -222,6 +227,10 @@ func AddHost(settings *Settings, host HostConfig) error {
 	}
 	if host.User == "" {
 		host.User = sshclient.DefaultSSHUser
+	}
+
+	if err := validateHostVia(settings, host); err != nil {
+		return err
 	}
 
 	// Check for duplicate host names and host+port combinations
@@ -248,6 +257,9 @@ func AddHost(settings *Settings, host HostConfig) error {
 
 // RemoveHost removes a host from settings by name
 func RemoveHost(settings *Settings, name string) error {
+	if deps := hostsUsingJump(settings, name); len(deps) > 0 {
+		return fmt.Errorf("host %q is a jump for %q; update or remove dependents first", name, deps[0])
+	}
 	for i, h := range settings.Hosts {
 		if h.Name == name {
 			settings.Hosts = append(settings.Hosts[:i], settings.Hosts[i+1:]...)
@@ -281,6 +293,10 @@ func UpdateHost(settings *Settings, host HostConfig) error {
 	}
 	if host.User == "" {
 		host.User = sshclient.DefaultSSHUser
+	}
+
+	if err := validateHostVia(settings, host); err != nil {
+		return err
 	}
 
 	// Check for duplicate host+port combination (excluding the host being updated)
