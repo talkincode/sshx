@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-07
+
+This is the first tag after v0.13.0. It also ships the previously untagged
+0.14.0 execution-contract work (plan binding, evidence, timeouts, and audit
+diagnostics).
+
 ### Added
 
 - Session-bound jump-host (`ProxyJump`-style) access via named `via` hops.
@@ -652,7 +658,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/talkincode/sshx/compare/v0.13.0...v0.15.0
 [0.13.0]: https://github.com/talkincode/sshx/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/talkincode/sshx/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/talkincode/sshx/compare/v0.11.0...v0.12.0
