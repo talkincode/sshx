@@ -8,7 +8,8 @@ description: Operate remote servers with the `sshx` CLI — inspect hosts with b
 `sshx` is a single-binary, cross-platform SSH/SFTP client with a built-in
 OS-keyring (or explicit local-vault) password manager and named-host config.
 Every invocation opens one connection, does its work, and exits — there is no
-daemon, tunneling, or port forwarding.
+daemon, local port forwarding, or SOCKS proxy. Named `via` jump hosts are
+session-bound nested SSH (ProxyJump-style) and die with the process.
 `sshx login` is a human-only TTY session; agents must not use it.
 
 > One command, multiple servers, zero password hassle.

@@ -78,9 +78,11 @@ the project's mission:
   validate-and-reload a service in the same invocation.
 - ❌ **GUI / TUI** — interaction is through flags and stdout/stderr only.
 - ❌ **Full OpenSSH replacement** — no interactive login shell multiplexing,
-  port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent forwarding.
-  A single human `sshx login` session is in scope; it is not a multiplexer,
-  jump host, or Agent-driven interactive shell.
+  local port forwarding / tunneling, SOCKS proxy, X11 forwarding, or agent
+  forwarding. Session-bound `via` jump hops (nested SSH for one invocation)
+  are in scope; they must not open a local listener or outlive the process.
+  A single human `sshx login` session is in scope; it is not a multiplexer
+  or Agent-driven interactive shell.
 - ❌ **Plaintext secret storage** — secrets live in the OS keyring by default,
   or in an explicit encrypted local vault (`SSHX_SECRET_BACKEND=local-vault`).
   The vault never displays values; sshx injects them over stdin. Inline
@@ -467,7 +469,8 @@ Items must respect the boundaries in §3.
 - ⬜ SFTP enhancements: recursive upload/download and glob support.
 - ⬜ Parallel fan-out: run one command across many named hosts with an aggregated
    report (an extension of `--host-test-all`). *In scope — no daemon required.*
-- ⬜ Bastion/jump-host (`ProxyJump`-style) support for reaching private hosts.
+- ✅ Bastion/jump-host (`ProxyJump`-style) support for reaching private hosts.
+  Session-bound nested SSH only; no local tunnels, SOCKS, or leftover listeners.
 
 **Long-term / under consideration**
 

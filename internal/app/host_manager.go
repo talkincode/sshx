@@ -83,6 +83,7 @@ func handleHostAdd(config *sshclient.Config) error {
 			Tags:           cloneTags(config.RunTags),
 			Type:           config.HostType,
 			Bind:           config.Bind,
+			Via:            config.Via,
 		}
 		if config.SudoKeySet {
 			host.SudoPasswordKey = config.SudoKey
@@ -156,6 +157,11 @@ func handleHostAdd(config *sshclient.Config) error {
 		fmt.Print("Source bind (IP or interface, optional): ")
 		if bind, err := reader.ReadString('\n'); err == nil {
 			host.Bind = strings.TrimSpace(bind)
+		}
+
+		fmt.Print("Jump host name (optional): ")
+		if via, err := reader.ReadString('\n'); err == nil {
+			host.Via = strings.TrimSpace(via)
 		}
 
 		// Type (optional, default: linux)
@@ -443,6 +449,12 @@ func handleHostUpdate(config *sshclient.Config) error {
 		host.Bind = existingHost.Bind
 	}
 
+	if config.ViaSet {
+		host.Via = config.Via
+	} else {
+		host.Via = existingHost.Via
+	}
+
 	// Update host
 	if err := UpdateHost(settings, host); err != nil {
 		return fmt.Errorf("failed to update host: %w", err)
@@ -515,6 +527,9 @@ func handleHostList(config *sshclient.Config) error {
 		if len(host.Tags) > 0 {
 			fmt.Printf("    Tags:        %s\n", formatTags(host.Tags))
 		}
+		if host.Via != "" {
+			fmt.Printf("    Via:         %s\n", host.Via)
+		}
 		if host.Type != "" {
 			fmt.Printf("    Type:        %s\n", host.Type)
 		}
@@ -546,6 +561,7 @@ type hostListJSONEntry struct {
 	Tags            map[string]string `json:"tags,omitempty"`
 	Type            string            `json:"type,omitempty"`
 	Bind            string            `json:"bind,omitempty"`
+	Via             string            `json:"via,omitempty"`
 }
 
 func hostJSONEntry(host HostConfig) *hostListJSONEntry {
@@ -562,6 +578,7 @@ func hostJSONEntry(host HostConfig) *hostListJSONEntry {
 		Tags:            host.Tags,
 		Type:            host.Type,
 		Bind:            host.Bind,
+		Via:             host.Via,
 	}
 	return &entry
 }
@@ -872,6 +889,14 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 	}
 
 	sshConfig := buildHostTestConfig(hostConfig, settings, baseConfig)
+	if hopErr := materializeJumpChain(sshConfig, settings); hopErr != nil {
+		result.ConnectionError = hopErr
+		return result
+	}
+	if hopSecretErr := resolveJumpSecrets(sshConfig); hopSecretErr != nil {
+		result.ConnectionError = hopSecretErr
+		return result
+	}
 	client, err := sshclient.NewSSHClient(sshConfig)
 	if err != nil {
 		result.ConnectionError = err
@@ -883,7 +908,7 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 		}
 	}()
 
-	if err := client.ConnectDirect(); err != nil {
+	if err := client.Connect(); err != nil {
 		result.ConnectionError = err
 		return result
 	}
@@ -910,6 +935,8 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 		User:        hostConfig.User,
 		UseKeyAuth:  true,
 		DialTimeout: hostTestDialTimeout,
+		HostAlias:   hostConfig.Name,
+		Via:         hostConfig.Via,
 	}
 
 	if baseConfig != nil {

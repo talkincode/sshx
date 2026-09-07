@@ -53,17 +53,20 @@ type auditEvent struct {
 	Mode   string `json:"mode"`
 	Action string `json:"action,omitempty"`
 
-	HostInput          string `json:"host_input,omitempty"`
-	HostResolved       string `json:"host_resolved,omitempty"`
-	Port               string `json:"port,omitempty"`
-	User               string `json:"user,omitempty"`
-	HostName           string `json:"host_name,omitempty"`
-	HostType           string `json:"host_type,omitempty"`
-	HostDescSet        bool   `json:"host_description_set"`
-	HostResolvedBy     string `json:"host_resolved_by,omitempty"`
-	Bind               string `json:"bind,omitempty"`
-	PeerAddress        string `json:"peer_address,omitempty"`
-	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
+	HostInput          string     `json:"host_input,omitempty"`
+	HostResolved       string     `json:"host_resolved,omitempty"`
+	Port               string     `json:"port,omitempty"`
+	User               string     `json:"user,omitempty"`
+	HostName           string     `json:"host_name,omitempty"`
+	HostType           string     `json:"host_type,omitempty"`
+	HostDescSet        bool       `json:"host_description_set"`
+	HostResolvedBy     string     `json:"host_resolved_by,omitempty"`
+	Bind               string     `json:"bind,omitempty"`
+	PeerAddress        string     `json:"peer_address,omitempty"`
+	HostKeyFingerprint string     `json:"host_key_fingerprint,omitempty"`
+	Via                string     `json:"via,omitempty"`
+	Hops               []auditHop `json:"hops,omitempty"`
+	HopsClosed         *bool      `json:"hops_closed,omitempty"`
 
 	Command    string `json:"command,omitempty"`
 	SftpAction string `json:"sftp_action,omitempty"`
@@ -426,6 +429,13 @@ func (r *auditRecorder) finish(config *sshclient.Config, err error) error {
 		}
 		r.completed = true
 	}
+	if len(r.event.Hops) > 0 && r.event.HopsClosed == nil {
+		closed := true
+		r.event.HopsClosed = &closed
+		for i := range r.event.Hops {
+			r.event.Hops[i].Closed = true
+		}
+	}
 	r.persistenceErr = writeAuditEvent(config, r.event, r.started)
 	r.persisted = r.persistenceErr == nil
 	return r.persistenceErr
@@ -441,6 +451,9 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	r.event.Port = config.Port
 	r.event.User = config.User
 	r.event.Bind = config.Bind
+	if r.event.Via == "" && config.Via != "" {
+		r.event.Via = config.Via
+	}
 	r.event.HostName = config.HostName
 	r.event.HostType = config.HostType
 	r.event.HostDescSet = config.HostDescription != ""
@@ -542,6 +555,54 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 	if r.event.DurationMs == 0 {
 		r.event.DurationMs = time.Since(r.started).Milliseconds()
 	}
+}
+
+type auditHop struct {
+	Role               string `json:"role"`
+	Alias              string `json:"alias,omitempty"`
+	Address            string `json:"address,omitempty"`
+	Port               string `json:"port,omitempty"`
+	User               string `json:"user,omitempty"`
+	PeerAddress        string `json:"peer_address,omitempty"`
+	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
+	AuthMethod         string `json:"auth_method,omitempty"`
+	Closed             bool   `json:"closed"`
+}
+
+func (r *auditRecorder) recordHops(client *sshclient.SSHClient) {
+	if r == nil || client == nil {
+		return
+	}
+	hops := client.Hops()
+	if len(hops) == 0 {
+		return
+	}
+	r.event.Hops = make([]auditHop, 0, len(hops))
+	closed := true
+	aliases := make([]string, 0, len(hops))
+	for _, hop := range hops {
+		r.event.Hops = append(r.event.Hops, auditHop{
+			Role:               hop.Role,
+			Alias:              hop.Alias,
+			Address:            hop.Address,
+			Port:               hop.Port,
+			User:               hop.User,
+			PeerAddress:        hop.PeerAddress,
+			HostKeyFingerprint: hop.HostKeyFingerprint,
+			AuthMethod:         hop.AuthMethod,
+			Closed:             hop.Closed,
+		})
+		if hop.Role == "jump" {
+			aliases = append(aliases, hop.Alias)
+		}
+		if !hop.Closed {
+			closed = false
+		}
+	}
+	if len(aliases) > 0 {
+		r.event.Via = strings.Join(aliases, ",")
+	}
+	r.event.HopsClosed = &closed
 }
 
 func (r *auditRecorder) recordPeer(client *sshclient.SSHClient) {

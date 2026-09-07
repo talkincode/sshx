@@ -121,6 +121,31 @@ func TestBuildImportPlan_DuplicateAddressWithinConfig(t *testing.T) {
 	assert.Contains(t, skippedReasons["db2"], "duplicates ssh_config entry 'db1'")
 }
 
+func TestBuildImportPlan_MapsNamedProxyJump(t *testing.T) {
+	entries, _, err := parseSSHConfig(strings.NewReader(`
+Host edge
+    HostName 10.0.0.1
+Host app
+    HostName 10.0.0.2
+    ProxyJump edge
+Host other
+    HostName 10.0.0.3
+    ProxyJump user@elsewhere
+`))
+	require.NoError(t, err)
+	plan := buildImportPlan(entries, &Settings{})
+	byName := map[string]HostConfig{}
+	ignored := map[string][]string{}
+	for _, candidate := range plan.Candidates {
+		byName[candidate.Host.Name] = candidate.Host
+		ignored[candidate.Host.Name] = candidate.Entry.IgnoredOptions
+	}
+	assert.Equal(t, "edge", byName["app"].Via)
+	assert.NotContains(t, ignored["app"], "proxyjump")
+	assert.Empty(t, byName["other"].Via)
+	assert.Contains(t, ignored["other"], "proxyjump")
+}
+
 func TestBuildImportPlan_Defaults(t *testing.T) {
 	entries, _, err := parseSSHConfig(strings.NewReader("Host solo\n    IdentityFile ~/.ssh/%r_key\n"))
 	require.NoError(t, err)

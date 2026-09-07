@@ -31,7 +31,7 @@ type Dialer interface {
 	Connect(cfg *sshclient.Config) (*sshclient.SSHClient, error)
 }
 
-// DefaultDialer uses sshclient.NewSSHClient + ConnectDirect.
+// DefaultDialer uses sshclient.NewSSHClient + Connect.
 type DefaultDialer struct{}
 
 // Connect implements Dialer.
@@ -40,7 +40,7 @@ func (DefaultDialer) Connect(cfg *sshclient.Config) (*sshclient.SSHClient, error
 	if err != nil {
 		return nil, err
 	}
-	if err := client.ConnectDirect(); err != nil {
+	if err := client.Connect(); err != nil {
 		_ = client.ForceClose() //nolint:errcheck // best-effort cleanup
 		return nil, err
 	}
@@ -207,7 +207,9 @@ func Execute(ctx context.Context, opts RunOptions) (RunOutcome, error) {
 		defer cancel()
 	}
 	if opts.Dialer == nil {
-		opts.Dialer = DefaultDialer{}
+		cache := sshclient.NewJumpCache()
+		defer func() { _ = cache.Close() }() //nolint:errcheck // invocation-scoped bastion teardown
+		opts.Dialer = sshclient.CacheDialer{Cache: cache, Context: ctx}
 	}
 	if opts.Events == nil {
 		if req.JSONLOutput {
@@ -631,15 +633,32 @@ func executeOneWithMetadata(ctx context.Context, opts RunOptions, target Resolve
 	}
 	defer func() { _ = client.Close() }() //nolint:errcheck // teardown does not invalidate observed remote outcomes
 
-	observeTargetPeer(&res, PeerIdentity{
-		Role:               "target",
-		Address:            client.PeerAddress(),
-		HostKeyFingerprint: client.HostKeyFingerprint(),
-		AuthMethod:         string(client.AuthMethodUsed()),
-		User:               cfg.User,
-		SSHPasswordKey:     firstNonEmpty(req.Policy.SSHPasswordKey, target.SSHPasswordKey),
-		SudoPasswordKey:    cfg.SudoKey,
-	})
+	hops := client.Hops()
+	if len(hops) == 0 {
+		hops = []sshclient.HopIdentity{{Role: "target"}}
+	}
+	for _, hop := range hops {
+		role := hop.Role
+		if role == "" {
+			role = "target"
+		}
+		peer := PeerIdentity{
+			Role:               role,
+			Address:            hop.PeerAddress,
+			HostKeyFingerprint: hop.HostKeyFingerprint,
+			AuthMethod:         hop.AuthMethod,
+			User:               hop.User,
+		}
+		if role == "target" {
+			peer.Address = client.PeerAddress()
+			peer.HostKeyFingerprint = client.HostKeyFingerprint()
+			peer.AuthMethod = string(client.AuthMethodUsed())
+			peer.User = cfg.User
+			peer.SSHPasswordKey = firstNonEmpty(req.Policy.SSHPasswordKey, target.SSHPasswordKey)
+			peer.SudoPasswordKey = cfg.SudoKey
+		}
+		observeTargetPeer(&res, peer)
+	}
 	if err := ctx.Err(); err != nil {
 		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
 		return res
@@ -748,6 +767,32 @@ func buildSSHConfig(req *Request, target ResolvedTarget) *sshclient.Config {
 	if cfg.User == "" {
 		cfg.User = "master"
 	}
+	if len(target.Jumps) > 0 {
+		cfg.Via = target.Via
+		cfg.HostAlias = target.Alias
+		for i, hop := range target.Jumps {
+			hopCfg := &sshclient.Config{
+				HostAlias:            hop.Alias,
+				Host:                 hop.Address,
+				Port:                 hop.Port,
+				User:                 hop.User,
+				KeyPath:              hop.KeyPath,
+				UseKeyAuth:           req.Policy.UseKeyAuth,
+				SSHPasswordKey:       hop.SSHPasswordKey,
+				AcceptUnknownHost:    req.Policy.AcceptUnknownHost,
+				AllowInsecureHostKey: req.Policy.AllowInsecureHostKey,
+				KnownHostsPath:       req.Policy.KnownHostsPath,
+				KnownHostsData:       hop.KnownHostsData,
+			}
+			if !req.Policy.UseKeyAuth {
+				hopCfg.KeyPath = ""
+			}
+			if i == 0 {
+				hopCfg.Bind = target.Bind
+			}
+			cfg.JumpChain = append(cfg.JumpChain, hopCfg)
+		}
+	}
 	return cfg
 }
 
@@ -762,6 +807,29 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 	// SSH login password: only explicit password, SSH_PASSWORD, or ssh_password_key.
 	if req.Policy.SSHPassword != "" {
 		cfg.Password = req.Policy.SSHPassword
+	}
+	for _, hop := range cfg.JumpChain {
+		if hop == nil || hop.Password != "" {
+			continue
+		}
+		hopKey := hop.SSHPasswordKey
+		if hopKey == "" {
+			if cfg.Password != "" {
+				hop.Password = cfg.Password
+			}
+			continue
+		}
+		if secrets == nil {
+			return fmt.Errorf("%w: jump ssh password key %q requested without secret resolver", ErrConfig, hopKey)
+		}
+		pw, err := secrets.GetSSHPassword(hopKey)
+		if cause := ctx.Err(); cause != nil {
+			return cause
+		}
+		if err != nil {
+			return &sshclient.HopError{Role: "jump", Alias: hop.HostAlias, Err: err}
+		}
+		hop.Password = pw
 	}
 	sshKey := firstNonEmpty(req.Policy.SSHPasswordKey, target.SSHPasswordKey)
 	if sshKey != "" {

@@ -36,6 +36,8 @@ type dryRunPlan struct {
 	HostResolution dryRunStatus `json:"host_resolution,omitempty"`
 	Port           string       `json:"port,omitempty"`
 	User           string       `json:"user,omitempty"`
+	Via            string       `json:"via,omitempty"`
+	Hops           []dryRunHop  `json:"hops,omitempty"`
 	Bind           string       `json:"bind,omitempty"`
 	BindResolved   string       `json:"bind_resolved,omitempty"`
 
@@ -95,6 +97,14 @@ type dryRunPlan struct {
 	Apply *applyDryRunPlan `json:"apply,omitempty"`
 
 	hostTestReadsSecret bool
+}
+
+type dryRunHop struct {
+	Role    string `json:"role"`
+	Alias   string `json:"alias,omitempty"`
+	Address string `json:"address"`
+	Port    string `json:"port,omitempty"`
+	User    string `json:"user,omitempty"`
 }
 
 type applyDryRunPlan struct {
@@ -171,6 +181,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	applyDryRunDefaults(config, &plan)
 	fillDryRunAction(config, &plan)
 	fillDryRunHost(config, &plan)
+	fillDryRunHops(config, &plan)
 	fillDryRunBind(config, &plan)
 	fillDryRunKeyDefault(config, &plan)
 	fillDryRunSudo(config, &plan)
@@ -292,6 +303,10 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	}
 
 	originalHost := config.Host
+	if config.HostAlias == "" {
+		config.HostAlias = originalHost
+	}
+	applyInventoryVia(config, *hostConfig)
 	config.Host = hostConfig.Host
 	if config.Port == "" || config.Port == sshclient.DefaultSSHPort {
 		if hostConfig.Port != "" {
@@ -327,6 +342,35 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	plan.User = config.User
 	plan.KeyPath = config.KeyPath
 	plan.HostResolution = dryRunStatus{Status: "resolved", Message: fmt.Sprintf("matched host %q in settings", originalHost)}
+}
+
+func fillDryRunHops(config *sshclient.Config, plan *dryRunPlan) {
+	if !modeUsesSSHConnection(config) {
+		return
+	}
+	if !plan.Valid {
+		return
+	}
+	if err := ensureJumpChain(config); err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+	if len(config.JumpChain) == 0 {
+		return
+	}
+	aliases := make([]string, 0, len(config.JumpChain))
+	for _, hop := range config.JumpChain {
+		plan.Hops = append(plan.Hops, dryRunHop{
+			Role:    "jump",
+			Alias:   hopAlias(hop),
+			Address: hop.Host,
+			Port:    hop.Port,
+			User:    hop.User,
+		})
+		aliases = append(aliases, hopAlias(hop))
+	}
+	plan.Via = strings.Join(aliases, ",")
 }
 
 func fillDryRunBind(config *sshclient.Config, plan *dryRunPlan) {
@@ -647,6 +691,14 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		plan.WouldReadSecret = canProceed && ((config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != "")
 		plan.WouldMutateRemote = canProceed
 	}
+	if plan.WouldConnect {
+		for _, hop := range config.JumpChain {
+			if hop != nil && hop.SSHPasswordKey != "" {
+				plan.WouldReadSecret = true
+				break
+			}
+		}
+	}
 	plan.MayMutateKnownHosts = plan.WouldConnect && config.AcceptUnknownHost
 }
 
@@ -845,6 +897,12 @@ func printDryRunPlan(plan dryRunPlan) {
 	}
 	if plan.Mode != "transfer" && (plan.User != "" || plan.Port != "") {
 		fmt.Printf("Target: %s@%s:%s\n", firstNonEmpty(plan.User, "-"), firstNonEmpty(plan.HostResolved, "-"), firstNonEmpty(plan.Port, "-"))
+	}
+	if plan.Via != "" {
+		fmt.Printf("Via: %s\n", plan.Via)
+	}
+	for _, hop := range plan.Hops {
+		fmt.Printf("Jump: %s %s@%s:%s\n", firstNonEmpty(hop.Alias, hop.Address), firstNonEmpty(hop.User, "-"), firstNonEmpty(hop.Address, "-"), firstNonEmpty(hop.Port, "-"))
 	}
 	if plan.Bind != "" {
 		fmt.Printf("Bind: %s", plan.Bind)

@@ -68,14 +68,14 @@ sshx --host-import --ssh-config=~/work/ssh_config
 sshx --host-import=web1 --dry-run --json
 ```
 
-每个条目导入的字段：`HostName`（缺省时使用别名本身）、`Port`、`User`、`IdentityFile`（作为该主机的 `key`）、以及 `BindAddress` / `BindInterface`（作为 `bind`；先出现的值生效）。
+每个条目导入的字段：`HostName`（缺省时使用别名本身）、`Port`、`User`、`IdentityFile`（作为该主机的 `key`）、`BindAddress` / `BindInterface`（作为 `bind`；先出现的值生效），以及当 `ProxyJump` 是已有 sshx 主机名时映射为 `via`。
 
 防污染规则——导入器始终跳过：
 
 - 通配或否定模式（`Host *`、`web-?`、`!pattern`）——它们是规则，不是主机；
 - 与 settings 中已有主机同名的条目；
 - `host:port` 已存在于 settings（或与同文件中更早条目重复）的条目；
-- sshx 不支持的选项（`ProxyJump`、`ForwardAgent` 等）——以 `ignored:` 显示，不会静默丢失；
+- sshx 不支持的选项（`ForwardAgent`、无法映射的 `ProxyJump` 等）——以 `ignored:` 显示，不会静默丢失；
 - 其他块的选项：`Host *` 的默认值绝不会合并进导入条目；
 - 含 `%` 令牌的 `IdentityFile`（在提示中说明）。
 
@@ -105,6 +105,19 @@ sshx --host-import=web1 --dry-run --json
 ```
 
 顶层 `key` 是默认 SSH 私钥。单个 host 的 `key` 只覆盖这一台主机。
+
+## 跳板主机
+
+本机到 `app` 不可达、但命名主机 `edge` 可达时，在目标上配置 `via`。sshx 只为这一次调用先连 `edge`，再通过 SSH `direct-tcpip` 通道连 `app`。不会在本机监听端口，进程退出后没有可拆的隧道。
+
+```bash
+sshx --host-add --host-name=edge -h=100.64.0.10 -u=jump
+sshx --host-add --host-name=app -h=10.0.0.5 -u=app --via=edge
+sshx -h=app --json "uptime"
+sshx -h=app --via=          # 本次强制直连
+```
+
+每一跳独立校验 host key，使用自己的 key 或 `ssh_password_key`。密钥留在本机。命令行 `--via=name` 覆盖清单。仍被其他主机当作 `via` 的主机不能删除。
 
 ## 日常主机命令
 

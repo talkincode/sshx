@@ -37,6 +37,21 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 		return reportRunRequestFailure(config, audit, loadErr)
 	}
 	snap, resolveErr := execution.ResolveTargets(hosts, req.Targets, defaults)
+	if resolveErr == nil {
+		var viaOverride *string
+		if config.ViaSet {
+			via := config.Via
+			viaOverride = &via
+		}
+		for i := range snap.Targets {
+			resolved, hopErr := execution.ResolveJumps(hosts, snap.Targets[i], viaOverride)
+			if hopErr != nil {
+				resolveErr = hopErr
+				break
+			}
+			snap.Targets[i] = resolved
+		}
+	}
 	if resolveErr != nil {
 		if config.DryRun && config.ExpectPlan == "" {
 			preview := execution.BuildDryRunPlan(req, hosts, defaults, payload)
@@ -260,6 +275,10 @@ func loadHostRecords(config *sshclient.Config) ([]execution.HostRecord, executio
 		SudoPasswordKey: config.SudoKey,
 		Bind:            config.Bind,
 		BindSet:         config.BindSet,
+		Via:             config.Via,
+	}
+	if config.ViaSet {
+		defaults.Via = config.Via
 	}
 	return hosts, defaults, nil
 }
@@ -276,6 +295,7 @@ func hostToRecord(h HostConfig) execution.HostRecord {
 		Groups:          append([]string(nil), h.Groups...),
 		Tags:            cloneTags(h.Tags),
 		Bind:            h.Bind,
+		Via:             h.Via,
 	}
 }
 

@@ -68,6 +68,7 @@ type serverOptions struct {
 	execHandler      func(ssh.Channel, string, string)
 	operatorPassword string
 	readerPassword   string
+	directTCPIP      map[string]string
 }
 
 type testSSHServer struct {
@@ -82,6 +83,8 @@ type testSSHServer struct {
 	stateMu       sync.Mutex
 	state         string
 	execHandler   func(ssh.Channel, string, string)
+	directTCPIP   map[string]string
+	directHits    atomic.Int64
 }
 
 // The CLI is built in a subprocess, so its sources are not Go test-cache
@@ -192,7 +195,7 @@ func startSSHServer(t *testing.T, options serverOptions) *testSSHServer {
 	server := &testSSHServer{
 		host: host, port: port, listener: listener,
 		root: options.root, sftpReadOnly: options.sftpReadOnly, reportedUID: options.reportedUID,
-		execHandler: options.execHandler,
+		execHandler: options.execHandler, directTCPIP: options.directTCPIP,
 	}
 	t.Cleanup(func() { _ = listener.Close() }) //nolint:errcheck // best-effort E2E teardown
 
@@ -243,6 +246,11 @@ func handleSSHConnection(conn net.Conn, config *ssh.ServerConfig, server *testSS
 	go ssh.DiscardRequests(requests)
 
 	for newChannel := range channels {
+		if newChannel.ChannelType() == "direct-tcpip" && server.directTCPIP != nil {
+			server.directHits.Add(1)
+			go handleDirectTCPIP(newChannel, server.directTCPIP)
+			continue
+		}
 		if newChannel.ChannelType() != "session" {
 			_ = newChannel.Reject(ssh.UnknownChannelType, "session channels only") //nolint:errcheck // test protocol response
 			continue
@@ -257,6 +265,42 @@ func handleSSHConnection(conn net.Conn, config *ssh.ServerConfig, server *testSS
 		}
 		go handleSSHSession(channel, channelRequests, server, role)
 	}
+}
+
+type channelOpenDirectMsg struct {
+	Raddr string
+	Rport uint32
+	Laddr string
+	Lport uint32
+}
+
+func handleDirectTCPIP(newChannel ssh.NewChannel, rewrite map[string]string) {
+	var msg channelOpenDirectMsg
+	if err := ssh.Unmarshal(newChannel.ExtraData(), &msg); err != nil {
+		_ = newChannel.Reject(ssh.ConnectionFailed, "bad extra data") //nolint:errcheck // fixture protocol
+		return
+	}
+	dest := net.JoinHostPort(msg.Raddr, fmt.Sprintf("%d", msg.Rport))
+	if mapped, ok := rewrite[dest]; ok {
+		dest = mapped
+	}
+	backend, err := net.Dial("tcp", dest)
+	if err != nil {
+		_ = newChannel.Reject(ssh.ConnectionFailed, err.Error()) //nolint:errcheck // fixture protocol
+		return
+	}
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		_ = backend.Close() //nolint:errcheck // failed accept
+		return
+	}
+	go ssh.DiscardRequests(requests)
+	go func() {
+		_, _ = io.Copy(backend, channel) //nolint:errcheck // fixture relay
+		_ = backend.Close()              //nolint:errcheck // fixture relay
+	}()
+	_, _ = io.Copy(channel, backend) //nolint:errcheck // fixture relay
+	_ = channel.Close()              //nolint:errcheck // fixture relay
 }
 
 func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server *testSSHServer, role string) {

@@ -116,8 +116,14 @@ func connectTransferEndpoint(base *sshclient.Config, host, role string) (*sshcli
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SSH client for %s host %s: %w", role, host, err)
 	}
-	err = client.ConnectDirect()
-	recordConnectedPeer(endpoint, client, role)
+	if hopErr := ensureJumpChain(endpoint); hopErr != nil {
+		return nil, hopErr
+	}
+	if hopSecretErr := resolveJumpSecrets(endpoint); hopSecretErr != nil {
+		return nil, hopSecretErr
+	}
+	err = client.Connect()
+	recordConnectedHopsAs(endpoint, client, role)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s host %s: %w", role, host, err)
 	}

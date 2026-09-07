@@ -54,6 +54,15 @@ func applyBindFlag(config *sshclient.Config, arg string) bool {
 	return true
 }
 
+func applyViaFlag(config *sshclient.Config, arg string) bool {
+	if !strings.HasPrefix(arg, "--via=") {
+		return false
+	}
+	config.Via = strings.SplitN(arg, "=", 2)[1]
+	config.ViaSet = true
+	return true
+}
+
 // applySudoKeyFlag records -pk/--password-key/--sudo-password-key, including
 // an explicit empty value that must not be confused with the runtime default.
 func applySudoKeyFlag(config *sshclient.Config, arg string) bool {
@@ -236,6 +245,7 @@ func ParseArgs(args []string) *sshclient.Config {
 				config.Timeout = -1
 			}
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case arg == "--sftp":
 			config.Mode = "sftp"
 		case strings.HasPrefix(arg, "--upload="):
@@ -545,6 +555,7 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 				config.Timeout = -1
 			}
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case strings.HasPrefix(arg, "--concurrency="):
 			raw := strings.SplitN(arg, "=", 2)[1]
 			n, err := strconv.Atoi(raw)
@@ -705,6 +716,7 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 				config.Timeout = -1
 			}
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
@@ -796,6 +808,7 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 				config.Timeout = -1
 			}
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
@@ -876,6 +889,7 @@ func parseInspectArgs(config *sshclient.Config, args []string) {
 				config.Timeout = -1
 			}
 		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
 		case strings.HasPrefix(arg, "--audit-output="):
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":

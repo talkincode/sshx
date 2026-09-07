@@ -11,19 +11,36 @@ import (
 	"github.com/talkincode/sshx/internal/sshclient"
 )
 
-func recordConnectedPeer(config *sshclient.Config, client *sshclient.SSHClient, role string) {
-	p := preparedFrom(config)
-	if p == nil {
+func recordConnectedHops(config *sshclient.Config, client *sshclient.SSHClient) {
+	recordConnectedHopsAs(config, client, "target")
+}
+
+func recordConnectedHopsAs(config *sshclient.Config, client *sshclient.SSHClient, targetRole string) {
+	if client == nil {
 		return
 	}
-	if p.audit != nil && role == "target" {
-		p.audit.recordPeer(client)
+	if targetRole == "" {
+		targetRole = "target"
 	}
-	p.meta.Peers = append(p.meta.Peers, execution.PeerIdentity{
-		Role: role, Address: client.PeerAddress(), HostKeyFingerprint: client.HostKeyFingerprint(),
-		AuthMethod: string(client.AuthMethodUsed()), User: config.User,
-		SSHPasswordKey: config.SSHPasswordKey, SudoPasswordKey: config.SudoKey,
-	})
+	for _, hop := range client.Hops() {
+		role := hop.Role
+		if role == "" || role == "target" {
+			role = targetRole
+		}
+		p := preparedFrom(config)
+		if p != nil {
+			p.meta.Peers = append(p.meta.Peers, execution.PeerIdentity{
+				Role: role, Address: hop.PeerAddress, HostKeyFingerprint: hop.HostKeyFingerprint,
+				AuthMethod: hop.AuthMethod, User: hop.User,
+			})
+		}
+		if p != nil && p.audit != nil && role == "target" {
+			p.audit.recordPeer(client)
+		}
+	}
+	if prepared := preparedFrom(config); prepared != nil && prepared.audit != nil {
+		prepared.audit.recordHops(client)
+	}
 }
 
 func resolveSSHCredential(config *sshclient.Config) error {

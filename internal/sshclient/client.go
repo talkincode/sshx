@@ -244,6 +244,13 @@ type Config struct {
 	// that must clear a named host's persisted bind.
 	Bind    string
 	BindSet bool
+	// Via is the named next hop. ViaSet distinguishes omit from --via=.
+	Via    string
+	ViaSet bool
+	// HostAlias is the named-host identity used in hop audit/plan records.
+	HostAlias string
+	// JumpChain is the bastion path, outermost first. Each hop has no nested chain.
+	JumpChain []*Config
 }
 
 // SSHClient wraps one ssh.Client with execution and SFTP helpers.
@@ -260,6 +267,8 @@ type SSHClient struct {
 	connecting         bool
 	peerAddress        string
 	hostKeyFingerprint string
+	ownedJumps         []*SSHClient
+	sharedJumps        []*SSHClient
 }
 
 // AuthMethodUsed returns the authentication method used for the current connection.
@@ -316,19 +325,68 @@ func (c *SSHClient) Close() error {
 	}
 	c.closed = true
 	cancel, conn, client := c.cancel, c.conn, c.client
+	owned, shared := c.ownedJumps, c.sharedJumps
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	// Close the socket first: SSH/SFTP channel Close can itself block on a
 	// stalled peer. Published pointers remain stable for existing callers.
+	var first error
 	if conn != nil {
-		return conn.Close()
+		first = conn.Close()
+	} else if client != nil {
+		first = client.Close()
 	}
-	if client != nil {
-		return client.Close()
+	if len(shared) == 0 {
+		for i := len(owned) - 1; i >= 0; i-- {
+			if err := owned[i].Close(); err != nil && first == nil {
+				first = err
+			}
+		}
 	}
-	return nil
+	return first
+}
+
+// Hops returns secret-free identities for bastion hops then the target.
+func (c *SSHClient) Hops() []HopIdentity {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	owned, shared := c.ownedJumps, c.sharedJumps
+	c.mu.Unlock()
+	sources := owned
+	if len(shared) > 0 {
+		sources = shared
+	}
+	out := make([]HopIdentity, 0, len(sources)+1)
+	for _, hop := range sources {
+		out = append(out, hop.identity("jump"))
+	}
+	out = append(out, c.identity("target"))
+	return out
+}
+
+func (c *SSHClient) identity(role string) HopIdentity {
+	if c == nil || c.config == nil {
+		return HopIdentity{Role: role}
+	}
+	alias := c.config.HostAlias
+	if alias == "" {
+		alias = c.config.Host
+	}
+	return HopIdentity{
+		Role:               role,
+		Alias:              alias,
+		Address:            c.config.Host,
+		Port:               c.config.Port,
+		User:               c.config.User,
+		PeerAddress:        c.PeerAddress(),
+		HostKeyFingerprint: c.HostKeyFingerprint(),
+		AuthMethod:         string(c.AuthMethodUsed()),
+		Closed:             c.closed,
+	}
 }
 
 // ForceClose forcefully closes the underlying SSH connection.

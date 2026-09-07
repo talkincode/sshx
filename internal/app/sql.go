@@ -187,9 +187,9 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	}
 	defer errutil.HandleCloseError(&err, client)
 	run.client = client
-	connErr := client.ConnectDirect()
+	connErr := client.Connect()
 	run.audit.recordPeer(run.client)
-	recordConnectedPeer(config, client, "target")
+	recordConnectedHops(config, client)
 	if connErr != nil {
 		return run.fail(classifyError(connErr), fmt.Errorf("failed to connect: %w", connErr))
 	}
