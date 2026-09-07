@@ -369,12 +369,21 @@ func (c *SSHClient) Hops() []HopIdentity {
 }
 
 func (c *SSHClient) identity(role string) HopIdentity {
-	if c == nil || c.config == nil {
+	if c == nil {
 		return HopIdentity{Role: role}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.config == nil {
+		return HopIdentity{Role: role, Closed: c.closed}
 	}
 	alias := c.config.HostAlias
 	if alias == "" {
 		alias = c.config.Host
+	}
+	auth := c.authMethodUsed
+	if auth == "" {
+		auth = AuthMethodUnknown
 	}
 	return HopIdentity{
 		Role:               role,
@@ -382,9 +391,9 @@ func (c *SSHClient) identity(role string) HopIdentity {
 		Address:            c.config.Host,
 		Port:               c.config.Port,
 		User:               c.config.User,
-		PeerAddress:        c.PeerAddress(),
-		HostKeyFingerprint: c.HostKeyFingerprint(),
-		AuthMethod:         string(c.AuthMethodUsed()),
+		PeerAddress:        c.peerAddress,
+		HostKeyFingerprint: c.hostKeyFingerprint,
+		AuthMethod:         string(auth),
 		Closed:             c.closed,
 	}
 }
