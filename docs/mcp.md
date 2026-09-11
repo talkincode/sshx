@@ -37,6 +37,7 @@ Claude Desktop / generic MCP client entry:
 | `sshx_sql` | `sshx sql --json` | Guarded single-statement SQL via remote psql/sqlite3/mysql |
 | `sshx_apply` | `sshx apply --json` | Guarded single-file replace; accepts `from_path` or inline `content` (including an empty string) |
 | `sshx_inspect` | `sshx inspect --json` | Built-in capabilities and trusted local plugins |
+| `sshx_text` | `sshx text --json` | Bounded file/journal dissection; exception blocks, presets, line windows |
 | `sshx_sftp` | SFTP flags | upload / download / list / mkdir / remove |
 | `sshx_transfer` | `--transfer` | Server-to-server streaming through the local machine |
 | `sshx_host_list` | `--host-list --json` | Read-only `sshx.hosts.v1` inventory |

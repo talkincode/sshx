@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sshx text`: bounded remote text/log dissection over SFTP or sshx-owned
+  `journalctl`. Lexical presets extract exception blocks, `--help`/`--help --json`
+  document the Agent workflow, and MCP exposes `sshx_text`. Hits are redacted;
+  there is no `--command` pipeline.
+
 ## [0.15.0] - 2026-09-07
 
 This is the first tag after v0.13.0. It also ships the previously untagged

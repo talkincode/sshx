@@ -1,6 +1,6 @@
 ---
 name: sshx
-description: Operate remote servers with the `sshx` CLI — inspect hosts with built-in or locally created plugins, run commands over SSH, transfer files over SFTP, apply a single remote file with hash/backup/atomic replace, manage named hosts, store SSH/sudo passwords in the OS keyring or an explicit local vault, and run guarded PostgreSQL or SQLite statements through the remote psql/sqlite3 client (with classification, backups, and strict auditing). Use when the user wants structured host discovery, custom application inspection, remote command execution, safe config file changes, upload/download, service operations, host management, keyring- or vault-backed secrets, or safe production database queries and changes. Prefer `--json` for programmatic/agent use.
+description: Operate remote servers with the `sshx` CLI — inspect hosts, dissect remote logs with `sshx text`, run commands over SSH, transfer files over SFTP, apply a single remote file, manage named hosts, store SSH/sudo passwords in the OS keyring or local vault, and run guarded SQL. Use when the user wants structured host discovery, log/exception triage, remote command execution, safe config file changes, upload/download, host management, or safe production database changes. Prefer `--json`. Do not wrap grep/journalctl in `sshx run` when `sshx text` fits.
 ---
 
 # sshx
@@ -28,6 +28,7 @@ session-bound nested SSH (ProxyJump-style) and die with the process.
 - Run one guarded SQL statement against a remote PostgreSQL (plain or Dockerized),
   MySQL/MariaDB, or a remote SQLite file, with classification, backups, and a full audit trail.
 - Inspect system/network state in one call and create custom application plugins in the sshx runtime directory.
+- Dissect remote logs with `sshx text` (exception blocks, presets, line windows). Prefer this over `sshx run -- "grep|journalctl"`.
 
 ## Inspect before repeating discovery commands
 
@@ -77,7 +78,19 @@ interpret `partial` or permission errors as application absence.
 `sshx login` attaches a human TTY to a remote shell (optional `--sudo` privileged
 login). It has no Agent JSON contract, is rejected without a TTY, and is not an
 MCP tool. For programmatic work keep using `sshx run` / `sshx inspect` /
-`sshx apply` / `sshx sql` with `--json`.
+`sshx apply` / `sshx sql` / `sshx text` with `--json`.
+
+## Dissect logs before downloading them
+
+```bash
+sshx text --help --json
+sshx text -h=prod-web --path=/var/log/app.log --preset=exception --json
+sshx text -h=prod-web --path=/var/log/app.log --around-line=8821 --context=5 --json
+sshx text -h=prod-web --journal=nginx.service --since='1h' --preset=error --json
+```
+
+Do not invent `grep`/`awk`/`journalctl` pipelines under `sshx run` for triage.
+There is no `--command` on `sshx text`. Download whole files only for archives.
 
 ## Golden rule for agents: prefer `sshx run` + `--json`/`--jsonl`
 

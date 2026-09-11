@@ -19,6 +19,7 @@ renaming, or changing the meaning of a field, flag, exit code, or
 | Secrets | `sshx.secrets.v1` | `--password-check` / `--password-list` / `--password-set` JSON |
 | Audit events | `sshx.audit.v1` | One JSONL object per non-dry-run invocation |
 | Audit query | `sshx.audit.query.v1` | `sshx audit query/export --json` |
+| Text dissection | `sshx.text.v1` | `sshx text --json`; help document is `sshx.text.help.v1` |
 | Exit codes | `0`, `1..254`, `255` | Remote status vs sshx-level failure |
 | JSON sshx failure | `exit_code: -1` | Distinguishes a remote `exit 255` |
 | `error_kind` | `timeout`, `auth`, `host_key`, `connect`, `blocked`, `exit_missing`, `config`, `error`, plus SQL/apply additions | Branch on this field, not prose |

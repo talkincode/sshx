@@ -806,6 +806,33 @@ type mcpTransferInput struct {
 	Bind              string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
+type mcpTextInput struct {
+	ExpectPlan        string   `json:"expect_plan,omitempty" jsonschema:"Expected sha256 execution plan hash; mismatch is rejected before connecting."`
+	HostTimeoutSecs   int      `json:"host_timeout_seconds,omitempty" jsonschema:"Optional whole-target budget in seconds."`
+	GlobalTimeoutSecs int      `json:"global_timeout_seconds,omitempty" jsonschema:"Optional whole-operation budget in seconds; MCP also has a 30-minute watchdog."`
+	Target            string   `json:"target" jsonschema:"Configured host name or address."`
+	Path              string   `json:"path,omitempty" jsonschema:"Absolute remote file path. Exactly one of path or journal is required."`
+	Journal           string   `json:"journal,omitempty" jsonschema:"systemd unit name for sshx-owned journalctl. Exactly one of path or journal is required."`
+	Since             string   `json:"since,omitempty" jsonschema:"Journal time bound, e.g. 1h or 2026-01-01 00:00:00."`
+	Until             string   `json:"until,omitempty" jsonschema:"Journal until bound."`
+	Presets           []string `json:"presets,omitempty" jsonschema:"Lexical presets: exception, error, panic, oom, http5xx."`
+	Pattern           string   `json:"pattern,omitempty" jsonschema:"Optional RE2 regexp applied after presets."`
+	Context           int      `json:"context,omitempty" jsonschema:"Neighbor lines around line hits, 0-20."`
+	AroundLine        int      `json:"around_line,omitempty" jsonschema:"Exact slice around a previous hit line."`
+	Offset            int      `json:"offset,omitempty" jsonschema:"1-based line window start inside the scanned bytes."`
+	Limit             int      `json:"limit,omitempty" jsonschema:"Line window length."`
+	Tail              int      `json:"tail,omitempty" jsonschema:"Keep only the last N scanned lines."`
+	Scan              string   `json:"scan,omitempty" jsonschema:"File scan origin: start or end (default end)."`
+	MaxHits           int      `json:"max_hits,omitempty" jsonschema:"Returned hit cap (default 20)."`
+	MaxBytes          int      `json:"max_bytes,omitempty" jsonschema:"Returned hit text cap in bytes (default 65536)."`
+	MaxScanBytes      int      `json:"max_scan_bytes,omitempty" jsonschema:"Remote bytes scanned (default 8MiB)."`
+	Sudo              bool     `json:"sudo,omitempty" jsonschema:"Read with sudo -S when the SSH user cannot open the file or journal."`
+	NoRedact          bool     `json:"no_redact,omitempty" jsonschema:"Keep secret-shaped spans. Default redacts passwords/tokens/JWTs."`
+	DryRun            bool     `json:"dry_run,omitempty" jsonschema:"Preview the text plan without connecting."`
+	TimeoutSecs       int      `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind              string   `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
+}
+
 type mcpHostListInput struct{}
 
 // --- argument builders (unit-tested) ----------------------------------------
@@ -1045,6 +1072,78 @@ func buildInspectArgs(in mcpInspectInput) ([]string, error) {
 	return args, nil
 }
 
+func buildTextArgs(in mcpTextInput) ([]string, error) {
+	if strings.TrimSpace(in.Target) == "" {
+		return nil, fmt.Errorf("target is required")
+	}
+	hasPath := strings.TrimSpace(in.Path) != ""
+	hasJournal := strings.TrimSpace(in.Journal) != ""
+	if hasPath == hasJournal {
+		return nil, fmt.Errorf("exactly one of path or journal is required")
+	}
+	args := []string{"text", "--json", "-h=" + in.Target}
+	if hasPath {
+		args = append(args, "--path="+in.Path)
+	}
+	if hasJournal {
+		args = append(args, "--journal="+in.Journal)
+	}
+	if in.Since != "" {
+		args = append(args, "--since="+in.Since)
+	}
+	if in.Until != "" {
+		args = append(args, "--until="+in.Until)
+	}
+	if len(in.Presets) > 0 {
+		args = append(args, "--preset="+strings.Join(in.Presets, ","))
+	}
+	if in.Pattern != "" {
+		args = append(args, "--pattern="+in.Pattern)
+	}
+	if in.Context > 0 {
+		args = append(args, "--context="+strconv.Itoa(in.Context))
+	}
+	if in.AroundLine > 0 {
+		args = append(args, "--around-line="+strconv.Itoa(in.AroundLine))
+	}
+	if in.Offset > 0 {
+		args = append(args, "--offset="+strconv.Itoa(in.Offset))
+	}
+	if in.Limit > 0 {
+		args = append(args, "--limit="+strconv.Itoa(in.Limit))
+	}
+	if in.Tail > 0 {
+		args = append(args, "--tail="+strconv.Itoa(in.Tail))
+	}
+	if in.Scan != "" {
+		args = append(args, "--scan="+in.Scan)
+	}
+	if in.MaxHits > 0 {
+		args = append(args, "--max-hits="+strconv.Itoa(in.MaxHits))
+	}
+	if in.MaxBytes > 0 {
+		args = append(args, "--max-bytes="+strconv.Itoa(in.MaxBytes))
+	}
+	if in.MaxScanBytes > 0 {
+		args = append(args, "--max-scan-bytes="+strconv.Itoa(in.MaxScanBytes))
+	}
+	if in.Sudo {
+		args = append(args, "--sudo")
+	}
+	if in.NoRedact {
+		args = append(args, "--no-redact")
+	}
+	if in.DryRun {
+		args = append(args, "--dry-run")
+	}
+	var err error
+	args, err = appendMCPLimits(args, in.ExpectPlan, in.TimeoutSecs, in.HostTimeoutSecs, in.GlobalTimeoutSecs)
+	if err != nil {
+		return nil, err
+	}
+	return appendBindArg(args, in.Bind), nil
+}
+
 func buildSFTPArgs(in mcpSFTPInput) ([]string, error) {
 	if strings.TrimSpace(in.Target) == "" {
 		return nil, fmt.Errorf("target is required")
@@ -1237,6 +1336,20 @@ func registerMCPTools(server *mcp.Server) {
 			"without touching local disk, preserving permission bits.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTransferInput) (*mcp.CallToolResult, any, error) {
 		args, err := buildTransferArgs(in)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runMCPTool(ctx, args, "", timeoutSeconds(in.GlobalTimeoutSecs))
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "sshx_text",
+		Description: "Dissect a remote text file or systemd journal into bounded, redacted hits. " +
+			"Use this instead of sshx_run grep/journalctl pipelines. Workflow: call with preset=exception first, " +
+			"then around_line to slice a hit. Sources are mutually exclusive path (SFTP stream) or journal (sshx-owned journalctl). " +
+			"Returns sshx.text.v1 with hits, stats.total_hits vs returned, truncated, and line_origin.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTextInput) (*mcp.CallToolResult, any, error) {
+		args, err := buildTextArgs(in)
 		if err != nil {
 			return nil, nil, err
 		}

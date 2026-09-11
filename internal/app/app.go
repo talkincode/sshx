@@ -105,6 +105,9 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	if config.Mode == "mcp" {
 		return RunMCPServerContext(ctx)
 	}
+	if config.Mode == "text" && config.TextHelp {
+		return HandleTextHelp(config)
+	}
 
 	audit := newAuditRecorder(config)
 	defer func() {
@@ -207,6 +210,13 @@ func RunContext(ctx context.Context, args []string) (err error) {
 			config.Timeout = 60 * time.Second
 		}
 		return HandleApply(config, audit)
+	}
+
+	if config.Mode == "text" {
+		if config.Timeout == 0 {
+			config.Timeout = 30 * time.Second
+		}
+		return HandleText(config, audit)
 	}
 
 	if config.Mode == "login" {

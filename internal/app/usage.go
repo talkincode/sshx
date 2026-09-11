@@ -33,6 +33,7 @@ Usage:
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
   sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
   sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
+  sshx text -h=<host> --path=<remote> [options]   # Bounded remote text/log dissection
   sshx login <name> [--sudo]                      # Human interactive login (TTY required)
   sshx mcp                                        # Serve the execution contract over stdio (MCP)
   sshx audit query [filters] [--json]             # Read-only audit trail query
@@ -417,6 +418,43 @@ Guarded File Apply:
   sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
       --dry-run --json
 
+Text Dissection:
+  sshx text --help
+  sshx text --help --json
+  sshx text -h=<host> --path=/abs/file.log [options]
+  sshx text -h=<host> --journal=UNIT [options]
+
+  Bounded remote text/log anatomy for Agents. Do not wrap grep/journalctl
+  in sshx run for incident triage — text returns structured hits.
+
+  Workflow:
+    1. sshx text --help  (or --help --json)
+    2. --preset=exception --json  (blocks and counts first)
+    3. --around-line=<hit.start_line> --context=5 --json
+    4. --download only for incident archives
+
+  --path=/abs/file          Stream a remote regular file over SFTP (default
+                            scan=end, last 8MiB). Symlinks/dirs refused.
+  --journal=UNIT            sshx-owned journalctl for one systemd unit
+  --preset=exception,error,panic,oom,http5xx
+  --pattern=RE2             Optional linear-time regexp after presets
+  --context=N               Neighbor lines (0..20)
+  --around-line=L           Slice around a previous hit
+  --offset=L --limit=N      Line window inside the scanned bytes
+  --tail=N                  Last N lines of the scanned window
+  --scan=start|end          File origin (default end)
+  --since= --until=         Journal time bounds (no shell metacharacters)
+  --max-hits=N --max-bytes=N --max-scan-bytes=N
+  --sudo                    Read with sudo -S
+  --no-redact               Keep secret-shaped spans (default redacts)
+
+  JSON schema sshx.text.v1: hits[], stats.total_hits vs returned,
+  truncated, truncated_reason, line_origin, redacted.
+  There is no --command; that is sshx run.
+
+  sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json
+  sshx text -h=prod-web --journal=nginx.service --since=1h --preset=error --json
+
 Interactive Login:
   sshx login <name> [--sudo]
   sshx login -h=<host> [-u=<user>] [-i=<key>] [--sudo]
@@ -671,4 +709,54 @@ Note:
   - Password manager works across macOS/Linux/Windows
   - Default user: master, Default sudo key: master
   - Host configurations are stored in ~/.sshx/settings.json`)
+}
+
+// PrintTextUsage is the dedicated Agent-facing help for sshx text.
+func PrintTextUsage() {
+	fmt.Print(`sshx text — bounded remote text and log dissection
+
+Use this instead of sshx run grep/journalctl pipelines. It streams a remote
+file or a sshx-owned journalctl invocation, classifies exception blocks, and
+returns bounded redacted hits.
+
+Workflow:
+  1. sshx text --help
+     sshx text --help --json
+  2. sshx text -h=<host> --path=/var/log/app.log --preset=exception --json
+  3. sshx text -h=<host> --path=/var/log/app.log --around-line=<line> --context=5 --json
+  4. sshx --download only when you need an incident archive
+
+Sources (exactly one):
+  --path=/abs/file       SFTP stream of a regular file (default --scan=end, last 8MiB)
+  --journal=UNIT         sshx-owned journalctl --unit=UNIT --no-pager --output=short-iso
+
+Filters:
+  --preset=exception,error,panic,oom,http5xx
+  --pattern=RE2          optional linear-time regexp (Go RE2, not PCRE)
+
+Windows:
+  --context=N            0..20 neighbor lines
+  --around-line=L        slice around a previous hit
+  --offset=L --limit=N   line window inside the scanned bytes
+  --tail=N               last N scanned lines
+  --scan=start|end       file origin (default end)
+  --since= --until=      journal time bounds (no shell metacharacters)
+
+Bounds and safety:
+  --max-hits=N           default 20
+  --max-bytes=N          default 64KiB of returned hit text
+  --max-scan-bytes=N     default 8MiB
+  --sudo                 sudo -S for unread files/journals
+  --no-redact            keep password=/token=/JWT spans (redacted by default)
+  --dry-run --json       local plan, zero connection
+
+There is no --command. JSON schema is sshx.text.v1. Branch on success,
+hits[].kind, stats.total_hits vs returned, truncated, truncated_reason,
+and line_origin (file vs scanned_window).
+
+Examples:
+  sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json
+  sshx text -h=prod-web --journal=nginx.service --since=1h --preset=error --json
+  sshx text -h=prod-web --path=/var/log/app.log --around-line=8821 --context=8 --json
+`)
 }

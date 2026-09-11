@@ -23,6 +23,8 @@ func TestUnifiedRiskMatrix(t *testing.T) {
 		{"apply", "", true, RiskPrivileged, false, false},
 		{"upload", "", false, RiskMutation, false, false},
 		{"download", "", false, RiskRead, false, true},
+		{"text", "", false, RiskRead, false, false},
+		{"text", "", true, RiskPrivileged, false, false},
 		{"remove", "", false, RiskDestructive, false, false},
 		{"transfer", "", false, RiskMutation, false, false},
 	} {

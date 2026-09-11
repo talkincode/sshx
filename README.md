@@ -81,6 +81,8 @@ It remains a single binary with one-shot invocations and no resident component o
     `BindAddress` / `BindInterface`.
 14. Session-bound jump hosts (`via` / `--via=`): nested SSH to private targets
     with per-hop trust and audit, without local tunnels.
+15. `sshx text`: bounded remote log/text dissection (exception blocks, presets,
+    line windows) over SFTP or sshx-owned journalctl.
 
 ## Installation
 

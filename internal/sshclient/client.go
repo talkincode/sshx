@@ -235,6 +235,25 @@ type Config struct {
 	ApplyBackupDir    string
 	ApplyUseSudo      bool
 
+	// Text dissection fields (Mode == "text").
+	TextJournal      string
+	TextSince        string
+	TextUntil        string
+	TextPresets      []string
+	TextPattern      string
+	TextContext      int
+	TextAroundLine   int
+	TextOffset       int
+	TextLimit        int
+	TextTail         int
+	TextScan         string
+	TextMaxHits      int
+	TextMaxBytes     int
+	TextMaxScanBytes int64
+	TextUseSudo      bool
+	TextRedact       bool
+	TextHelp         bool
+
 	// Interactive login fields (Mode == "login").
 	LoginUseSudo     bool
 	LoginLiteralHost bool
