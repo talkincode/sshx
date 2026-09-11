@@ -87,6 +87,28 @@ func TestParseArgs_InspectSubcommand(t *testing.T) {
 	}
 }
 
+func TestParseArgs_TextSubcommand(t *testing.T) {
+	config := ParseArgs([]string{
+		"sshx", "text", "-h=prod", "--path=/var/log/app.log",
+		"--preset=exception,error", "--context=3", "--scan=end",
+		"--max-hits=5", "--json", "--sudo",
+	})
+	if config.Mode != "text" || config.Host != "prod" || config.RemotePath != "/var/log/app.log" {
+		t.Fatalf("unexpected text routing: %#v", config)
+	}
+	if !config.JSONOutput || !config.TextUseSudo || !config.TextRedact || config.TextContext != 3 {
+		t.Fatalf("unexpected text flags: %#v", config)
+	}
+	help := ParseArgs([]string{"sshx", "text", "--help", "--json"})
+	if !help.TextHelp || !help.JSONOutput {
+		t.Fatalf("text help not parsed: %#v", help)
+	}
+	denied := ParseArgs([]string{"sshx", "text", "-h=prod", "--command=grep foo"})
+	if denied.ArgumentError == "" {
+		t.Fatal("text --command should be rejected")
+	}
+}
+
 func TestParseArgs_SubcommandsRejectUnknownOptions(t *testing.T) {
 	pluginConfig := ParseArgs([]string{"sshx", "plugin", "list", "--typo"})
 	if pluginConfig.ArgumentError == "" {

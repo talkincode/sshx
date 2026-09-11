@@ -101,8 +101,11 @@ trust, and bounded observation reuse are also in scope. Guarded SQL execution
 (`sshx sql`) and guarded file apply (`sshx apply`) are deliberate scope
 expansions: they absorb mutation risk (classify → precondition → backup →
 atomic change → structured result) without becoming a workflow engine.
-`sshx login` is a human-only TTY escape hatch onto a named host (optional
-`--sudo` privileged login shell); it is not part of the Agent/MCP contract. The
+`sshx text` is a deliberate scope expansion: bounded remote text/log
+dissection (exception blocks, presets, line windows) without wrapping Unix
+grep/journalctl as a new verb. `sshx login` is a human-only TTY escape hatch
+onto a named host (optional `--sudo` privileged login shell); it is not part
+of the Agent/MCP contract. The
 stdio MCP server (`sshx mcp`) is a thin adapter over the same contract: tools
 map 1:1 to CLI verbs, results are the CLI's versioned JSON, every call is a
 one-shot child invocation audited with `entry=mcp`, and password management is
@@ -136,6 +139,7 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   inspect.go              → one-shot capability execution + observation caching
   sql.go                  → sshx sql: guarded SQL pipeline (classify → gate → explain → backup → execute)
   apply.go                → sshx apply: guarded single-file mutation (hash → backup → atomic write)
+  text.go                 → sshx text: bounded remote text/log dissection
   login.go                → sshx login: human TTY session, optional sudo privileged shell
   mcp.go                  → sshx mcp: stdio MCP server; tools self-exec sshx as one-shot children
 internal/execution/       → versioned request/result model, selectors, executor
@@ -144,6 +148,7 @@ internal/plugin/          → manifests, schemas, scaffolds, trust, built-ins
 internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/skillinstall/    → conflict-safe, atomic Agent skill installation
 internal/sqlsafe/         → fail-closed SQL classification, policy gates, transactional backup decisions, psql/sqlite3 assembly
+internal/textsafe/        → lexical presets, exception blocks, redaction, bounded text scan
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   remote_state.go         → restrictive atomic remote observation I/O
@@ -169,6 +174,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | `inspect`  | `sshx inspect ... <capability-id>`        | collect/reuse one host observation      |
 | `sql`      | `sshx sql ... "<statement>"`              | guarded SQL via remote psql or sqlite3  |
 | `apply`    | `sshx apply --path= --from=`              | guarded single-file remote replace      |
+| `text`     | `sshx text --path= / --journal=`          | bounded remote text/log dissection      |
 
 ### State & storage
 

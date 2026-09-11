@@ -726,6 +726,8 @@ func auditAction(config *sshclient.Config) string {
 		return "sql"
 	case "apply":
 		return "apply"
+	case "text":
+		return "text"
 	case "login":
 		if config.LoginUseSudo {
 			return "login-sudo"
@@ -764,6 +766,8 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 		return config.SQLPasswordKey != "" || config.SQLCredFrom != "" || (config.SQLUseSudo && config.SudoKey != "")
 	case "apply":
 		return config.ApplyUseSudo && config.SudoKey != ""
+	case "text":
+		return config.TextUseSudo && config.SudoKey != ""
 	case "login":
 		return (config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != ""
 	default:

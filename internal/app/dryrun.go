@@ -95,6 +95,8 @@ type dryRunPlan struct {
 	SQL *sqlDryRunPlan `json:"sql,omitempty"`
 	// Apply is the guarded file-apply local plan (Mode == "apply").
 	Apply *applyDryRunPlan `json:"apply,omitempty"`
+	// Text is the text dissection local plan (Mode == "text").
+	Text *textDryRunPlan `json:"text,omitempty"`
 
 	hostTestReadsSecret bool
 }
@@ -105,6 +107,22 @@ type dryRunHop struct {
 	Address string `json:"address"`
 	Port    string `json:"port,omitempty"`
 	User    string `json:"user,omitempty"`
+}
+
+type textDryRunPlan struct {
+	SourceKind string   `json:"source_kind"`
+	Path       string   `json:"path,omitempty"`
+	Journal    string   `json:"journal,omitempty"`
+	Since      string   `json:"since,omitempty"`
+	Until      string   `json:"until,omitempty"`
+	Presets    []string `json:"presets,omitempty"`
+	Pattern    string   `json:"pattern,omitempty"`
+	Context    int      `json:"context,omitempty"`
+	Scan       string   `json:"scan,omitempty"`
+	MaxHits    int      `json:"max_hits,omitempty"`
+	MaxBytes   int      `json:"max_bytes,omitempty"`
+	Redact     bool     `json:"redact"`
+	UseSudo    bool     `json:"use_sudo,omitempty"`
 }
 
 type applyDryRunPlan struct {
@@ -189,6 +207,7 @@ func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	fillDryRunSecretBackend(config, &plan)
 	fillDryRunSQL(config, &plan)
 	fillDryRunApply(config, &plan)
+	fillDryRunText(config, &plan)
 	fillDryRunEffects(config, &plan)
 
 	return plan
@@ -239,6 +258,9 @@ func fillDryRunAction(config *sshclient.Config, plan *dryRunPlan) {
 		plan.Action = "apply"
 		plan.LocalPath = config.LocalPath
 		plan.RemotePath = config.RemotePath
+	case "text":
+		plan.Action = "text"
+		plan.RemotePath = config.RemotePath
 	case "login":
 		plan.Action = "login"
 		if config.LoginUseSudo {
@@ -260,7 +282,7 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 		plan.HostInput = config.Host
 	}
 
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "login" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "text" || config.Mode == "login" {
 		resolveDryRunSSHHost(config, plan)
 		return
 	}
@@ -458,6 +480,10 @@ func fillDryRunSudo(config *sshclient.Config, plan *dryRunPlan) {
 	}
 	if config.Mode == "login" {
 		plan.UsesSudo = config.LoginUseSudo
+		plan.SudoKey = config.SudoKey
+	}
+	if config.Mode == "text" {
+		plan.UsesSudo = config.TextUseSudo
 		plan.SudoKey = config.SudoKey
 	}
 	if config.Mode == "host" && config.HostAction == "test" {
@@ -690,6 +716,11 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 		plan.WouldExecute = canProceed
 		plan.WouldReadSecret = canProceed && ((config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != "")
 		plan.WouldMutateRemote = canProceed
+	case "text":
+		plan.WouldConnect = canProceed
+		plan.WouldExecute = canProceed
+		plan.WouldReadSecret = canProceed && config.TextUseSudo && config.SudoKey != ""
+		plan.WouldMutateRemote = false
 	}
 	if plan.WouldConnect {
 		for _, hop := range config.JumpChain {
@@ -866,8 +897,42 @@ func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
 	plan.SafetyCheck = dryRunStatus{Status: "passed"}
 }
 
+func fillDryRunText(config *sshclient.Config, plan *dryRunPlan) {
+	if config.Mode != "text" {
+		return
+	}
+	if config.ArgumentError != "" {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: config.ArgumentError}
+		plan.Valid = false
+		return
+	}
+	req, err := textRequestFrom(config)
+	if err != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.Valid = false
+		return
+	}
+	plan.Text = &textDryRunPlan{
+		SourceKind: req.Kind,
+		Path:       req.Path,
+		Journal:    req.JournalUnit,
+		Since:      req.Since,
+		Until:      req.Until,
+		Presets:    append([]string(nil), req.Presets...),
+		Pattern:    req.Pattern,
+		Context:    req.Context,
+		Scan:       req.Scan,
+		MaxHits:    req.MaxHits,
+		MaxBytes:   req.MaxBytes,
+		Redact:     req.Redact,
+		UseSudo:    config.TextUseSudo,
+	}
+	plan.UsesSudo = config.TextUseSudo
+	plan.SafetyCheck = dryRunStatus{Status: "passed"}
+}
+
 func modeUsesSSHConnection(config *sshclient.Config) bool {
-	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "login" {
+	if config.Mode == "ssh" || config.Mode == "sftp" || config.Mode == "transfer" || config.Mode == "inspect" || config.Mode == "sql" || config.Mode == "apply" || config.Mode == "text" || config.Mode == "login" {
 		return true
 	}
 	return config.Mode == "host" && (config.HostAction == "test" || config.HostAction == "test-all")

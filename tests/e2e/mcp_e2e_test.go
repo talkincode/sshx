@@ -283,7 +283,7 @@ func TestMCPServerContract(t *testing.T) {
 		}
 		assert.ElementsMatch(t, []string{
 			"sshx_run", "sshx_sql", "sshx_apply", "sshx_inspect",
-			"sshx_sftp", "sshx_transfer", "sshx_host_list",
+			"sshx_text", "sshx_sftp", "sshx_transfer", "sshx_host_list",
 		}, names)
 		for _, name := range names {
 			assert.NotContains(t, name, "password", "secret management must not be exposed over MCP")

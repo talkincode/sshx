@@ -88,6 +88,9 @@ func reportPlanFailure(config *sshclient.Config, audit *auditRecorder, err error
 		value = failure
 	case "inspect":
 		result["capability"] = config.InspectCapability
+	case "text":
+		run := &textRun{config: config, start: time.Now(), phase: "classify"}
+		value = run.baseResult(false, -1, kind, err)
 	}
 	if !config.JSONOutput && !config.JSONLOutput {
 		if _, finalizeErr := finalizeLifecycle(config, value); finalizeErr != nil {

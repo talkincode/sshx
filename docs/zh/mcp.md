@@ -35,6 +35,7 @@ Claude Desktop / 通用 MCP 客户端条目：
 | `sshx_sql` | `sshx sql --json` | 经远端 psql / sqlite3 / mysql 的受控单语句 SQL |
 | `sshx_apply` | `sshx apply --json` | 受控单文件替换；接受 `from_path` 或内联 `content`（允许空字符串） |
 | `sshx_inspect` | `sshx inspect --json` | 内置能力与已信任的本地插件 |
+| `sshx_text` | `sshx text --json` | 有界文件/journal 解剖：异常块、preset、行窗 |
 | `sshx_sftp` | SFTP flags | upload / download / list / mkdir / remove |
 | `sshx_transfer` | `--transfer` | 经本机中转的服务器到服务器流式传输 |
 | `sshx_host_list` | `--host-list --json` | 只读 `sshx.hosts.v1` 清单 |

@@ -44,7 +44,7 @@ func ClassifyRisk(action, command string, sudo bool) (Risk, Effects) {
 	switch action {
 	case "download":
 		e.LocalWrite = true
-	case "list", "ls", "host-list":
+	case "list", "ls", "host-list", "text":
 	case "upload", "mkdir", "transfer", "apply":
 		e.RemoteWrite = true
 	case "remove", "rm":

@@ -73,13 +73,14 @@ done
 ## Scenario 6: Collect Logs For An Incident
 
 ```bash
+sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json
+sshx text -h=prod-web --journal=nginx.service --since='30 min ago' --preset=error --json
 mkdir -p incident-2026-07-01/prod-web
 sshx -h=prod-web --download=/var/log/nginx/error.log --to=incident-2026-07-01/prod-web/error.log
-sshx -h=prod-web --download=/var/log/nginx/access.log --to=incident-2026-07-01/prod-web/access.log
-sshx -h=prod-web --audit-output=incident-2026-07-01/audit "journalctl -u nginx --since '30 min ago' --no-pager"
 ```
 
-Why this is useful: downloaded evidence and local audit metadata stay next to the incident folder.
+Why this is useful: Agents dissect exceptions in-place first. Whole-file
+download is for archives, not live triage.
 
 ## Scenario 7: Upload A Config Safely
 

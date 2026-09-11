@@ -22,6 +22,7 @@ const (
 	ActionSFTP     = "sftp"
 	ActionTransfer = "transfer"
 	ActionApply    = "apply"
+	ActionText     = "text"
 
 	IntentRead    = "read"
 	IntentChange  = "change"

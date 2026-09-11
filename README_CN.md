@@ -77,6 +77,7 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 12. 人类专用的 `sshx login`：登录已配置主机，可选 `--sudo` 进入特权壳。不属于 Agent/MCP 契约。
 13. 源地址绑定（`--bind=<ip|iface>`），对齐 OpenSSH `-b` / `BindAddress` / `BindInterface`。
 14. 会话内跳板（`via` / `--via=`）：嵌套 SSH 进入私网目标，每跳独立信任与审计，不在本机开隧道。
+15. `sshx text`：有界远端日志/文本解剖（异常块、preset、行窗），经 SFTP 或 sshx 持有的 journalctl。
 
 ## 安装
 

@@ -18,6 +18,7 @@ flag、退出码、`error_kind` 的含义，都是破坏性变更。
 | 密钥 | `sshx.secrets.v1` | `--password-check` / `--password-list` / `--password-set` JSON |
 | 审计事件 | `sshx.audit.v1` | 每次非 dry-run 调用一条 JSONL |
 | 审计查询 | `sshx.audit.query.v1` | `sshx audit query/export --json` |
+| 文本解剖 | `sshx.text.v1` | `sshx text --json`；帮助文档为 `sshx.text.help.v1` |
 | 退出码 | `0`、`1..254`、`255` | 远端状态 vs sshx 层失败 |
 | JSON sshx 失败 | `exit_code: -1` | 与远端 `exit 255` 可区分 |
 | `error_kind` | `timeout`、`auth`、`host_key`、`connect`、`blocked`、`exit_missing`、`config`、`error`，加上 SQL/apply 扩展 | 按此字段分支，不要解析散文 |

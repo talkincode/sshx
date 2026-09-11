@@ -46,7 +46,7 @@ func preparedFrom(config *sshclient.Config) *preparedOperation {
 
 func remoteOperation(config *sshclient.Config) bool {
 	switch config.Mode {
-	case "ssh", "sftp", "transfer", "apply", "sql", "inspect":
+	case "ssh", "sftp", "transfer", "apply", "sql", "inspect", "text":
 		return true
 	default:
 		return false
@@ -189,6 +189,31 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 		if config.SQLCredFrom != "" || config.SQLDockerContainer != "" {
 			plan.Unresolved = append(plan.Unresolved, "remote credential/container identity is not pinned offline")
 		}
+	case "text":
+		req, err := textRequestFrom(config)
+		if err != nil {
+			return p, fmt.Errorf("%w: %v", execution.ErrConfig, err)
+		}
+		plan.Effects.Unknown = false
+		plan.Effects.RemoteWrite = false
+		plan.Inputs["source_kind"] = req.Kind
+		plan.Inputs["remote_path"] = req.Path
+		plan.Inputs["journal_unit"] = req.JournalUnit
+		plan.Inputs["since"] = req.Since
+		plan.Inputs["until"] = req.Until
+		plan.Inputs["presets"] = strings.Join(req.Presets, ",")
+		plan.Inputs["pattern_sha256"] = execution.Digest([]byte(req.Pattern))
+		plan.Inputs["context"] = strconv.Itoa(req.Context)
+		plan.Inputs["around_line"] = strconv.Itoa(req.AroundLine)
+		plan.Inputs["offset"] = strconv.Itoa(req.Offset)
+		plan.Inputs["limit"] = strconv.Itoa(req.Limit)
+		plan.Inputs["tail"] = strconv.Itoa(req.Tail)
+		plan.Inputs["scan"] = req.Scan
+		plan.Inputs["max_hits"] = strconv.Itoa(req.MaxHits)
+		plan.Inputs["max_bytes"] = strconv.Itoa(req.MaxBytes)
+		plan.Inputs["max_scan_bytes"] = strconv.FormatInt(req.MaxScanBytes, 10)
+		plan.Inputs["redact"] = strconv.FormatBool(req.Redact)
+		plan.Risk = plan.Effects.Risk()
 	case "inspect":
 		resolved := p.preview.resolvedPlugin
 		if resolved == nil {

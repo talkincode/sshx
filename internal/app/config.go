@@ -179,6 +179,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "apply":
 			parseApplyArgs(config, args[2:])
 			return config
+		case "text":
+			parseTextArgs(config, args[2:])
+			return config
 		case "audit":
 			parseAuditArgs(config, args[2:])
 			return config
@@ -817,6 +820,162 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 			config.ArgumentError = fmt.Sprintf("unknown apply option %q", arg)
 		}
 	}
+}
+
+func parseTextArgs(config *sshclient.Config, args []string) {
+	config.Mode = "text"
+	config.TextRedact = true
+	for _, arg := range args {
+		switch {
+		case applyLifecycleFlag(config, arg):
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--target="):
+			config.Host = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case applySudoKeyFlag(config, arg):
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--path="):
+			config.RemotePath = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--journal="):
+			config.TextJournal = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--since="):
+			config.TextSince = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--until="):
+			config.TextUntil = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--preset="):
+			config.TextPresets = append(config.TextPresets, strings.SplitN(arg, "=", 2)[1])
+		case strings.HasPrefix(arg, "--pattern="):
+			config.TextPattern = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--context="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --context: %v", err)
+			} else {
+				config.TextContext = n
+			}
+		case strings.HasPrefix(arg, "--around-line="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --around-line: %v", err)
+			} else {
+				config.TextAroundLine = n
+			}
+		case strings.HasPrefix(arg, "--offset="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --offset: %v", err)
+			} else {
+				config.TextOffset = n
+			}
+		case strings.HasPrefix(arg, "--limit="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --limit: %v", err)
+			} else {
+				config.TextLimit = n
+			}
+		case strings.HasPrefix(arg, "--tail="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --tail: %v", err)
+			} else {
+				config.TextTail = n
+			}
+		case strings.HasPrefix(arg, "--scan="):
+			config.TextScan = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--max-hits="):
+			n, err := strconv.Atoi(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --max-hits: %v", err)
+			} else {
+				config.TextMaxHits = n
+			}
+		case strings.HasPrefix(arg, "--max-bytes="):
+			n, err := parseByteCount(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --max-bytes: %v", err)
+			} else {
+				config.TextMaxBytes = int(n)
+			}
+		case strings.HasPrefix(arg, "--max-scan-bytes="):
+			n, err := parseByteCount(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				config.ArgumentError = fmt.Sprintf("invalid --max-scan-bytes: %v", err)
+			} else {
+				config.TextMaxScanBytes = n
+			}
+		case arg == "--sudo":
+			config.TextUseSudo = true
+		case arg == "--no-redact":
+			config.TextRedact = false
+		case arg == "--help":
+			config.TextHelp = true
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--json":
+			config.JSONOutput = true
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
+		case applyBindFlag(config, arg):
+		case applyViaFlag(config, arg):
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		case arg == "--command", strings.HasPrefix(arg, "--command="):
+			config.ArgumentError = "sshx text does not accept --command; use --path or --journal"
+		default:
+			config.ArgumentError = fmt.Sprintf("unknown text option %q", arg)
+		}
+	}
+}
+
+func parseByteCount(raw string) (int64, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(value, "k"):
+		mult = 1024
+		value = strings.TrimSuffix(value, "k")
+	case strings.HasSuffix(value, "m"):
+		mult = 1024 * 1024
+		value = strings.TrimSuffix(value, "m")
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("negative size")
+	}
+	return n * mult, nil
 }
 
 // sqlCredCacheExplicit reports whether the operator explicitly set

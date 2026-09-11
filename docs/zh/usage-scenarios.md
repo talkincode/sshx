@@ -73,13 +73,13 @@ done
 ## 场景 6：为事故收集日志
 
 ```bash
+sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json
+sshx text -h=prod-web --journal=nginx.service --since='30 min ago' --preset=error --json
 mkdir -p incident-2026-07-01/prod-web
 sshx -h=prod-web --download=/var/log/nginx/error.log --to=incident-2026-07-01/prod-web/error.log
-sshx -h=prod-web --download=/var/log/nginx/access.log --to=incident-2026-07-01/prod-web/access.log
-sshx -h=prod-web --audit-output=incident-2026-07-01/audit "journalctl -u nginx --since '30 min ago' --no-pager"
 ```
 
-下载的证据和本地审计元数据会放在同一个事故目录附近。
+先用 `sshx text` 现场解剖异常块；整文件下载只用于归档。
 
 ## 场景 7：安全上传配置
 

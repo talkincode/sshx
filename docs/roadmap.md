@@ -267,6 +267,7 @@ issue #71 的新增边界、验证状态及外部前提单列在后面的证据�
 | 审计查询/导出 | 中 | 否 | 查询无写入；导出写本地目标 | ✅ execute → query by run_id | ✅ 空结果 exit 0 | 不适用：本地调用者 | 不改写源审计文件 | `tests/e2e/host_audit_e2e_test.go`、`internal/app/audit_query_test.go` |
 | 受控 SQL（MySQL） | 高 | 是 | 是，远端库 | 真实 SSH + 模拟 mysql 客户端；非真实引擎 | LOAD DATA / INTO OUTFILE 分类拒绝；run-mode mysql 阻断且零连接 | operator SSH 密码角色；非真实 DB 权限验证 | 模拟快照含旧值，不证明真实引擎回滚/原子性 | `tests/e2e/sql_mysql_e2e_test.go`、`tests/e2e/fake_mysql.py`、`internal/sqlsafe/mysql_test.go` |
 | 受控 jump-host | 高 | 是，每跳独立 | 否，无本地监听 | ✅ 经 bastion 执行；dry-run 展示 via | ✅ 未知 via / 环 / 跳板认证失败且目标零连接 | ✅ jump 与 target 各自认证 | 调用结束 hop 关闭；不提供隧道启停 | `tests/e2e/jump_e2e_test.go`、`internal/sshclient/connect_jump_test.go`、`internal/execution/jumps_test.go` |
+| 远端文本解剖 | 中 | 是 | 否 | ✅ SFTP 异常块命中；journal 受控 argv | ✅ 相对路径拒绝、dry-run 零连接 | ✅ operator SFTP；sudo 文件/journal | 不适用：只读 | `tests/e2e/text_e2e_test.go`、`internal/textsafe/*_test.go`、`internal/app/text_test.go` |
 
 不能据此声称完整平台/引擎验收已通过。任何一级能力不得只以参数解析或组件测试
 作为完成依据；必须补充相应外部边界 E2E，并如实记录不可用环境与未证明的保证。
