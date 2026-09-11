@@ -1,11 +1,8 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -498,30 +495,16 @@ func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 func runDryRunJSON(t *testing.T, args []string) map[string]any {
 	t.Helper()
 
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	runErr := Run(args)
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("failed to copy pipe output: %v", copyErr)
-	}
-
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = Run(args)
+	})
 	if runErr != nil {
-		t.Fatalf("Run() error = %v, output=%s", runErr, buf.String())
+		t.Fatalf("Run() error = %v, output=%s", runErr, string(raw))
 	}
 	var result map[string]any
-	if jErr := json.Unmarshal(buf.Bytes(), &result); jErr != nil {
-		t.Fatalf("invalid JSON output %q: %v", buf.String(), jErr)
+	if jErr := json.Unmarshal(raw, &result); jErr != nil {
+		t.Fatalf("invalid JSON output %q: %v", string(raw), jErr)
 	}
 	return result
 }
@@ -541,27 +524,4 @@ func runReportedJSON(t *testing.T, args []string) map[string]any {
 		t.Fatalf("invalid JSON output %q: %v", string(raw), jErr)
 	}
 	return result
-}
-
-func captureStdout(t *testing.T, fn func()) []byte {
-	t.Helper()
-
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	fn()
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("failed to copy pipe output: %v", copyErr)
-	}
-	return buf.Bytes()
 }
