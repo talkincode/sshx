@@ -1,37 +1,13 @@
 package app
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"strings"
 	"testing"
 )
 
 func TestPrintUsage(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	// Call PrintUsage
-	PrintUsage()
-
-	// Restore stdout
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("Failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-
-	// Read captured output
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("Failed to copy pipe output: %v", copyErr)
-	}
-	output := buf.String()
+	// Call PrintUsage and capture its output.
+	output := string(captureStdout(t, PrintUsage))
 
 	// Verify output contains key sections
 	expectedSections := []string{
@@ -149,26 +125,7 @@ func TestPrintUsage(t *testing.T) {
 }
 
 func TestPrintUsage_OutputFormat(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	PrintUsage()
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("Failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("Failed to copy pipe output: %v", copyErr)
-	}
-	output := buf.String()
+	output := string(captureStdout(t, PrintUsage))
 
 	// Verify output starts with newline (for proper formatting)
 	if !strings.HasPrefix(output, "\n") {
@@ -183,25 +140,7 @@ func TestPrintUsage_OutputFormat(t *testing.T) {
 }
 
 func TestPrintUsage_Examples(t *testing.T) {
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	PrintUsage()
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("Failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("Failed to copy pipe output: %v", copyErr)
-	}
-	output := buf.String()
+	output := string(captureStdout(t, PrintUsage))
 
 	// Verify practical examples exist
 	examples := []string{

@@ -167,6 +167,19 @@ func loadMatchingAuditEvents(config *sshclient.Config) (auditQueryRecords, error
 	if err != nil {
 		return records, auditIOError("resolve audit directory", "", err)
 	}
+	// Windows reports a regular file opened as a directory as an empty
+	// directory rather than ENOTDIR, so require a directory explicitly and
+	// keep the typed failure identical on every platform.
+	info, statErr := os.Stat(dir)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return records, nil
+		}
+		return records, auditIOError("inspect audit directory", dir, statErr)
+	}
+	if !info.IsDir() {
+		return records, auditIOError("read audit directory", dir, errors.New("not a directory"))
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

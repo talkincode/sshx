@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,22 +22,10 @@ func TestRun_BlockedCommandWritesRedactedAuditEvent(t *testing.T) {
 	auditDir := t.TempDir()
 	command := "sudo rm -rf / password=orange --token purple" //nolint:gosec // test verifies redaction of credential-like arguments.
 
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	runErr := Run([]string{"sshx", "-h=192.0.2.1", "--audit-output=" + auditDir, "--json", command})
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-	if _, copyErr := io.Copy(io.Discard, r); copyErr != nil {
-		t.Logf("failed to drain stdout: %v", copyErr)
-	}
+	var runErr error
+	captureStdout(t, func() {
+		runErr = Run([]string{"sshx", "-h=192.0.2.1", "--audit-output=" + auditDir, "--json", command})
+	})
 
 	if !errors.Is(runErr, ErrReported) {
 		t.Fatalf("expected ErrReported, got %v", runErr)

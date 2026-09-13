@@ -1,43 +1,23 @@
 package app
 
 import (
-	"bytes"
 	"errors"
-	"io"
-	"os"
 	"strings"
 	"testing"
 )
 
 func TestRun_NoArgs(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Failed to create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	args := []string{"sshx"}
-	err = Run(args)
-
-	if closeErr := w.Close(); closeErr != nil {
-		t.Logf("Failed to close pipe writer: %v", closeErr)
-	}
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
-		t.Logf("Failed to copy pipe output: %v", copyErr)
-	}
+	var runErr error
+	output := string(captureStdout(t, func() {
+		runErr = Run([]string{"sshx"})
+	}))
 
 	// Should return ErrUsage
-	if !errors.Is(err, ErrUsage) {
-		t.Errorf("Expected ErrUsage, got %v", err)
+	if !errors.Is(runErr, ErrUsage) {
+		t.Errorf("Expected ErrUsage, got %v", runErr)
 	}
 
 	// Should have printed usage
-	output := buf.String()
 	if !strings.Contains(output, "Usage:") {
 		t.Error("Expected usage to be printed")
 	}
@@ -116,35 +96,16 @@ func TestRun_ArgumentParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			setTestHome(t, t.TempDir())
-			// Suppress output
-			oldStdout := os.Stdout
-			oldStderr := os.Stderr
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatalf("Failed to create pipe: %v", err)
-			}
-			os.Stdout = w
-			os.Stderr = w
 
-			err = Run(tt.args)
+			var runErr error
+			captureCombinedOutput(t, func() { runErr = Run(tt.args) })
 
-			if closeErr := w.Close(); closeErr != nil {
-				t.Logf("Failed to close pipe writer: %v", closeErr)
-			}
-			os.Stdout = oldStdout
-			os.Stderr = oldStderr
-
-			// Drain pipe
-			if _, copyErr := io.Copy(io.Discard, r); copyErr != nil {
-				t.Logf("Failed to drain pipe: %v", copyErr)
-			}
-
-			if tt.shouldError && err == nil {
+			if tt.shouldError && runErr == nil {
 				t.Error("Expected error but got nil")
 			}
 
-			if tt.errorIs != nil && !errors.Is(err, tt.errorIs) {
-				t.Errorf("Expected error %v, got %v", tt.errorIs, err)
+			if tt.errorIs != nil && !errors.Is(runErr, tt.errorIs) {
+				t.Errorf("Expected error %v, got %v", tt.errorIs, runErr)
 			}
 		})
 	}
