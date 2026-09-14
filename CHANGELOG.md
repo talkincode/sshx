@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-14
+
 ### Fixed
 
 - Admission now reports why a plan was rejected instead of the generic
   `invalid execution plan` placeholder. A missing host fails with
   `host is required` (`error_kind: config`) in both the human message and the
-  `--json` envelope; this covers every remote mode.
+  `--json` envelope. Unknown `--host-test` targets also keep that config
+  reason on `config_check` instead of leaving it `passed`.
 - SFTP actions with an empty path are rejected during admission as `config`
   errors (`remote path is required` / `local path is required`), matching the
   MCP adapter's pre-flight checks. Previously an empty `--mkdir=`, `--rm=`,
@@ -679,7 +682,9 @@ diagnostics).
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/talkincode/sshx/compare/v0.16.0...v0.16.1
+[0.16.0]: https://github.com/talkincode/sshx/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/talkincode/sshx/compare/v0.13.0...v0.15.0
 [0.13.0]: https://github.com/talkincode/sshx/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/talkincode/sshx/compare/v0.12.0...v0.12.1
