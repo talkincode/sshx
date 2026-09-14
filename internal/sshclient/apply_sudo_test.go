@@ -138,11 +138,38 @@ func TestApplySudoScriptEvidenceAndCleanup(t *testing.T) {
 	}
 }
 
+// applyScriptEnv appends the POSIX sbin directories to every PATH entry. A
+// minimal test runner can ship a PATH without them (macOS keeps chown in
+// /usr/sbin) while the generated privileged script shells out to chown; without
+// this the fixture fails for environmental reasons instead of the behavior
+// under test. Appending keeps fault fixtures' stub tools ahead of the real ones.
+func applyScriptEnv(env []string) []string {
+	extra := ""
+	for _, dir := range []string{"/usr/sbin", "/sbin"} {
+		if info, statErr := os.Stat(filepath.Join(dir, "chown")); statErr != nil || info.IsDir() {
+			continue
+		}
+		extra += string(os.PathListSeparator) + dir
+	}
+	if extra == "" {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			out = append(out, kv+extra)
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 func runApplyScriptFixture(t *testing.T, script []byte, env []string) ExecResult {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("sh") // #nosec G204 -- executes only the generated apply script in the owned fixture directory.
-	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = bytes.NewReader(script), &stdout, &stderr, env
+	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = bytes.NewReader(script), &stdout, &stderr, applyScriptEnv(env)
 	err := cmd.Run()
 	code := 0
 	if err != nil {

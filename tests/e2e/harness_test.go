@@ -509,6 +509,36 @@ func isSudoCollectorCommand(cmd string) string {
 	return isCollectorCommand(rest)
 }
 
+// withSudoSecurePath mirrors sudo's secure_path for the privileged fixture: a
+// privileged script must resolve tools such as chown that live outside a
+// minimal runner PATH (macOS keeps chown in /usr/sbin). Without this the
+// fixture fails for environmental reasons instead of the behavior under test.
+// Directories are appended so fixture-provided stubs keep priority.
+func withSudoSecurePath(env []string, useSudo bool) []string {
+	if !useSudo {
+		return env
+	}
+	extra := ""
+	for _, dir := range []string{"/usr/sbin", "/sbin"} {
+		if info, statErr := os.Stat(filepath.Join(dir, "chown")); statErr != nil || info.IsDir() {
+			continue
+		}
+		extra += string(os.PathListSeparator) + dir
+	}
+	if extra == "" {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			out = append(out, kv+extra)
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role string, useSudo bool, shell string) {
 	reader := bufio.NewReader(channel)
 	if useSudo {
@@ -536,7 +566,8 @@ func handleCollectorSession(channel ssh.Channel, server *testSSHServer, role str
 	}
 	command := exec.Command(shell) // #nosec G204 -- shell name comes from a fixed allowlist and executes only isolated test-created collector fixtures.
 	command.Dir = server.root
-	command.Env = append(os.Environ(), "HOME="+server.root, "SSHX_E2E_ROLE="+role)
+	env := append(os.Environ(), "HOME="+server.root, "SSHX_E2E_ROLE="+role)
+	command.Env = withSudoSecurePath(env, useSudo)
 	command.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
