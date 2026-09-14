@@ -222,8 +222,10 @@ func TestPlanAdmissionRejectsEmptySFTPPaths(t *testing.T) {
 	}
 
 	t.Run("complete paths stay admitted", func(t *testing.T) {
+		local := filepath.Join(t.TempDir(), "upload.txt")
+		require.NoError(t, os.WriteFile(local, []byte("payload\n"), 0o600))
 		args := []string{"sshx", "-h=" + config.Host, "--dry-run", "--json", "--no-audit",
-			"--upload=/etc/hosts", "--to=/remote/file"}
+			"--upload=" + local, "--to=/remote/file"}
 		var runErr error
 		output := captureStdout(t, func() { runErr = Run(args) })
 		require.NoError(t, runErr)
