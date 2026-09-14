@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Admission now reports why a plan was rejected instead of the generic
+  `invalid execution plan` placeholder. A missing host fails with
+  `host is required` (`error_kind: config`) in both the human message and the
+  `--json` envelope; this covers every remote mode.
+- SFTP actions with an empty path are rejected during admission as `config`
+  errors (`remote path is required` / `local path is required`), matching the
+  MCP adapter's pre-flight checks. Previously an empty `--mkdir=`, `--rm=`,
+  `--download=` or `--list=` was admitted and surfaced later as a misleading
+  connection failure, and an empty `--upload=` as a local-io error.
+
 ## [0.16.0] - 2026-09-11
 
 ### Added

@@ -299,6 +299,9 @@ func fillDryRunHost(config *sshclient.Config, plan *dryRunPlan) {
 func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	if config.Host == "" {
 		plan.HostResolution = dryRunStatus{Status: "missing", ErrorKind: "config", Message: "host is required"}
+		// Admission reports ConfigCheck/SafetyCheck only; mirror the reason so a
+		// missing host is not flattened into the generic "invalid execution plan".
+		plan.ConfigCheck = plan.HostResolution
 		plan.Valid = false
 		return
 	}
@@ -425,12 +428,14 @@ func resolveDryRunHostTest(config *sshclient.Config, plan *dryRunPlan) {
 	settings, err := LoadSettings()
 	if err != nil {
 		plan.HostResolution = dryRunStatus{Status: "error", ErrorKind: "config", Message: err.Error()}
+		plan.ConfigCheck = plan.HostResolution
 		plan.Valid = false
 		return
 	}
 	hostConfig, err := GetHost(settings, config.HostName)
 	if err != nil {
 		plan.HostResolution = dryRunStatus{Status: "not_found", ErrorKind: "config", Message: err.Error()}
+		plan.ConfigCheck = plan.HostResolution
 		plan.Valid = false
 		return
 	}
@@ -539,6 +544,23 @@ func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
 				Message:   "destination must be specified as --to=<host>:<path>",
 			}
 			plan.Valid = false
+		}
+		return
+	}
+	if config.Mode == "sftp" {
+		// Mirror the MCP adapter's pre-flight checks: an empty path cannot
+		// produce a plan, and rejecting it here keeps the diagnostic a config
+		// error instead of a misleading connection failure.
+		if strings.TrimSpace(config.RemotePath) == "" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "remote path is required"}
+			plan.Valid = false
+			return
+		}
+		if config.SftpAction == "upload" || config.SftpAction == "download" {
+			if strings.TrimSpace(config.LocalPath) == "" {
+				plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "local path is required"}
+				plan.Valid = false
+			}
 		}
 		return
 	}

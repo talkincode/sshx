@@ -151,3 +151,85 @@ func TestPlanAdmissionPreservesDomainEnvelopes(t *testing.T) {
 		})
 	}
 }
+
+// A missing host is the most common operator mistake; admission must surface
+// the reason instead of collapsing it into the generic fallback message.
+func TestPlanAdmissionReportsMissingHost(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	var jsonRunErr error
+	output := captureStdout(t, func() {
+		jsonRunErr = Run([]string{"sshx", "--json", "--no-audit", "uptime"})
+	})
+	require.ErrorIs(t, jsonRunErr, ErrReported)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(output, &result), string(output))
+	require.Equal(t, "config", result["error_kind"])
+	require.Equal(t, "host is required", result["error"])
+
+	humanErr := Run([]string{"sshx", "--no-audit", "uptime"})
+	require.Error(t, humanErr)
+	require.Contains(t, humanErr.Error(), "host is required")
+	require.NotContains(t, humanErr.Error(), "invalid execution plan")
+}
+
+func TestPlanAdmissionReportsUnknownHostTest(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	var runErr error
+	output := captureStdout(t, func() {
+		runErr = Run([]string{"sshx", "--host-test=no-such-host", "--dry-run", "--json", "--no-audit"})
+	})
+	require.NoError(t, runErr)
+	var result dryRunPlan
+	require.NoError(t, json.Unmarshal(output, &result), string(output))
+	require.False(t, result.Valid)
+	require.Equal(t, "config", result.ConfigCheck.ErrorKind)
+	require.NotEmpty(t, result.ConfigCheck.Message)
+}
+
+// An empty SFTP path cannot produce a plan. Admission must reject it as a
+// config error, matching the MCP adapter's pre-flight checks, rather than
+// admitting the plan and reporting a later connection failure.
+func TestPlanAdmissionRejectsEmptySFTPPaths(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	config := planTestConfig(t)
+	cases := []struct {
+		name    string
+		args    []string
+		message string
+	}{
+		{"upload without local path", []string{"--upload=", "--to=/remote/file"}, "local path is required"},
+		{"upload without remote path", []string{"--upload=/etc/hosts"}, "remote path is required"},
+		{"download without local path", []string{"--download=/remote/file"}, "local path is required"},
+		{"download without remote path", []string{"--download=", "--to=/local/file"}, "remote path is required"},
+		{"list without remote path", []string{"--list="}, "remote path is required"},
+		{"mkdir without remote path", []string{"--mkdir="}, "remote path is required"},
+		{"remove without remote path", []string{"--rm="}, "remote path is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"sshx", "-h=" + config.Host, "--dry-run", "--json", "--no-audit"}, tc.args...)
+			var runErr error
+			output := captureStdout(t, func() { runErr = Run(args) })
+			require.NoError(t, runErr)
+			var result dryRunPlan
+			require.NoError(t, json.Unmarshal(output, &result), string(output))
+			require.False(t, result.Valid)
+			require.Equal(t, "config", result.ConfigCheck.ErrorKind)
+			require.Equal(t, tc.message, result.ConfigCheck.Message)
+			require.False(t, result.WouldConnect)
+		})
+	}
+
+	t.Run("complete paths stay admitted", func(t *testing.T) {
+		args := []string{"sshx", "-h=" + config.Host, "--dry-run", "--json", "--no-audit",
+			"--upload=/etc/hosts", "--to=/remote/file"}
+		var runErr error
+		output := captureStdout(t, func() { runErr = Run(args) })
+		require.NoError(t, runErr)
+		var result dryRunPlan
+		require.NoError(t, json.Unmarshal(output, &result), string(output))
+		require.True(t, result.Valid)
+		require.True(t, result.WouldConnect)
+	})
+}

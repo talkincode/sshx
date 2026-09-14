@@ -167,6 +167,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | `ssh`      | default; a command argument is present    | run a remote command (sudo auto-fill)   |
 | `run`      | `sshx run ...`                            | canonical multi-host/script execution   |
 | `sftp`     | `--upload/--download/--list/--mkdir/--rm` | file transfer & remote FS ops           |
+| `transfer` | `--transfer=<host>:<path> --to=<host>:<path>` | server-to-server file transfer      |
 | `password` | `--password-*`                            | manage keyring secrets                  |
 | `host`     | `--host-*`                                | manage `settings.json` host entries     |
 | `skill`    | `sshx skill install`                      | install/update the embedded Agent skill |
@@ -175,6 +176,9 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 | `sql`      | `sshx sql ... "<statement>"`              | guarded SQL via remote psql or sqlite3  |
 | `apply`    | `sshx apply --path= --from=`              | guarded single-file remote replace      |
 | `text`     | `sshx text --path= / --journal=`          | bounded remote text/log dissection      |
+| `login`    | `sshx login <name> [--sudo]`              | human interactive TTY session           |
+| `mcp`      | `sshx mcp`                                | stdio MCP server; one child per tool call |
+| `audit`    | `sshx audit query/export`                 | read-only audit trail query/export      |
 
 ### State & storage
 
@@ -211,7 +215,6 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 - **SFTP:** `github.com/pkg/sftp`
 - **Keyring:** `github.com/zalando/go-keyring`
 - **Terminal input:** `golang.org/x/term` (no-echo password prompts)
-- **Dotenv:** `github.com/joho/godotenv`
 - **Tests:** `github.com/stretchr/testify`
 
 > Security baseline reviewed for v0.14.0: x/crypto v0.56.0 fixes reachable
@@ -466,15 +469,18 @@ Items must respect the boundaries in §3.
 **Near-term**
 
 - ⬜ Raise test coverage across `internal/app` and `internal/sshclient`.
-- ⬜ Host config UX: tags/groups, richer `--host-list` output, edit ergonomics.
+- ⬜ Host config UX: richer `--host-list` output and edit ergonomics
+  (tags/groups already ship with multi-host selectors).
 - ⬜ Better `--password-list` discovery and consistent keyring key naming.
 - ⬜ Shell completion (bash/zsh/fish) and `--version`/build-info polish.
 
 **Mid-term**
 
 - ⬜ SFTP enhancements: recursive upload/download and glob support.
-- ⬜ Parallel fan-out: run one command across many named hosts with an aggregated
-   report (an extension of `--host-test-all`). *In scope — no daemon required.*
+- ✅ Parallel fan-out: one command across many selected hosts with per-target
+  results and aggregated counts (`sshx run --concurrency=`, `--max-failures=`,
+  `--fail-fast`; the same limits are exposed as MCP tool inputs). No daemon
+  required.
 - ✅ Bastion/jump-host (`ProxyJump`-style) support for reaching private hosts.
   Session-bound nested SSH only; no local tunnels, SOCKS, or leftover listeners.
 
