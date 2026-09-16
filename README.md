@@ -493,6 +493,41 @@ and writable `PRAGMA` are blocked.
 Use `--cred-cache=off` to disable caching or `--cred-refresh` to discard and
 resolve the current value again.
 
+## MikroTik RouterOS (ROS) Support
+
+`sshx ros` provides native support for MikroTik RouterOS devices **strictly over the SSH protocol** (no proprietary API or REST ports needed). It implements the agent-friendly contracts, introspection schemas, safety guardrails, and file workflows referenced from `roswire`.
+
+```bash
+# Introspection & Self-description (runs locally without network connection)
+sshx ros commands --json
+sshx ros help ip address add --json
+sshx ros schema ip address add --json
+sshx ros doctor --json
+
+# Read-only inspection
+sshx ros -h=router interface print --json
+sshx ros -h=router ip address print --json
+sshx ros -h=router system resource print --json
+
+# Safe mutations & raw commands
+sshx ros -h=router ip address add address=192.168.88.2/24 interface=ether1
+sshx ros -h=router raw "/system/resource/print"
+sshx ros -h=router raw "/ip/dns/set servers=1.1.1.1,8.8.8.8" --allow-write
+
+# Preview with dry-run
+sshx ros -h=router ip address add address=10.0.0.1/24 interface=ether2 --dry-run --json
+
+# File, script, and backup workflows over SFTP
+sshx ros -h=router file upload ./setup.rsc flash/setup.rsc
+sshx ros -h=router file download flash/setup.rsc ./setup.rsc
+sshx ros -h=router import ./setup.rsc --cleanup
+sshx ros -h=router export download ./config.rsc --compact --cleanup
+sshx ros -h=router backup download ./backup.backup --name=pre-change --cleanup
+sshx ros -h=router script put bootstrap --source=@./setup.rsc
+```
+
+Destructive commands (`reset-configuration`, `reboot`, `shutdown`, `disk format`) are guarded and require `--force`.
+
 ## Host Inspection and Local Plugins
 
 Use one structured inspection instead of repeatedly probing an unfamiliar host:

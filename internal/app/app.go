@@ -145,6 +145,11 @@ func RunContext(ctx context.Context, args []string) (err error) {
 		return HandleRun(config, audit)
 	}
 
+	// MikroTik RouterOS execution contract over SSH.
+	if config.Mode == "ros" {
+		return HandleROS(config, audit)
+	}
+
 	if config.Mode == "ssh" {
 		if bypassErr := requireBypassReason(config); bypassErr != nil {
 			return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", bypassErr)

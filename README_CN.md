@@ -748,6 +748,41 @@ sudo xattr -rd com.apple.quarantine /usr/local/bin/sshx
 sudo chmod +x /usr/local/bin/sshx
 ```
 
+## MikroTik RouterOS (ROS) 支持
+
+`sshx ros` 为 MikroTik RouterOS 设备提供原生执行与运维支持，**严格限定在 SSH 协议通道**（无需开启 8728/8729 API 或 80/443 REST 端口）。它参考 `roswire` 的 Agent 友好契约，提供自描述、参数校验、安全护栏以及基于 SFTP 的文件与配置工作流：
+
+```bash
+# Agent 自描述与环境诊断（本地执行，无需连接网络）
+sshx ros commands --json
+sshx ros help ip address add --json
+sshx ros schema ip address add --json
+sshx ros doctor --json
+
+# 只读查询
+sshx ros -h=router interface print --json
+sshx ros -h=router ip address print --json
+sshx ros -h=router system resource print --json
+
+# 安全配置变更与原生命令
+sshx ros -h=router ip address add address=192.168.88.2/24 interface=ether1
+sshx ros -h=router raw "/system/resource/print"
+sshx ros -h=router raw "/ip/dns/set servers=1.1.1.1,8.8.8.8" --allow-write
+
+# dry-run 计划预览
+sshx ros -h=router ip address add address=10.0.0.1/24 interface=ether2 --dry-run --json
+
+# 基于 SFTP 的文件传输、配置导入导出与备份
+sshx ros -h=router file upload ./setup.rsc flash/setup.rsc
+sshx ros -h=router file download flash/setup.rsc ./setup.rsc
+sshx ros -h=router import ./setup.rsc --cleanup
+sshx ros -h=router export download ./config.rsc --compact --cleanup
+sshx ros -h=router backup download ./backup.backup --name=pre-change --cleanup
+sshx ros -h=router script put bootstrap --source=@./setup.rsc
+```
+
+高危破坏性命令（如 `reset-configuration`、`reboot`、`shutdown`、`disk format` 等）被安全门禁严格拦截，必须显式传入 `--force` 才能执行。
+
 ## 开发
 
 项目的目标状态、非目标铁律和业务能力覆盖矩阵维护在[项目画像与方向](docs/roadmap.md)。新增一级业务能力必须同步增加 Happy Path E2E 并更新矩阵；高风险、权限和状态修改能力还必须满足相应失败、权限差异与恢复覆盖底线。
