@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-16
+
+### Added
+
+- `sshx ros`: native MikroTik RouterOS (ROS) support strictly over standard SSH
+  (port 22) and SFTP protocols. No ROS API service port (8728/8729) or REST port
+  is required. Features include:
+  - Command catalog mapping RouterOS paths (`ip address`, `ip firewall`, `ip route`,
+    `interface`, `system resource`, etc.) with output parsing into structured JSON.
+  - `raw` command execution for arbitrary RouterOS API paths (e.g. `sshx ros -h=host raw /system/resource/print`)
+    with optional `--raw` flag to bypass output parsing.
+  - Safety guardrails: destructive actions (`/system/reset-configuration`, `/system/reboot`,
+    `/certificate/reset`, `/disk/format`) are blocked without `--force`, and state-altering
+    raw mutations are blocked without `--allow-write`.
+  - Client-side dry-run: preview execution plans and mutation flags without connecting.
+  - SFTP configuration and file workflows: `file upload`, `file download`, `file list`,
+    `script put` (with `--source=@path`), `backup download` (with `--cleanup`), and
+    `export download` (with `--compact` and `--cleanup`).
+  - Introspection tools: `commands`, `help`, `schema`, `doctor`, and `explain-error`.
+  - MCP tool `sshx_ros` for AI agent integration with `expect_plan`, `dry_run`, and
+    `allow_write` guardrails.
+
 ## [0.16.1] - 2026-09-14
 
 ### Fixed
@@ -682,7 +704,8 @@ diagnostics).
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/talkincode/sshx/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/talkincode/sshx/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/talkincode/sshx/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/talkincode/sshx/compare/v0.13.0...v0.15.0
