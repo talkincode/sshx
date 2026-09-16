@@ -102,6 +102,11 @@ func (c *SSHClient) newSFTPClient() (*sftp.Client, error) {
 	return client, nil
 }
 
+// NewSFTPClient opens a new SFTP client session over the existing SSH connection.
+func (c *SSHClient) NewSFTPClient() (*sftp.Client, error) {
+	return c.newSFTPClient()
+}
+
 // PeerAddress is the actual connected TCP peer, not the configured DNS name.
 func (c *SSHClient) PeerAddress() string {
 	if c == nil {

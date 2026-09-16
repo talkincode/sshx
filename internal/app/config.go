@@ -188,6 +188,9 @@ func ParseArgs(args []string) *sshclient.Config {
 		case "login":
 			parseLoginArgs(config, args[2:])
 			return config
+		case "ros":
+			parseROSArgs(config, args[2:])
+			return config
 		}
 	}
 
@@ -1102,5 +1105,88 @@ func parseAuditArgs(config *sshclient.Config, args []string) {
 		default:
 			config.ArgumentError = fmt.Sprintf("unknown audit option %q", arg)
 		}
+	}
+}
+
+// parseROSArgs parses the `sshx ros` MikroTik RouterOS subcommand.
+func parseROSArgs(config *sshclient.Config, args []string) {
+	config.Mode = "ros"
+	var tokens []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			tokens = append(tokens, args[i+1:]...)
+			break
+		}
+		switch {
+		case applyLifecycleFlag(config, arg):
+		case strings.HasPrefix(arg, "--bypass-reason="):
+			config.BypassReason = strings.TrimPrefix(arg, "--bypass-reason=")
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
+			config.Host = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
+			config.Port = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
+			config.User = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
+			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
+			config.UseKeyAuth = true
+		case applySudoKeyFlag(config, arg):
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-key", arg == "--password-only":
+			config.UseKeyAuth = false
+			config.KeyPath = ""
+		case arg == "--key-auth":
+			config.UseKeyAuth = true
+		case arg == "--accept-unknown-host":
+			config.AcceptUnknownHost = true
+		case arg == "--insecure-hostkey":
+			config.AllowInsecureHostKey = true
+		case arg == "--strict-host-key":
+			config.AllowInsecureHostKey = false
+		case strings.HasPrefix(arg, "--known-hosts="):
+			config.KnownHostsPath = strings.SplitN(arg, "=", 2)[1]
+		case applyBindFlag(config, arg):
+		case strings.HasPrefix(arg, "--timeout="):
+			raw := strings.SplitN(arg, "=", 2)[1]
+			if d, err := parseTimeout(raw); err == nil {
+				config.Timeout = d
+			} else {
+				config.Timeout = -1
+			}
+		case arg == "--dry-run":
+			config.DryRun = true
+		case arg == "--json":
+			config.JSONOutput = true
+		case arg == "--allow-write":
+			config.ROSAllowWrite = true
+		case arg == "--force", arg == "-f":
+			config.Force = true
+		case arg == "--raw":
+			config.ROSRaw = true
+		case strings.HasPrefix(arg, "--routeros-version="), strings.HasPrefix(arg, "--ros-version="): //nolint:misspell // domain name for MikroTik RouterOS
+			config.ROSRouterOSVersion = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--source="):
+			config.ROSSource = strings.TrimPrefix(strings.SplitN(arg, "=", 2)[1], "@")
+		case arg == "--cleanup":
+			config.ROSCleanup = true
+		case arg == "--compact":
+			config.ROSCompact = true
+		case strings.HasPrefix(arg, "--name="):
+			config.ROSBackupName = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--include-remote":
+			config.ROSIncludeRemote = true
+		case strings.HasPrefix(arg, "--audit-output="):
+			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--no-audit":
+			config.AuditEnabled = false
+		default:
+			tokens = append(tokens, arg)
+		}
+	}
+	config.ROSTokens = tokens
+	if config.User == "" {
+		config.User = "admin"
 	}
 }

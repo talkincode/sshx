@@ -32,6 +32,7 @@ Usage:
   sshx plugin list [--json]                       # List built-in and local capabilities
   sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
   sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
+  sshx ros -h=<host> [options] <cmd...>           # MikroTik RouterOS over SSH
   sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
   sshx text -h=<host> --path=<remote> [options]   # Bounded remote text/log dissection
   sshx login <name> [--sudo]                      # Human interactive login (TTY required)
@@ -385,6 +386,34 @@ Guarded SQL Execution:
       "UPDATE users SET active=0 WHERE id=42"
   sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --sudo --json \
       "UPDATE users SET active=0 WHERE id=42"
+
+MikroTik RouterOS (ROS) over SSH:
+  sshx ros -h=<host> [options] <path...> <action> [key=value ...]
+  sshx ros -h=<host> interface print [--json]
+  sshx ros -h=<host> ip address add address=192.168.88.1/24 interface=ether1
+  sshx ros -h=<host> raw "/system/resource/print"
+  sshx ros -h=<host> file upload <local> <remote>
+  sshx ros -h=<host> file download <remote> <local>
+  sshx ros -h=<host> backup download <local.backup> [--name=<name>] [--cleanup]
+  sshx ros -h=<host> export download <local.rsc> [--compact] [--cleanup]
+  sshx ros -h=<host> import <local.rsc> [--cleanup]
+  sshx ros -h=<host> script put <name> --source=@<local.rsc>
+  sshx ros commands [--json]                      # List supported RouterOS commands
+  sshx ros help [command] [--json]                # Show command help and arguments
+  sshx ros schema [command] [--json]              # Emit JSON schema for command
+  sshx ros doctor [-h=<host>] [--include-remote]  # Health & environment check
+  sshx ros explain-error <code>                   # Explain error code and remediation
+
+  ROS Options:
+    --dry-run               Emit execution plan JSON without modifying router
+    --allow-write           Permit raw commands or mutations to alter state
+    --force, -f             Bypass safety guardrails for destructive commands
+    --raw                   Execute without CLI response parsing
+    --ros-version=VER       RouterOS major version hint (v6, v7, auto)
+    --source=@PATH          Local .rsc script file for script put
+    --cleanup               Delete temporary remote files after workflow
+    --compact               Use compact export for export download
+    --name=NAME             Custom backup file name
 
 Guarded File Apply:
   sshx apply -h=<host> --path=/abs/remote.conf --from=./local.conf [options]

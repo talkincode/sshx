@@ -745,6 +745,21 @@ type mcpSQLInput struct {
 	Bind              string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
+type mcpROSInput struct {
+	ExpectPlan        string `json:"expect_plan,omitempty" jsonschema:"Expected sha256 execution plan hash; mismatch is rejected before connecting."`
+	HostTimeoutSecs   int    `json:"host_timeout_seconds,omitempty" jsonschema:"Optional whole-target budget in seconds."`
+	GlobalTimeoutSecs int    `json:"global_timeout_seconds,omitempty" jsonschema:"Optional whole-operation budget in seconds."`
+	Target            string `json:"target,omitempty" jsonschema:"Configured host name or IP address of the RouterOS device to reach over SSH."`
+	Port              int    `json:"port,omitempty" jsonschema:"SSH port (default 22)."`
+	User              string `json:"user,omitempty" jsonschema:"SSH user (default admin)."`
+	Command           string `json:"command" jsonschema:"RouterOS command or workflow (e.g. 'ip address print', 'commands', 'raw /system/resource/print')."`
+	AllowWrite        bool   `json:"allow_write,omitempty" jsonschema:"Permit raw commands or mutations to modify router state."`
+	Force             bool   `json:"force,omitempty" jsonschema:"Bypass safety guardrails for destructive commands."`
+	DryRun            bool   `json:"dry_run,omitempty" jsonschema:"Preview the execution plan without connecting."`
+	RouterOSVersion   string `json:"routeros_version,omitempty" jsonschema:"Optional RouterOS major version hint (v6, v7, auto)."` //nolint:misspell // domain name for MikroTik RouterOS
+	Bind              string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
+}
+
 type mcpApplyInput struct {
 	ExpectPlan        string  `json:"expect_plan,omitempty" jsonschema:"Expected sha256 execution plan hash; mismatch is rejected before connecting."`
 	HostTimeoutSecs   int     `json:"host_timeout_seconds,omitempty" jsonschema:"Optional whole-target budget in seconds."`
@@ -995,6 +1010,48 @@ func buildSQLArgs(in mcpSQLInput) ([]string, error) {
 	}
 	args = appendBindArg(args, in.Bind)
 	args = append(args, "--", in.Statement)
+	return args, nil
+}
+
+func buildROSArgs(in mcpROSInput) ([]string, error) {
+	cmdTrimmed := strings.TrimSpace(in.Command)
+	if cmdTrimmed == "" {
+		return nil, fmt.Errorf("command is required")
+	}
+	args := []string{"ros", "--json"}
+	if in.Target != "" {
+		args = append(args, "-h="+in.Target)
+	}
+	if in.Port > 0 {
+		args = append(args, fmt.Sprintf("-p=%d", in.Port))
+	}
+	if in.User != "" {
+		args = append(args, "-u="+in.User)
+	}
+	if in.AllowWrite {
+		args = append(args, "--allow-write")
+	}
+	if in.Force {
+		args = append(args, "--force")
+	}
+	if in.DryRun {
+		args = append(args, "--dry-run")
+	}
+	if in.RouterOSVersion != "" {
+		args = append(args, "--routeros-version="+in.RouterOSVersion) //nolint:misspell // domain name for MikroTik RouterOS
+	}
+	if in.ExpectPlan != "" {
+		args = append(args, "--expect-plan="+in.ExpectPlan)
+	}
+	if in.HostTimeoutSecs > 0 {
+		args = append(args, fmt.Sprintf("--host-timeout=%ds", in.HostTimeoutSecs))
+	}
+	if in.GlobalTimeoutSecs > 0 {
+		args = append(args, fmt.Sprintf("--timeout=%ds", in.GlobalTimeoutSecs))
+	}
+	args = appendBindArg(args, in.Bind)
+	tokens := strings.Fields(cmdTrimmed)
+	args = append(args, tokens...)
 	return args, nil
 }
 
@@ -1262,6 +1319,19 @@ func registerMCPTools(server *mcp.Server) {
 			"Reads run read-only. Use this instead of invoking database clients via sshx_run (which blocks them).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSQLInput) (*mcp.CallToolResult, any, error) {
 		args, err := buildSQLArgs(in)
+		if err != nil {
+			return nil, nil, err
+		}
+		return runMCPTool(ctx, args, "", timeoutSeconds(in.GlobalTimeoutSecs))
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "sshx_ros",
+		Description: "Execute MikroTik RouterOS (ROS) commands, workflows, or introspection strictly over SSH: " +
+			"print queries, safe mutations, raw CLI passthrough, file/script workflows (upload/download/backup/export/import), " +
+			"and dry-run preview with structured JSON output and safety guardrails.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpROSInput) (*mcp.CallToolResult, any, error) {
+		args, err := buildROSArgs(in)
 		if err != nil {
 			return nil, nil, err
 		}

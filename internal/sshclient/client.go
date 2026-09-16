@@ -258,6 +258,17 @@ type Config struct {
 	LoginUseSudo     bool
 	LoginLiteralHost bool
 
+	// RouterOS execution fields (Mode == "ros").
+	ROSTokens          []string
+	ROSAllowWrite      bool
+	ROSRouterOSVersion string
+	ROSRaw             bool
+	ROSSource          string
+	ROSCleanup         bool
+	ROSCompact         bool
+	ROSBackupName      string
+	ROSIncludeRemote   bool
+
 	// Bind is a local source address: a literal IP or a network interface name.
 	// BindSet distinguishes "flag not provided" from an explicit empty --bind=
 	// that must clear a named host's persisted bind.
