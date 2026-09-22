@@ -444,7 +444,7 @@ func reportSudoPromptFailure(w io.Writer, command, output string) {
 	if !needed || !sshclient.SudoPasswordPromptFailure(output) {
 		return
 	}
-	fmt.Fprintf(w, "sshx: %s\n", hint)
+	writeDiagnosticNote(w, "sshx: %s\n", hint)
 }
 
 // emitCommandJSON writes a single JSON result line to stdout. Diagnostic logs go

@@ -57,7 +57,7 @@ func (r *textScanReporter) Progress(p textsafe.ScanProgress) {
 		return
 	}
 	r.lastLine = now
-	fmt.Fprintln(r.out, r.progressLine(now))
+	writeDiagnosticNote(r.out, "%s\n", r.progressLine(now))
 }
 
 func (r *textScanReporter) progressLine(now time.Time) string {
@@ -80,13 +80,13 @@ func (r *textScanReporter) Finish(result textsafe.Result, elapsed time.Duration)
 		return
 	}
 	if result.Truncated && textsafe.HasTruncationReason(result.TruncatedReason, "max_scan_bytes") {
-		fmt.Fprintf(r.out, "sshx text: warning: scan stopped at its --max-scan-bytes budget after %s (%s scanned, %s in window); results are partial "+
+		writeDiagnosticNote(r.out, "sshx text: warning: scan stopped at its --max-scan-bytes budget after %s (%s scanned, %s in window); results are partial "+
 			"(total_hits_exact=false). Narrow with --offset=N or --tail=N, pre-filter with --pattern=..., or raise --max-scan-bytes=N.\n",
 			formatSeconds(elapsed), formatByteCount(result.Stats.BytesScanned), formatByteCount(result.Stats.ExpectedScanBytes))
 		return
 	}
 	if elapsed >= r.advice {
-		fmt.Fprintf(r.out, "sshx text: notice: scan took %s for %s; narrow the window with --offset=N or --tail=N when a smaller window answers the question.\n",
+		writeDiagnosticNote(r.out, "sshx text: notice: scan took %s for %s; narrow the window with --offset=N or --tail=N when a smaller window answers the question.\n",
 			formatSeconds(elapsed), formatByteCount(result.Stats.BytesScanned))
 	}
 }

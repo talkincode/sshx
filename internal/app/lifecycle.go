@@ -144,10 +144,10 @@ func reportPolicyRejection(w io.Writer, document map[string]json.RawMessage) {
 	if raw, ok := document["exit_code"]; ok {
 		_ = json.Unmarshal(raw, &exitCode) //nolint:errcheck // only reads the optional numeric projection
 	}
-	fmt.Fprintf(w, "sshx: blocked by safety policy (phase=%s, error_kind=%s, executed=%s, exit_code=%d); no remote command ran\n",
+	writeDiagnosticNote(w, "sshx: blocked by safety policy (phase=%s, error_kind=%s, executed=%s, exit_code=%d); no remote command ran\n",
 		phase, execution.ErrorKindBlocked, executed, exitCode)
 	if reason := flattenPolicyReason(documentString(document, "error")); reason != "" {
-		fmt.Fprintf(w, "sshx: block reason: %s\n", reason)
+		writeDiagnosticNote(w, "sshx: block reason: %s\n", reason)
 	}
 }
 
