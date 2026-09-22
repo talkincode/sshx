@@ -132,6 +132,12 @@ Agent / Scripting Mode:
     error_kind (timeout, auth, host_key, connect, blocked, exit_missing,
     config, error), so it is always distinguishable from a remote exit 255.
 
+  A policy block also writes its reason to stderr
+  (exit_code=-1, error_kind=blocked, phase=admission, executed=false), so a
+  caller that only prints the streams sees why nothing ran. Use the guarded
+  alternative instead: sshx sql -h=<host> --db=<name> [--docker=<container>]
+  "<SQL>". stdout still carries exactly one JSON document.
+
   Trust note: high-risk bypasses (force, no-safety-check, accept-unknown-host,
   insecure-hostkey) require explicit CLI flags. Inherited env values and
   working-directory .env files are ignored for those decisions.
@@ -144,6 +150,10 @@ Sudo Auto-fill:
   Non-leading sudo is not auto-filled and does not trigger keyring lookup:
     sshx -h=host "sh -c 'sudo whoami'"
     sshx -h=host "echo sudo"
+
+  sshx warns on stderr when it sees a non-leading sudo, because the remote then
+  stops with "sudo: a password is required". Wrap the privileged part instead:
+    sshx -h=host "sudo sh -c 'cd /data/app && docker compose up -d'"
 
   This keeps keyring lookup, stdin password injection, and future audit fields
   on one clear rule. Put sudo at the beginning of the remote command when you
@@ -782,6 +792,14 @@ Bounds and safety:
 There is no --command. JSON schema is sshx.text.v1. Branch on success,
 hits[].kind, stats.total_hits vs returned, truncated, truncated_reason,
 and line_origin (file vs scanned_window).
+
+Monitoring:
+  A scan that runs longer than a few seconds narrates progress on stderr
+  (bytes, percentage, lines, elapsed, matches). Long or budget-limited scans
+  close with advice naming --offset/--tail/--max-scan-bytes. stderr carries
+  these lines only: stdout stays exactly one JSON document. stats gains
+  expected_scan_bytes (the window budget) alongside file_size/window_start_byte,
+  so a caller can size a scan before trusting total_hits_exact.
 
 Examples:
   sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json

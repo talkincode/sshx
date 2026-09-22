@@ -77,7 +77,7 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 12. 人类专用的 `sshx login`：登录已配置主机，可选 `--sudo` 进入特权壳。不属于 Agent/MCP 契约。
 13. 源地址绑定（`--bind=<ip|iface>`），对齐 OpenSSH `-b` / `BindAddress` / `BindInterface`。
 14. 会话内跳板（`via` / `--via=`）：嵌套 SSH 进入私网目标，每跳独立信任与审计，不在本机开隧道。
-15. `sshx text`：有界远端日志/文本解剖（异常块、preset、行窗），经 SFTP 或 sshx 持有的 journalctl。
+15. `sshx text`：有界远端日志/文本解剖（异常块、preset、行窗），经 SFTP 或 sshx 持有的 journalctl；读取走并发流水线，扫描进度写 stderr，宽窗口不再像卡死。
 
 ## 安装
 
@@ -258,6 +258,16 @@ sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.lo
 | `0`      | 命令成功                                                   |
 | `1..254` | 远程命令的退出码，原样透传                                  |
 | `255`    | `sshx` 层面的失败（连接 / 认证 / 主机密钥 / 超时 / 被拦截） |
+
+被安全策略拦截时，除 stdout 的 JSON 外，stderr 也会给出人类可读的原因，只打印两个流的调用方不会把拦截误读成「静默拒绝」：
+
+```text
+$ sshx -h=prod-db --json "docker exec pg exec -U app -d app -c 'select 1'"
+sshx: blocked by safety policy (phase=admission, error_kind=blocked, executed=false, exit_code=-1); no remote command ran
+sshx: block reason: ⚠️  Dangerous command blocked | ... | Reason: Direct PostgreSQL client execution ("psql") bypasses the guarded SQL pipeline. Use: sshx sql -h=<host> --db=<name> [--docker=<container>] "<SQL>" ...
+```
+
+拦截判定是机器可读的，四个字段同时出现：`exit_code=-1`、`error_kind=blocked`、`phase=admission`、`executed=false`。被拦截的命令不会触网。请改用受管路径：`sshx sql -h=<host> --db=<name> [--docker=<container>] "<SQL>"`。stdout 仍只有一份 JSON 文档，stderr 的两行是补充信息。
 
 ### `--json` 结构化输出
 
@@ -569,6 +579,18 @@ sshx -h=192.168.1.100 -pk=server-A "sudo systemctl restart nginx"
 sshx -h=192.168.1.101 -pk=server-B "sudo systemctl restart nginx"
 sshx -h=192.168.1.102 -pk=server-C "sudo systemctl restart nginx"
 ```
+
+**自动填密只作用于命令的首个 token。** 只有命令以 `sudo` 开头时，sshx 才会识别密码提示并注入已保存的密码；出现在 `&&` 之后、脚本内部或管道中的 `sudo` 不会被填密：
+
+```bash
+# 不会填密 —— sudo 不是首个 token，远端会以 "sudo: a password is required" 失败
+sshx -h=prod-web "cd /data/app && sudo docker compose up -d"
+
+# 会填密 —— 把整条特权命令包起来
+sshx -h=prod-web "sudo sh -c 'cd /data/app && docker compose up -d'"
+```
+
+sshx 遇到前一种写法会在 stderr 给出提示：连接前给一次，远端确实报出 sudo 索要密码时再给一次。填密范围本身没有变化。
 
 ### 密码键名说明
 

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `sshx text` reads remote files through a pipelined SFTP path: read-ahead
+  aperture plus `UseConcurrentReads`, so the SFTP layer keeps multiple requests
+  in flight for one file instead of one round trip per read. On the reporting
+  host the same 8 MiB window went from a median 83.0 s to 26.5 s (88.0/77.9 s →
+  23.8/29.1 s, alternating runs, identical bytes and lines scanned). `--max-scan-bytes`
+  still bounds both the scan and the read-ahead, and the truncation probe reads
+  exactly one byte past the budget.
+
+### Added
+
+- `sshx text` narrates scan progress on stderr after a short grace period
+  (bytes, percentage, lines, elapsed, matches) and warns when a scan stops at
+  its `--max-scan-bytes` budget, naming `--offset`/`--tail`/`--pattern`/
+  `--max-scan-bytes` as the ways to narrow it. A slow scan closes with the same
+  advice. stdout stays exactly one JSON document; progress never enters it.
+- `sshx.text.v1` `stats.expected_scan_bytes` (additive): the byte budget of the
+  scanned window, so a caller can size a scan and spot a partial one before
+  trusting `total_hits_exact`. Omitted when the source size is unknown (journal).
+- A policy block now mirrors its reason to stderr in `--json` mode
+  (`sshx: blocked by safety policy (phase=admission, error_kind=blocked,
+  executed=false, exit_code=-1)`) plus the flattened reason with the guarded
+  alternative, so a caller that only prints stdout/stderr no longer sees a
+  silent refusal. The block predicate and the `sshx sql --docker=` alternative
+  are documented in README/README_CN/usage, with unit and E2E assertions.
+- `sshx` warns when a command contains a non-leading `sudo` (for example
+  `cd /data/app && sudo docker compose up -d`): password auto-fill only rewrites
+  a leading `sudo`, so it announces the boundary before connecting and explains
+  the refusal afterwards, suggesting `sudo sh -c "<command>"`. The auto-fill
+  scope is unchanged.
+
+### Fixed
+
+- `sshx text` no longer looks like a hang: a 60+ second SFTP window used to emit
+  nothing at all, and a budget-limited scan returned partial results without
+  saying so.
+
 ## [0.17.0] - 2026-09-16
 
 ### Added

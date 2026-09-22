@@ -82,7 +82,8 @@ It remains a single binary with one-shot invocations and no resident component o
 14. Session-bound jump hosts (`via` / `--via=`): nested SSH to private targets
     with per-hop trust and audit, without local tunnels.
 15. `sshx text`: bounded remote log/text dissection (exception blocks, presets,
-    line windows) over SFTP or sshx-owned journalctl.
+    line windows) over SFTP or sshx-owned journalctl, with pipelined reads and
+    stderr scan progress so a wide window is never mistaken for a hang.
 
 ## Installation
 
@@ -259,6 +260,22 @@ By default:
 | `0`      | Command succeeded                                                   |
 | `1..254` | Remote command's exit status, propagated verbatim                  |
 | `255`    | `sshx`-level failure (connect / auth / host-key / timeout / blocked) |
+
+A policy block reaches stderr as well as stdout, so a caller that only prints
+the streams sees the reason instead of a silent refusal:
+
+```text
+$ sshx -h=prod-db --json "docker exec pg psql -U app -d app -c 'select 1'"
+sshx: blocked by safety policy (phase=admission, error_kind=blocked, executed=false, exit_code=-1); no remote command ran
+sshx: block reason: ⚠️  Dangerous command blocked | Command: docker exec pg psql … | Reason: Direct PostgreSQL client execution ("psql") bypasses the guarded SQL pipeline. Use: sshx sql -h=<host> --db=<name> [--docker=<container>] "<SQL>" (adds classification, backups, and audit) | If you are sure, use --force or -f flag
+```
+
+The block predicate is machine-readable, and all four fields appear together:
+`exit_code=-1`, `error_kind=blocked`, `phase=admission`, `executed=false`. A
+blocked command never reaches the network. Use the guarding path instead:
+`sshx sql -h=<host> --db=<name> [--docker=<container>] "<SQL>"`. stdout still
+carries exactly one JSON document; the mirror lines are additional, not a
+replacement.
 
 ### `--json` structured output
 
@@ -785,6 +802,23 @@ sshx -h=192.168.1.100 -pk=server-A "sudo systemctl restart nginx"
 sshx -h=192.168.1.101 -pk=server-B "sudo systemctl restart nginx"
 sshx -h=192.168.1.102 -pk=server-C "sudo systemctl restart nginx"
 ```
+
+**Auto-fill only rewrites the first token.** sshx detects a password prompt and
+feeds the stored password only when `sudo` is the command's leading token. A
+`sudo` that appears later runs without a password:
+
+```bash
+# NOT filled — sudo is not the leading token; the remote fails with
+# "sudo: a password is required"
+sshx -h=prod-web "cd /data/app && sudo docker compose up -d"
+
+# Filled — wrap the whole privileged command
+sshx -h=prod-web "sudo sh -c 'cd /data/app && docker compose up -d'"
+```
+
+sshx warns on stderr when it sees the first form, both before connecting and
+again if the remote reports that sudo wanted a password. Auto-fill never
+changes the command text in ways the caller did not ask for.
 
 ## Host Key Verification 🔐
 
