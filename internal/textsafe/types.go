@@ -83,6 +83,28 @@ type Stats struct {
 	TotalHitsExact  bool  `json:"total_hits_exact"`
 	WindowStartByte int64 `json:"window_start_byte,omitempty"`
 	FileSize        int64 `json:"file_size,omitempty"`
+	// ExpectedScanBytes is how much this request expects to read: the byte
+	// window it opened, capped by --max-scan-bytes. A caller can weigh it
+	// before trusting TotalHitsExact, and a mismatch with BytesScanned means
+	// the scan stopped early instead of covering its window. It is additive to
+	// sshx.text.v1 and omitted when the source size is unknown (journal).
+	ExpectedScanBytes int64 `json:"expected_scan_bytes,omitempty"`
+}
+
+// ScanProgress is a bounded progress sample taken while a scan is running.
+// MatchedLines counts lines that matched --pattern so far and stays zero when
+// no pattern was requested.
+type ScanProgress struct {
+	Bytes        int64
+	Lines        int
+	MatchedLines int
+	FileSize     int64
+}
+
+// ProgressObserver receives progress samples. Implementations must not block
+// and must never write to stdout, which carries the JSON result.
+type ProgressObserver interface {
+	Progress(ScanProgress)
 }
 
 // Result is the engine output before host/lifecycle wrapping.

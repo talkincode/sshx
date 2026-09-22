@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -43,13 +44,15 @@ type textJSONResult struct {
 }
 
 type textRun struct {
-	config *sshclient.Config
-	audit  *auditRecorder
-	start  time.Time
-	phase  string
-	client *sshclient.SSHClient
-	req    textsafe.Request
-	scan   textsafe.Result
+	config    *sshclient.Config
+	audit     *auditRecorder
+	start     time.Time
+	phase     string
+	client    *sshclient.SSHClient
+	req       textsafe.Request
+	scan      textsafe.Result
+	reporter  *textScanReporter
+	scanStart time.Time
 }
 
 func textRequestFrom(config *sshclient.Config) (textsafe.Request, error) {
@@ -155,6 +158,11 @@ func HandleText(config *sshclient.Config, audit *auditRecorder) (err error) {
 }
 
 func (r *textRun) collect(req textsafe.Request) (textsafe.Result, error) {
+	// A streamed SFTP window is the only source that can idle for minutes, so it
+	// is the one that narrates progress. stdout stays untouched because the
+	// reporter writes to stderr.
+	r.reporter = newTextScanReporter(os.Stderr, req.Pattern != "")
+	r.scanStart = time.Now()
 	switch req.Kind {
 	case textsafe.SourceFile:
 		if r.config.TextUseSudo {
@@ -178,7 +186,7 @@ func (r *textRun) scanSFTP(req textsafe.Request) (textsafe.Result, error) {
 	req.FileSize = meta.Size
 	req.WindowStartByte = meta.StartByte
 	req.SkipPartialFirst = meta.SkipPartial
-	return textsafe.Scan(file, req)
+	return textsafe.ScanWithProgress(file, req, r.reporter)
 }
 
 func (r *textRun) scanPrivilegedFile(req textsafe.Request) (textsafe.Result, error) {
@@ -220,6 +228,7 @@ func (r *textRun) succeed() error {
 	r.phase = "complete"
 	r.recordAudit(0, "", nil)
 	result := r.baseResult(true, 0, "", nil)
+	r.reportScanAdvice()
 	if r.config.JSONOutput {
 		return emitTextJSON(r.config, result)
 	}
@@ -228,6 +237,16 @@ func (r *textRun) succeed() error {
 	}
 	printTextHits(result)
 	return nil
+}
+
+// reportScanAdvice closes a streamed scan with the guidance a caller needs when
+// the window was too wide or the scan stopped at its byte budget. It writes to
+// stderr only.
+func (r *textRun) reportScanAdvice() {
+	if r.reporter == nil {
+		return
+	}
+	r.reporter.Finish(r.scan, time.Since(r.scanStart))
 }
 
 func (r *textRun) fail(kind string, failErr error) error {
