@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -339,6 +340,10 @@ func RunContext(ctx context.Context, args []string) (err error) {
 			config.SudoPassword = password
 			logger.GetLogger().Success("Sudo password will be auto-filled when prompted")
 		}
+	} else if hint, needed := sshclient.NonLeadingSudoHint(config.Command); needed && config.SudoKey != "" {
+		// Warn before connecting: this command will prompt for a password that
+		// no non-interactive session can answer.
+		logger.GetLogger().Warning("sudo password auto-fill skipped for this command: %s", hint)
 	}
 
 	// Create SSH client
@@ -377,6 +382,7 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *au
 	res, execErr := client.RunCommand(config.JSONOutput)
 	dur := time.Since(start)
 	audit.recordCommandResult(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
+	reportSudoPromptFailure(os.Stderr, config.Command, res.Stderr+res.Stdout)
 
 	if config.JSONOutput {
 		if outputErr := emitCommandJSON(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr); outputErr != nil {
@@ -426,6 +432,19 @@ func reportSSHFailure(config *sshclient.Config, audit *auditRecorder, authMethod
 		}
 	}
 	return err
+}
+
+// reportSudoPromptFailure explains a sudo refusal sshx cannot help with: the
+// stored password is only injected for a leading sudo, so a mid-command sudo
+// stops with "a password is required". It writes straight to stderr rather than
+// through the logger, because it explains a failed run to a caller that may be
+// running with diagnostics quieted.
+func reportSudoPromptFailure(w io.Writer, command, output string) {
+	hint, needed := sshclient.NonLeadingSudoHint(command)
+	if !needed || !sshclient.SudoPasswordPromptFailure(output) {
+		return
+	}
+	fmt.Fprintf(w, "sshx: %s\n", hint)
 }
 
 // emitCommandJSON writes a single JSON result line to stdout. Diagnostic logs go

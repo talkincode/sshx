@@ -121,12 +121,14 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 	if execErr != nil {
 		if outcome.RunID != "" {
 			recordRunAudit(audit, config, req, snap, outcome)
+			reportRunSudoPromptFailures(outcome, req.Action.Command)
 			return execErr
 		}
 		return reportRunRequestFailure(config, audit, execErr)
 	}
 
 	recordRunAudit(audit, config, req, snap, outcome)
+	reportRunSudoPromptFailures(outcome, req.Action.Command)
 
 	// Single-target --json emits one versioned result document.
 	if req.JSONOutput && !req.JSONLOutput && outcome.Single != nil {
@@ -143,6 +145,28 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 		return fmt.Errorf("run failed")
 	default:
 		return &ExitError{Code: code}
+	}
+}
+
+// reportRunSudoPromptFailures explains a per-target sudo refusal that sshx
+// cannot auto-fill: the stored password only rewrites a leading sudo, so a
+// mid-command sudo stops with "a password is required". It writes straight to
+// stderr because the caller explaining a failure may be running with
+// diagnostics quieted, and stdout must keep exactly one result document.
+func reportRunSudoPromptFailures(outcome execution.RunOutcome, command string) {
+	hint, needed := sshclient.NonLeadingSudoHint(command)
+	if !needed {
+		return
+	}
+	for _, res := range outcome.Results {
+		if !sshclient.SudoPasswordPromptFailure(res.Stderr + res.Stdout) {
+			continue
+		}
+		if label := res.Target.Alias; label != "" {
+			fmt.Fprintf(os.Stderr, "sshx: [%s] %s\n", label, hint)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "sshx: %s\n", hint)
 	}
 }
 
@@ -388,6 +412,11 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 		} else {
 			req.Action.Intent = execution.IntentRead
 		}
+	}
+	if hint, needed := sshclient.NonLeadingSudoHint(req.Action.Command); needed {
+		// Non-interactive sessions cannot answer a mid-command sudo prompt and
+		// auto-fill only rewrites the leading token. Say so before connecting.
+		logger.GetLogger().Warning("%s", hint)
 	}
 	if req.Policy.FailureMode == "" {
 		req.Policy.FailureMode = execution.FailureContinue

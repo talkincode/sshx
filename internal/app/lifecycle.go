@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/talkincode/sshx/internal/execution"
@@ -111,10 +114,62 @@ func emitLifecycleJSON(config *sshclient.Config, value any) error {
 	if err != nil {
 		return err
 	}
+	// Write the human-readable mirror first so the JSON document stays the last
+	// line a caller that merges stderr into stdout would have to parse.
+	reportPolicyRejection(os.Stderr, document)
 	if err := encodeJSON(document); err != nil {
 		return fmt.Errorf("%w: deliver execution result: %w", execution.ErrLocalIO, err)
 	}
 	return nil
+}
+
+// reportPolicyRejection mirrors a blocked admission decision to stderr. The
+// rejection predicate is machine-readable (exit_code=-1, error_kind=blocked,
+// phase=admission, executed=false) but lives inside the stdout document, which
+// callers that surface only stdout/stderr used to read as a silent refusal.
+// stdout keeps exactly one JSON document, so --json stays machine-parsable.
+func reportPolicyRejection(w io.Writer, document map[string]json.RawMessage) {
+	if documentString(document, "error_kind") != execution.ErrorKindBlocked {
+		return
+	}
+	phase := documentString(document, "phase")
+	if phase == "" {
+		phase = execution.PhaseAdmission
+	}
+	executed := strings.TrimSpace(string(document["executed"]))
+	if executed != "true" {
+		executed = "false"
+	}
+	exitCode := -1
+	if raw, ok := document["exit_code"]; ok {
+		_ = json.Unmarshal(raw, &exitCode) //nolint:errcheck // only reads the optional numeric projection
+	}
+	fmt.Fprintf(w, "sshx: blocked by safety policy (phase=%s, error_kind=%s, executed=%s, exit_code=%d); no remote command ran\n",
+		phase, execution.ErrorKindBlocked, executed, exitCode)
+	if reason := flattenPolicyReason(documentString(document, "error")); reason != "" {
+		fmt.Fprintf(w, "sshx: block reason: %s\n", reason)
+	}
+}
+
+// flattenPolicyReason collapses a multi-line policy message into one greppable
+// line.
+func flattenPolicyReason(message string) string {
+	parts := strings.Split(message, "\n")
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			kept = append(kept, trimmed)
+		}
+	}
+	return strings.Join(kept, " | ")
+}
+
+func documentString(document map[string]json.RawMessage, key string) string {
+	var text string
+	if raw, ok := document[key]; ok {
+		_ = json.Unmarshal(raw, &text) //nolint:errcheck // only reads optional string projections
+	}
+	return text
 }
 
 func finalizeLifecycle(config *sshclient.Config, value any) (map[string]json.RawMessage, error) {
@@ -158,11 +213,7 @@ func finalizeLifecycle(config *sshclient.Config, value any) (map[string]json.Raw
 		}
 	}
 	stringField := func(key string) string {
-		var text string
-		if raw, ok := document[key]; ok {
-			_ = json.Unmarshal(raw, &text) //nolint:errcheck // only reads optional string projections
-		}
-		return text
+		return documentString(document, key)
 	}
 	code := -1
 	if raw, ok := document["exit_code"]; ok {

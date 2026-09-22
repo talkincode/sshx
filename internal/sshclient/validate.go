@@ -116,6 +116,102 @@ func isCommandWhitespace(ch byte) bool {
 	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
 }
 
+// NonLeadingSudoHint reports a `sudo` invocation in command position that sshx
+// cannot feed a password to, because auto-fill only rewrites a leading `sudo`
+// token (see sudoStdinCommand). `cd /data/app && sudo docker compose up -d`
+// therefore runs verbatim and sudo prompts for a password it can never read
+// over a non-interactive session.
+//
+// The returned hint tells the operator how to restructure the command. The
+// auto-fill scope itself is unchanged: sshx still fills only the leading form.
+func NonLeadingSudoHint(command string) (string, bool) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return "", false
+	}
+	if _, ok := leadingSudoRemainder(trimmed); ok {
+		return "", false
+	}
+	if !sudoInCommandPosition(trimmed, 0) {
+		return "", false
+	}
+	return "sudo is not the first token, so sshx cannot auto-fill a stored sudo password " +
+		"(auto-fill only rewrites a leading `sudo`). Run the privileged part as " +
+		"`sudo sh -c \"<full command>\"`, or move `sudo` to the front.", true
+}
+
+// sudoInCommandPosition reports whether any shell segment executes sudo as its
+// command, recursing into `sh -c '<script>'` payloads.
+func sudoInCommandPosition(command string, depth int) bool {
+	if depth > maxDestructiveDepth {
+		return false
+	}
+	for _, seg := range splitShellSegments(command) {
+		if sudoAtCommandPosition(seg) {
+			return true
+		}
+		if _, args, kind := commandInPosition(seg); kind == positionShellScript && len(args) == 1 {
+			if sudoInCommandPosition(args[0], depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sudoAtCommandPosition walks environment assignments and command wrappers of a
+// single simple command and reports whether one of them is sudo. The walk stops
+// at the first token that is neither, so `sudo` used as an argument (`echo sudo`)
+// or inside a container (`docker exec c sudo id`) does not match, while
+// `nohup sudo …` and `FOO=1 sudo …` do.
+func sudoAtCommandPosition(tokens []string) bool {
+	i := 0
+	for i < len(tokens) {
+		tok := tokens[i]
+		if isEnvAssignment(tok) {
+			i++
+			continue
+		}
+		name := strings.ToLower(commandBasename(tok))
+		if name == "sudo" {
+			return true
+		}
+		valueFlags, ok := commandWrappers[name]
+		if !ok {
+			return false
+		}
+		i++
+		i = skipFlags(tokens, i, valueFlags)
+		if name == "timeout" && i < len(tokens) && looksLikeDuration(tokens[i]) {
+			i++
+		}
+	}
+	return false
+}
+
+// sudoPromptFailures are the remote messages that mean sudo refused to run
+// because it could not read a password.
+var sudoPromptFailures = []string{
+	"sudo: a password is required",
+	"sudo: no password was provided",
+	"sudo: a terminal is required to read the password",
+	"sudo: no tty present and no askpass program specified",
+	"sudo: unable to read password",
+	"sudo: sorry, you must have a tty to run sudo",
+}
+
+// SudoPasswordPromptFailure reports whether remote output shows sudo refusing to
+// run for want of a password read.
+func SudoPasswordPromptFailure(output string) bool {
+	lowered := strings.ToLower(output)
+	for _, marker := range sudoPromptFailures {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetSudoPassword reads a sudo password from the configured secret backend
 // (OS keyring by default, or the explicit local vault).
 func GetSudoPassword(key string) (string, error) {
