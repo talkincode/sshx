@@ -100,7 +100,7 @@ func TestParseArgs_TextSubcommand(t *testing.T) {
 		t.Fatalf("unexpected text flags: %#v", config)
 	}
 	help := ParseArgs([]string{"sshx", "text", "--help", "--json"})
-	if !help.TextHelp || !help.JSONOutput {
+	if help.HelpVerb != "text" || !help.JSONOutput {
 		t.Fatalf("text help not parsed: %#v", help)
 	}
 	denied := ParseArgs([]string{"sshx", "text", "-h=prod", "--command=grep foo"})

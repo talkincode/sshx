@@ -36,7 +36,23 @@ not be introduced for an existing invocation shape.
 - A breaking change requires a new schema (`sshx.result.v2`, …) and an N-1
   support window: the previous schema remains emitted or accepted until the
   next major sshx release after the new schema ships.
-- `--json` stdout stays a machine document. Human logs belong on stderr.
+- `--json` stdout stays a machine document. Human logs belong on stderr, and
+  sshx never writes human text to stdout, including on failure.
+- stderr carries human notices (deprecation warnings, narration, progress) and,
+  outside `--json`, the diagnostic for a failed invocation. `--quiet`
+  (`--no-notices`) suppresses the notices; with it, a caller that merges the
+  streams (`2>&1`) under `--json` still reads exactly one document, in both the
+  success and the failure path. Merging stderr without `--quiet` is not
+  supported for parsing.
+- Per-verb discovery is part of the contract: every subcommand answers
+  `sshx <verb> --help`, and `sshx <verb> --help --json` emits the same blocks as
+  an `sshx.help.v1` document (`sshx text --help --json` keeps its structured
+  `sshx.text.help.v1` document).
+- `--help` and `--quiet` are recognized in option position, in any order:
+  `sshx -h=<host> -p=22 --help` prints the global usage without resolving a host,
+  connecting, or touching the trust store. Once the remote command, SQL
+  statement, or `--` separator starts, a later `--help`/`--quiet` belongs to the
+  payload.
 - MCP tools return the CLI JSON verbatim. MCP does not grow a parallel schema.
 
 ## Additive execution hardening

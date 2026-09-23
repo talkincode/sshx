@@ -16,7 +16,7 @@ func HandlePluginManagement(config *sshclient.Config) error {
 	}
 	action := config.PluginAction
 	if action == "" {
-		return reportPluginError(config, "config", fmt.Errorf("plugin action is required: create, list, show, validate, test, trust, or remove"))
+		return reportPluginError(config, "config", fmt.Errorf("plugin action is required: create, install, list, show, validate, test, trust, or remove"))
 	}
 
 	var result pluginpkg.ActionResult
@@ -55,10 +55,31 @@ func HandlePluginManagement(config *sshclient.Config) error {
 				},
 			}
 		}
+	case "install":
+		if config.PluginSource == "" {
+			err = fmt.Errorf("plugin source directory is required (sshx plugin install <dir>)")
+			break
+		}
+		var installed *pluginpkg.InstallResult
+		installed, err = pluginpkg.Install(pluginpkg.InstallOptions{
+			Source:  config.PluginSource,
+			Replace: config.PluginReplace,
+			Trust:   config.PluginTrust,
+		})
+		if err == nil {
+			resolved := installed.Resolved
+			result = pluginpkg.ActionResult{
+				Success: true, Action: action, PluginID: resolved.Manifest.ID,
+				Path: resolved.Path, PluginRoot: pluginRootOrEmpty(), Source: config.PluginSource,
+				BackupPath: installed.BackupPath, Digest: resolved.Digest,
+				Trusted: resolved.Trusted, Builtin: resolved.Builtin, Valid: true, Files: installed.Files,
+				NextActions: pluginNextActions(resolved.Manifest.ID, resolved.Trusted),
+			}
+		}
 	case "list":
 		var plugins []pluginpkg.Summary
 		plugins, err = pluginpkg.List()
-		result = pluginpkg.ActionResult{Success: err == nil, Action: action, Plugins: plugins}
+		result = pluginpkg.ActionResult{Success: err == nil, Action: action, Plugins: plugins, PluginRoot: pluginRootOrEmpty()}
 	case "show", "validate":
 		if config.PluginID == "" {
 			err = fmt.Errorf("plugin id is required")
@@ -68,7 +89,7 @@ func HandlePluginManagement(config *sshclient.Config) error {
 		resolved, err = pluginpkg.Resolve(config.PluginID)
 		if err == nil {
 			summary := pluginpkg.SummaryFromResolved(resolved)
-			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: resolved.Trusted, Valid: true, Plugin: &summary, Manifest: &resolved.Manifest}
+			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: resolved.Trusted, Builtin: resolved.Builtin, Valid: true, Plugin: &summary, Manifest: &resolved.Manifest}
 		}
 	case "test":
 		if config.PluginID == "" {
@@ -80,7 +101,7 @@ func HandlePluginManagement(config *sshclient.Config) error {
 		var testResult pluginpkg.Result
 		resolved, testResult, fixture, err = pluginpkg.Test(config.PluginID, config.PluginFixture)
 		if err == nil {
-			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: resolved.Trusted, Valid: true, Fixture: fixture, TestResult: &testResult}
+			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: resolved.Trusted, Builtin: resolved.Builtin, Valid: true, Fixture: fixture, TestResult: &testResult}
 		}
 	case "trust":
 		if config.PluginID == "" {
@@ -90,7 +111,7 @@ func HandlePluginManagement(config *sshclient.Config) error {
 		var resolved *pluginpkg.Resolved
 		resolved, err = pluginpkg.Trust(config.PluginID)
 		if err == nil {
-			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: true, Valid: true}
+			result = pluginpkg.ActionResult{Success: true, Action: action, PluginID: config.PluginID, Path: resolved.Path, Digest: resolved.Digest, Trusted: true, Builtin: resolved.Builtin, Valid: true}
 		}
 	case "remove":
 		if config.PluginID == "" {
@@ -175,9 +196,7 @@ func emitPluginResult(config *sshclient.Config, result pluginpkg.ActionResult) e
 		return nil
 	}
 	if result.Action == "list" {
-		for _, summary := range result.Plugins {
-			fmt.Printf("%s\t%s\ttrusted=%t\tbuiltin=%t\tvalid=%t\n", summary.ID, summary.Version, summary.Trusted, summary.Builtin, summary.Valid)
-		}
+		printPluginList(result)
 		return nil
 	}
 	fmt.Printf("plugin %s: %s", result.Action, result.PluginID)
@@ -188,5 +207,59 @@ func emitPluginResult(config *sshclient.Config, result pluginpkg.ActionResult) e
 		fmt.Printf("; backup=%s", result.BackupPath)
 	}
 	fmt.Println()
+	if result.Digest != "" {
+		fmt.Printf("  builtin=%t trusted=%t valid=%t digest=%s\n", result.Builtin, result.Trusted, result.Valid, result.Digest)
+	}
+	for _, next := range result.NextActions {
+		fmt.Printf("  next: %s\n", next)
+	}
 	return nil
+}
+
+// printPluginList groups the inventory by provenance and always names the local
+// plugin root, so "no local plugins installed" is visible as such instead of
+// having to be inferred from the absence of rows, and a local entry shows the
+// state and digest a caller needs before running it.
+func printPluginList(result pluginpkg.ActionResult) {
+	builtins, local := []pluginpkg.Summary{}, []pluginpkg.Summary{}
+	for _, summary := range result.Plugins {
+		if summary.Builtin {
+			builtins = append(builtins, summary)
+		} else {
+			local = append(local, summary)
+		}
+	}
+	fmt.Printf("built-in capabilities (%d):\n", len(builtins))
+	for _, summary := range builtins {
+		fmt.Printf("  %s\t%s\ttrusted=true\tvalid=%t\n", summary.ID, summary.Version, summary.Valid)
+	}
+	fmt.Printf("local plugins (%d) in %s:\n", len(local), result.PluginRoot)
+	if len(local) == 0 {
+		fmt.Printf("  (none; use \"sshx plugin install <dir>\" or \"sshx plugin create <id>\")\n")
+		return
+	}
+	for _, summary := range local {
+		if !summary.Valid {
+			fmt.Printf("  %s\tINVALID\t%s\t%s\n", summary.ID, summary.ErrorKind, summary.Error)
+			continue
+		}
+		fmt.Printf("  %s\t%s\ttrusted=%t\tvalid=true\tdigest=%s\n", summary.ID, summary.Version, summary.Trusted, summary.Digest)
+	}
+}
+
+// pluginRootOrEmpty names the local plugin root for discovery output.
+func pluginRootOrEmpty() string {
+	root, err := pluginpkg.Root()
+	if err != nil {
+		return ""
+	}
+	return root
+}
+
+// pluginNextActions points at the remaining step after a plugin lands.
+func pluginNextActions(id string, trusted bool) []string {
+	if trusted {
+		return []string{"sshx plugin test " + id + " --json", "sshx inspect -h=<host> " + id + " --json"}
+	}
+	return []string{"sshx plugin validate " + id + " --json", "sshx plugin trust " + id + " --json", "sshx inspect -h=<host> " + id + " --json"}
 }

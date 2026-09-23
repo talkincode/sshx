@@ -427,6 +427,59 @@ func TestRun_DryRunResolvesNamedHostAndSudoKey(t *testing.T) {
 	}
 }
 
+// `sshx run --target=` resolves the sudo keyring reference per host, exactly as
+// the single-target verbs do: the built-in default key must not shadow the
+// host's sudo_password_key, and an explicit -pk still wins (issue #78).
+func TestRun_DryRunTargetResolvesHostSudoKey(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	sudoKeyName := "prod-web-sudo" //nolint:gosec // G101: keyring key name used in a test, not secret material.
+	err := SaveSettings(&Settings{
+		Hosts: []HostConfig{{
+			Name:            "prod-web",
+			Host:            "10.0.0.5",
+			Port:            "2222",
+			User:            "root",
+			SudoPasswordKey: sudoKeyName,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SaveSettings() error = %v", err)
+	}
+
+	targetSudoKey := func(t *testing.T, args []string) string {
+		t.Helper()
+		result := runDryRunJSON(t, args)
+		plan, ok := result["plan"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected nested plan object, got %T", result["plan"])
+		}
+		targets, ok := plan["targets"].([]any)
+		if !ok || len(targets) != 1 {
+			t.Fatalf("expected one planned target, got %v", plan["targets"])
+		}
+		target, ok := targets[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected target object, got %T", targets[0])
+		}
+		key, ok := target["sudo_key"].(string)
+		if !ok {
+			t.Fatalf("planned target has no sudo_key string: %v", target)
+		}
+		return key
+	}
+
+	configured := targetSudoKey(t, []string{"sshx", "run", "--target=prod-web", "--dry-run", "--json", "--", "sudo whoami"})
+	if configured != sudoKeyName {
+		t.Errorf("expected the host's sudo key %q in the plan, got %q", sudoKeyName, configured)
+	}
+
+	override := targetSudoKey(t, []string{"sshx", "run", "--target=prod-web", "-pk=explicit-sudo", "--dry-run", "--json", "--", "sudo whoami"})
+	if override != "explicit-sudo" {
+		t.Errorf("expected an explicit -pk to win, got %q", override)
+	}
+}
+
 func TestRun_DryRunHostTestUsesConfiguredKeyAndPasswordKey(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)

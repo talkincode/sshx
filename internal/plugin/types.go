@@ -145,6 +145,9 @@ type ActionResult struct {
 	Action      string    `json:"action"`
 	PluginID    string    `json:"plugin_id,omitempty"`
 	Path        string    `json:"path,omitempty"`
+	Builtin     bool      `json:"builtin,omitempty"`
+	PluginRoot  string    `json:"plugin_root,omitempty"`
+	Source      string    `json:"source,omitempty"`
 	BackupPath  string    `json:"backup_path,omitempty"`
 	Digest      string    `json:"digest,omitempty"`
 	Trusted     bool      `json:"trusted,omitempty"`

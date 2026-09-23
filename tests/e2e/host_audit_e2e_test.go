@@ -84,6 +84,91 @@ func TestCLIAuditQueryByRunID(t *testing.T) {
 	assert.Equal(t, 0, emptyDoc.Count)
 }
 
+// `sshx run --target=` resolves the sudo key per host, and the audit trail must
+// name the reference each host actually used: the per-target event carries the
+// resolved key, while the run summary reports only a caller-level choice instead
+// of misreporting the built-in default (issue #78).
+func TestCLIRunAuditRecordsResolvedPerTargetSudoKey(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	auditDir := filepath.Join(home, "audit")
+	env := map[string]string{
+		"SSHX_E2E_KEYRING_FILE": filepath.Join(home, "keyring.json"),
+		"SSH_PASSWORD":          operatorPassword,
+		"SSHX_NO_AUDIT":         "false",
+	}
+	// The host's sudo key holds the operator password; "master" is never seeded,
+	// so a run that fell back to the default could not authenticate sudo.
+	set := runSSHXWithTestKeyring(t, home, []string{"--password-set=hostkey:" + operatorPassword, "--no-audit"}, env)
+	require.Equal(t, 0, set.exitCode, set.stderr)
+	writeSettings(t, home, map[string]any{
+		"hosts": []map[string]any{{
+			"name": "prod-web", "host": server.host, "port": server.port, "user": "operator",
+			"sudo_password_key": "hostkey",
+		}},
+	})
+
+	auditEventsFor := func(t *testing.T, runID string) []map[string]any {
+		t.Helper()
+		queried := runSSHXWithTestKeyring(t, home, []string{
+			"audit", "query", "--run-id=" + runID, "--json", "--audit-output=" + auditDir, "--no-audit",
+		}, env)
+		require.Equal(t, 0, queried.exitCode, queried.stderr)
+		var queryDoc struct {
+			Events []map[string]any `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(queried.stdout), &queryDoc))
+		require.NotEmpty(t, queryDoc.Events, queried.stdout)
+		return queryDoc.Events
+	}
+	splitEvents := func(t *testing.T, events []map[string]any) (summary, target map[string]any) {
+		t.Helper()
+		for _, event := range events {
+			if _, ok := event["target_index"]; ok {
+				target = event
+				continue
+			}
+			summary = event
+		}
+		require.NotNil(t, summary, "run must write a summary audit event")
+		require.NotNil(t, target, "run must write a per-target audit event")
+		return summary, target
+	}
+
+	ran := runSSHXWithTestKeyring(t, home, []string{
+		"run", "--target=prod-web", "--no-key", "--accept-unknown-host",
+		"--json", "--audit-output=" + auditDir, "--", "sudo whoami",
+	}, env)
+	require.Equal(t, 0, ran.exitCode, "stderr=%s stdout=%s", ran.stderr, ran.stdout)
+	var runDoc struct {
+		RunID string `json:"run_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(ran.stdout), &runDoc))
+	require.NotEmpty(t, runDoc.RunID)
+
+	summary, target := splitEvents(t, auditEventsFor(t, runDoc.RunID))
+	assert.Equal(t, "hostkey", target["sudo_key"],
+		"the per-target event must name the sudo key the host resolved to")
+	assert.NotContains(t, summary, "sudo_key",
+		"a caller that chose no key must not be recorded as using the built-in default")
+
+	// An explicit caller key overrides the host's key and is recorded as such.
+	explicitSet := runSSHXWithTestKeyring(t, home, []string{"--password-set=explicit:" + operatorPassword, "--no-audit"}, env)
+	require.Equal(t, 0, explicitSet.exitCode, explicitSet.stderr)
+	override := runSSHXWithTestKeyring(t, home, []string{
+		"run", "--target=prod-web", "-pk=explicit", "--no-key", "--accept-unknown-host",
+		"--json", "--audit-output=" + auditDir, "--", "sudo whoami",
+	}, env)
+	require.Equal(t, 0, override.exitCode, "stderr=%s stdout=%s", override.stderr, override.stdout)
+	var overrideDoc struct {
+		RunID string `json:"run_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(override.stdout), &overrideDoc))
+	overrideSummary, overrideTarget := splitEvents(t, auditEventsFor(t, overrideDoc.RunID))
+	assert.Equal(t, "explicit", overrideTarget["sudo_key"])
+	assert.Equal(t, "explicit", overrideSummary["sudo_key"])
+}
+
 func TestCLIHostImportIsUsableAndFailedSelectionIsAllOrNothing(t *testing.T) {
 	server := startSSHServer(t, serverOptions{})
 	home := t.TempDir()

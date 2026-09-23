@@ -40,6 +40,16 @@ sshx plugin list --json
 sshx inspect -h=prod-web system.baseline --json
 ```
 
+`sshx plugin list` always names the local plugin root and its provenance, and a
+missing plugin names the directory that was searched. When a plugin already
+exists as a local directory, provision it through the CLI instead of placing
+files by hand:
+
+```bash
+sshx plugin install ./my-plugin --trust --json   # validate + publish + trust
+sshx plugin install ./my-plugin --replace --json # keep the old one as a backup
+```
+
 Application-specific scripts are sshx runtime assets under
 `~/.sshx/plugins/<id>` (or `$SSHX_HOME/plugins/<id>`). **Do not embed or maintain
 collector scripts in this skill.** If no suitable plugin exists, ask sshx to
@@ -111,6 +121,16 @@ legacy single-object shape. `sshx run --json` adds versioned fields
 Branch on `success` / `status` first; on failure read `error.kind` or
 `error_kind` (do not parse free-form text). For change actions, inspect
 `completion` before any retry (`not_started|partial|completed|completed_unconfirmed|unknown`).
+
+Every subcommand documents itself: `sshx <verb> --help` prints that verb's
+usage, and `sshx <verb> --help --json` returns the same blocks as
+`sshx.help.v1` (`sshx text --help --json` keeps its structured
+`sshx.text.help.v1` document). Read the verb's help before guessing flag names.
+
+Under `--json`, stdout carries the machine document and nothing else; human
+notices (deprecation warnings, narration) go to stderr. Pass `--quiet` when you
+merge the streams (`2>&1`): it suppresses the notices, so the merged stream still
+parses while failures keep their JSON `error_kind`/`error`.
 
 Selectors resolve only configured host aliases. Literal addresses require
 `--address=` and cannot enter group/tag fan-out. Zero matches is exit `255`
@@ -321,6 +341,11 @@ automatic backup → execute → structured result + audit event.
 ```bash
 # Reads run directly; no EXPLAIN, no backup.
 sshx sql -h=db1 --db=app --json "SELECT count(*) FROM users"
+
+# A statement that opens with a comment is statement text, not an option; a
+# .sql file can be handed over directly, or piped on stdin.
+sshx sql -h=db1 --db=app --json --statement-file=./query.sql
+printf '%s' 'select 1' | sshx sql -h=db1 --db=app --json
 
 # DML with WHERE: rows are snapshotted to CSV on the remote host first.
 sshx sql -h=db1 --db=app --db-user=app --db-password-key=app-db --json \

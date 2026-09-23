@@ -1,753 +1,195 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/talkincode/sshx/internal/execution"
+	"github.com/talkincode/sshx/internal/sshclient"
+)
 
 // Version is the sshx build version, set by the main package at startup
 // (injected via -ldflags). Defaults to "dev" for go test / go run builds.
 var Version = "dev"
 
-// PrintUsage prints the usage information for the sshx command.
+// helpSchemaVersion is the schema of the generic per-verb help document.
+const helpSchemaVersion = "sshx.help.v1"
+
+// usageSection is one titled block of the sshx help surface. `sshx --help`
+// prints every block in order; `sshx <verb> --help` prints that verb's blocks
+// plus the shared option blocks. The text is defined once, in
+// usage_sections.go, so the per-verb help cannot drift from the global help.
+type usageSection struct {
+	title   string
+	verb    string // empty for blocks that no single verb owns
+	summary string // one line, emitted by sshx.help.v1
+	text    string
+}
+
+// helpVerbs are the subcommands that answer `sshx <verb> --help`.
+var helpVerbs = []string{"run", "apply", "sql", "text", "inspect", "plugin", "skill", "audit", "login", "mcp", "ros"}
+
+// verbSharedSections are the blocks every remote verb accepts, repeated in each
+// per-verb help so one call answers "what may I pass here?".
+var verbSharedSections = []string{
+	"SSH Options",
+	"Agent / Scripting Mode",
+	"Sudo Auto-fill",
+	"Dry-run Plan Preview",
+	"Audit Trail",
+	"Safety Options",
+}
+
+// usageSections returns every help block in global-help order.
+func usageSections() []usageSection {
+	return []usageSection{
+		{title: "Usage", verb: "", summary: "", text: usageIntro},
+		{title: "SSH Options", verb: "", summary: "", text: usageSSHOptions},
+		{title: "Run Contract (preferred for Agents)", verb: "run", summary: "Execute one command or script across selected hosts with the versioned sshx.run contract.", text: usageRun},
+		{title: "Agent / Scripting Mode", verb: "", summary: "", text: usageAgentMode},
+		{title: "Sudo Auto-fill", verb: "", summary: "", text: usageSudoAutoFill},
+		{title: "Dry-run Plan Preview", verb: "", summary: "", text: usageDryRun},
+		{title: "Audit Trail", verb: "", summary: "", text: usageAuditTrail},
+		{title: "Audit Query and Export", verb: "audit", summary: "Query or export the local structured audit trail without connecting or writing.", text: usageAuditQuery},
+		{title: "Safety Options", verb: "", summary: "", text: usageSafety},
+		{title: "SFTP Options", verb: "", summary: "", text: usageSFTP},
+		{title: "Server-to-Server Transfer", verb: "", summary: "", text: usageTransfer},
+		{title: "Password Management (Cross-Platform)", verb: "", summary: "", text: usagePassword},
+		{title: "Host Management", verb: "", summary: "", text: usageHost},
+		{title: "Inspection Capabilities", verb: "inspect", summary: "Collect or reuse one structured host observation from a built-in or local capability.", text: usageInspect},
+		{title: "Guarded SQL Execution", verb: "sql", summary: "Run one guarded SQL statement through the database client already present on the remote host.", text: usageSQL},
+		{title: "MikroTik RouterOS (ROS) over SSH", verb: "ros", summary: "Manage MikroTik RouterOS devices over SSH and SFTP with structured commands.", text: usageROS},
+		{title: "Guarded File Apply", verb: "apply", summary: "Replace one remote regular file with a precondition, backup, and post-write verification pipeline.", text: usageApply},
+		{title: "Text Dissection", verb: "", summary: "", text: usageText},
+		{title: "Interactive Login", verb: "login", summary: "Open one human interactive TTY session on a host already known to sshx.", text: usageLogin},
+		{title: "Plugin Management", verb: "plugin", summary: "Install, create, list, validate, trust, and remove local inspection plugins.", text: usagePlugin},
+		{title: "Agent Skill Installation", verb: "skill", summary: "Install or update the sshx Agent skill embedded in the binary.", text: usageSkill},
+		{title: "MCP Server (stdio)", verb: "mcp", summary: "Serve the sshx execution contract over stdio to an MCP client.", text: usageMCP},
+		{title: "Environment Variables (.env)", verb: "", summary: "", text: usageEnv},
+		{title: "SSH Examples", verb: "", summary: "", text: usageSSHExamples},
+		{title: "Inspection Examples", verb: "inspect", summary: "", text: usageInspectExamples},
+		{title: "Agent Skill Example", verb: "skill", summary: "", text: usageSkillExample},
+		{title: "SFTP Examples", verb: "", summary: "", text: usageSFTPExamples},
+		{title: "Server-to-Server Transfer Examples", verb: "", summary: "", text: usageTransferExamples},
+		{title: "Password Management Examples", verb: "", summary: "", text: usagePasswordExamples},
+		{title: "Host Management Examples", verb: "", summary: "", text: usageHostExamples},
+		{title: "Note", verb: "", summary: "", text: usageNotes},
+	}
+}
+
+// PrintUsage prints the global sshx help surface.
 func PrintUsage() {
 	fmt.Printf("\nSSHX — Agent-native remote host execution over SSH\nVersion: %s\n", Version)
-	fmt.Println(`
-Usage:
-  sshx -h=<host> [options] <command>              # SSH mode (compatibility)
-  sshx run [selectors] [options] -- <command>     # Canonical execution contract
-  sshx run --script-file=PATH ...                 # Byte-preserving script payload
-  sshx -h=<host> [options] --upload=<file>        # SFTP upload
-  sshx -h=<host> [options] --download=<file>      # SFTP download
-  sshx --transfer=<host>:<path> --to=<host>:<path> # Server-to-server transfer
-  sshx --password-set=<key>[:<password>]          # Store a password (keyring or local vault)
-  sshx --password-get=<key>                       # Get password from OS keyring (denied for local vault)
-  sshx --password-delete=<key>                    # Delete a stored password
-  sshx --password-list                            # List stored or common password keys
-  sshx --host-add                                 # Add host configuration
-  sshx --host-update                              # Update host configuration
-  sshx --host-list                                # List configured hosts
-  sshx --host-test=<name>                         # Test host connection
-  sshx --host-test-all                            # Test all host connections
-  sshx --host-remove=<name>                       # Remove host configuration
-  sshx skill install [options]                    # Install/update the bundled Agent skill
-  sshx plugin create <id> [options]               # Scaffold a local inspection plugin
-  sshx plugin list [--json]                       # List built-in and local capabilities
-  sshx inspect -h=<host> <capability> [options]   # Run one structured host inspection
-  sshx sql -h=<host> --db=<name> [options] "SQL"  # Guarded SQL via remote psql/sqlite3
-  sshx ros -h=<host> [options] <cmd...>           # MikroTik RouterOS over SSH
-  sshx apply -h=<host> --path=<remote> --from=<local>  # Guarded remote file apply
-  sshx text -h=<host> --path=<remote> [options]   # Bounded remote text/log dissection
-  sshx login <name> [--sudo]                      # Human interactive login (TTY required)
-  sshx mcp                                        # Serve the execution contract over stdio (MCP)
-  sshx audit query [filters] [--json]             # Read-only audit trail query
-  sshx audit export --to=<file> [filters]         # Export matching audit events as JSONL
-
-SSH Options:
-  -h, --host=HOST          Remote host address (required in compatibility mode)
-  -p, --port=PORT          SSH port (default: 22)
-  -u, --user=USER          SSH username (default: master)
-  -i, --key=PATH           SSH private key path (default: ~/.ssh/id_rsa)
-  -pk, --password-key=KEY  Sudo password keyring key name (default: master)
-                           Used only when the remote command starts with sudo
-  --ssh-password-key=KEY   SSH login password keyring key (never used for sudo)
-  --bind=ADDR              Local source IP or interface (e.g. 192.0.2.10 or en0)
-  --via=NAME               Named sshx jump host (session-bound; no local tunnel)
-  --dry-run                Print the local execution plan without side effects
-  --expect-plan=HASH       Require the reviewed sha256:<64 lowercase hex> plan
-  --audit-output=DIR       Write audit JSONL files to DIR (default: ~/.sshx/audit)
-  --no-audit               Disable local audit event writing for this invocation
-  --timeout=DURATION       Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
-  --host-timeout=DURATION  Optional total admitted-target budget (setup + verify)
-  --global-timeout=DURATION Optional operation budget, including queued targets
-  --json                   Emit a single structured JSON result on stdout
-  --pty                    Request a PTY (merges stderr into stdout; off by default)
-  --version                Show version information (alias: -v)
-  --help                   Show this help message
-
-Run Contract (preferred for Agents):
-  sshx run --target=prod-web --json -- "systemctl is-active nginx"
-  sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
-  sshx run --target=prod-web --script-file=./check.sh --json
-  cat ./check.sh | sshx run --target=prod-web --script-stdin --json
-
-  Selectors (configured hosts only; multi-host never treats names as DNS):
-    --target=NAME            strict alias (repeatable via --targets=a,b)
-    --group=NAME             union with other names/groups (repeatable)
-    --tag=key=value          AND filter (repeatable)
-    --all-hosts              all configured hosts before tag filters
-    --address=HOST           explicit single literal address (not for fan-out)
-
-  Script payloads:
-    --script-file=PATH       byte-preserving script from a local file
-    --script-stdin           byte-preserving script from stdin
-    --shell=NAME             interpreter override: sh, bash, zsh, dash, ksh, ash
-                             (default: the script's #! line, else sh)
-
-  Limits / policy:
-    --concurrency=N          default 4, hard max 32
-    --failure-mode=continue|fail_fast   default continue
-    --fail-fast              Alias of --failure-mode=fail_fast
-    --max-failures=N          Stop new admission at this failure threshold
-    --intent=read|change|unknown
-    --force / --no-safety-check require --bypass-reason=TEXT
-    --jsonl                  stream run_started/target_*/run_finished events
-
-  Failure thresholds stop admission only; already admitted targets finish and
-  can add failures. Conflicting failure policies are configuration errors.
-  New time budgets are opt-in; --timeout keeps its existing meaning/defaults.
-  Cancellation closes local transport work, not guaranteed remote termination
-  or rollback. Treat unacknowledged changes as uncertain before retrying.
-
-  Multi-target exit codes:
-    0    all selected targets succeeded
-    1    run accepted but at least one target failed/skipped/uncertain
-    255  request-level failure (bad selectors, zero matches, invalid input)
-
-Agent / Scripting Mode:
-  By default command output streams live with stdout and stderr kept on
-  separate channels (no PTY), and the remote command's exit status is
-  propagated as sshx's own exit code.
-
-  Compatibility --json emits one JSON object on stdout:
-    {host, port, user, command, exit_code, success, stdout, stderr,
-     stdout_truncated, stderr_truncated, duration_ms, auth_method,
-     error_kind, error}
-  sshx run --json adds versioned fields (schema_version, run_id, status,
-  phase, completion, structured error).
-
-  Shared Execution Evidence:
-    plan_hash, risk, effects, execution_id, parent_execution_id,
-    execution_fingerprint, change_state, executed (nullable), verified,
-    verification, preconditions, postconditions.
-  change_state is changed|unchanged|unknown; null executed is not false.
-  Success, execution acknowledgement, change, and verification are distinct.
-  Unknown commands/scripts default to mutation risk with unknown effects;
-  --intent=read is not proof of read-only behavior. Risk is
-  read|mutation|privileged|destructive, not an authorization grant.
-  Raw stdout/stderr and secret values are not execution-fingerprinted.
-
-  Exit codes (single-host compatibility mode):
-    0          command succeeded
-    1..254     remote command's exit status (propagated verbatim)
-    255        sshx-level failure (connect/auth/host-key/timeout/blocked/...)
-    In --json mode an sshx-level failure has exit_code -1 and a non-empty
-    error_kind (timeout, auth, host_key, connect, blocked, exit_missing,
-    config, error), so it is always distinguishable from a remote exit 255.
-
-  A policy block also writes its reason to stderr
-  (exit_code=-1, error_kind=blocked, phase=admission, executed=false), so a
-  caller that only prints the streams sees why nothing ran. Use the guarded
-  alternative instead: sshx sql -h=<host> --db=<name> [--docker=<container>]
-  "<SQL>". stdout still carries exactly one JSON document.
-
-  Trust note: high-risk bypasses (force, no-safety-check, accept-unknown-host,
-  insecure-hostkey) require explicit CLI flags. Inherited env values and
-  working-directory .env files are ignored for those decisions.
-
-Sudo Auto-fill:
-  sshx auto-fills a sudo password only when the remote command starts with
-  sudo, for example:
-    sshx -h=host "sudo systemctl status nginx"
-
-  Non-leading sudo is not auto-filled and does not trigger keyring lookup:
-    sshx -h=host "sh -c 'sudo whoami'"
-    sshx -h=host "echo sudo"
-
-  sshx warns on stderr when it sees a non-leading sudo, because the remote then
-  stops with "sudo: a password is required". Wrap the privileged part instead:
-    sshx -h=host "sudo sh -c 'cd /data/app && docker compose up -d'"
-
-  This keeps keyring lookup, stdin password injection, and future audit fields
-  on one clear rule. Put sudo at the beginning of the remote command when you
-  want sshx to auto-fill it.
-
-Dry-run Plan Preview:
-  Add --dry-run to see how sshx would interpret an invocation before any
-  connection, command execution, keyring secret lookup, known_hosts mutation, or
-  settings write. Use --json with --dry-run for an agent-readable plan.
-
-  Examples:
-    sshx -h=prod-web --dry-run "sudo systemctl restart nginx"
-    sshx -h=prod-web --dry-run --json --upload=local.txt --to=/tmp/local.txt
-
-  Dry-run is a local plan preview only. It does not prove the remote command
-  would succeed.
-
-  Bound Plan Admission:
-  Remote command/run/apply/sql/SFTP/transfer/inspect previews add a nested
-  sshx.plan.v1 plan plus plan_hash and risk. Run keeps sshx.request.v1 outside.
-  Repeat reviewed inputs with --expect-plan=sha256:<64 lowercase hex>.
-  Local mismatch fails before secret lookup or network work; --force cannot
-  bypass it. Errors: config (format), plan_mismatch, plan_unresolved.
-  Check plan.bindable and plan.unresolved: DNS-only addresses, unavailable
-  public-key sidecars, missing/relaxed trust, and remotely discovered SQL
-  identity cannot bind offline. The entire sorted known_hosts record snapshot
-  is hashed, so unrelated trust changes can conservatively invalidate a plan.
-  Dry-run never connects, reads secrets, or writes state. A plan hash is not
-  a lock on remote files, rows, permissions, or recursive directory membership.
-
-Audit Trail:
-  sshx writes one structured JSONL audit event per non-dry-run invocation to
-  ~/.sshx/audit/sshx-YYYY-MM-DD.jsonl by default. Use --audit-output=<dir> to
-  save audit events next to a project or incident record.
-
-  Audit events record metadata and outcomes such as mode/action, host
-  resolution, sudo/keyring decisions, safety status, auth method, exit code, and
-  error kind. They do not record plaintext passwords, private key contents, or
-  stdout/stderr. Command text is best-effort redacted for password/token-style
-  arguments.
-
-  Read-only consumption:
-    sshx audit query --since=2026-09-01 --target=prod-web --json
-    sshx audit query --run-id=<id> --error-kind=blocked --bypass-only
-    sshx audit query --execution-id=<id> --json
-    sshx audit export --to=./incident.jsonl --since=2026-09-01
-  Empty query results exit 0. JSON mode emits {schema_version, success, count, events}.
-  Corrupt/partial records have visible diagnostics; valid records are retained.
-  Audit writes are best-effort, with persistence status separate from execution.
-  Do not repeat a successful mutation just because audit writing failed.
-
-Safety Options:
-  -f, --force           Force execution, bypass safety checks (use with caution!)
-  --no-safety-check     Disable safety checks completely (not recommended)
-  --bypass-reason=TEXT  Required with --force / --no-safety-check in command
-                        mode and sshx run (recorded in dry-run, result, audit)
-
-  Safety checks protect against:
-    - Destructive operations (rm -rf /, mkfs, dd)
-    - System shutdown/reboot commands
-    - Critical file modifications (/etc/passwd, /etc/shadow)
-    - Dangerous pipe operations (curl | sh)
-    - Fork bombs and other malicious patterns
-    - Direct database client execution (psql/pgcli/sqlite3/mysql/mariadb,
-      incl. docker exec, sudo -u, sh -c, kubectl exec wrappers) — use 'sshx sql' instead
-
-SFTP Options:
-  --upload=<local>      Upload file (use with --to=<remote>)
-  --download=<remote>   Download file (use with --to=<local>)
-  --to=<path>           Target path for upload/download
-  --list=<path>         List directory contents (alias: --ls)
-  --mkdir=<path>        Create remote directory
-  --rm=<path>           Remove remote file or directory
-
-  Add --json for structured operation/effect evidence. Size-only verification
-  does not prove content equality. Partial recursive progress is not rolled
-  back as one atomic directory operation.
-
-Server-to-Server Transfer:
-  --transfer=<src-host>:<src-path> --to=<dst-host>:<dst-path>
-
-  Streams files directly from one server to another through the local
-  machine (nothing is written to local disk). Supports single files and
-  recursive directory transfers, and preserves file permission bits.
-  Both hosts can be configured host names (from ~/.sshx/settings.json)
-  or IP addresses, each using its own SSH key/user/port from settings.
-
-Password Management (Cross-Platform):
-  --password-set=<key>[:<password>]   Store a password in the secret backend
-                                      If password omitted, will prompt
-  --password-get=<key>                OS keyring: emit the value only when piped.
-                                      Local vault: always refused (write-only).
-  --password-check=<key>              Check if password exists (alias: --password-exists).
-                                      Missing keys exit non-zero. --json emits
-                                      sshx.secrets.v1 with success/exists.
-  --password-delete=<key>             Delete password (alias: --password-del)
-  --password-list                     List stored keys (vault) or common keys (keyring).
-                                      --json emits keys[] (list_complete=false on keyring probes)
-
-  Default backend: OS keyring (macOS Keychain / Linux Secret Service /
-  Windows Credential Manager). Headless servers can opt into an encrypted
-  local vault with SSHX_SECRET_BACKEND=local-vault. There is no silent
-  fallback. The vault never displays secret values; sshx injects them over
-  stdin during execution. Unlock with SSHX_VAULT_PASSPHRASE or
-  SSHX_VAULT_KEY_FILE (0600). The vault file is $SSHX_HOME/vault.
-
-Host Management:
-  --host-add                          Add new host (interactive or with options).
-                                      Omitting -pk does not persist sudo_password_key=master.
-                                      --json emits sshx.hosts.v1 for add/update/remove/test.
-  --host-import                       Selectively import hosts from ~/.ssh/config (interactive)
-  --host-import=<name1,name2>         Import only the named ssh_config hosts (non-interactive)
-  --ssh-config=<path>                 ssh_config file to import from (default: ~/.ssh/config)
-  --host-update                       Update existing host configuration
-  --host-list                         List all configured hosts (alias: --host-ls)
-  --host-test=<name>                  Test connection to configured host
-  --host-test-all                     Test connections for all configured hosts
-  --host-remove=<name>                Remove host from configuration (alias: --host-rm)
-
-  Host Add/Update Options:
-    --host-name=<name>                Host name (unique identifier, required for update)
-    --host-desc=<description>         Host description
-    -h=<address>                      Host address (IP or hostname)
-    -p=<port>                         SSH port
-    -u=<user>                         SSH username
-    -i=<key>, --key=<key>            SSH private key path for this host (optional)
-    -pk=<key>                         Password key name
-    --host-type=<type>                System type (linux/windows/macos)
-    --bind=<ip|iface>                 Persist a source address for this host
-    --via=<name>                      Named jump host for this target
-
-  Configuration file: ~/.sshx/settings.json
-
-Inspection Capabilities:
-  sshx inspect -h=<host> <capability> [options]
-
-  Built in:
-    system.identity, system.resources, system.baseline
-    network.interfaces, network.routes, network.dns
-    network.listeners, network.firewall
-
-  --cache=off|remote-prefer  Reuse/write a remote observation (default: off)
-  --refresh                  Ignore a reusable observation and run the collector
-  --max-age=DURATION         Require observations no older than this duration
-  --allow-stale              Explicitly allow an expired observation
-  --sudo                     Use sudo for an optional-privilege plugin
-
-  Collectors execute once through SSH stdin and are never installed on the
-  target. With remote-prefer caching, only redacted JSON is stored below the
-  remote user's ~/.sshx/observations/v1 directory.
-
-Guarded SQL Execution:
-  sshx sql -h=<host> --db=<name> [options] "<single SQL statement>"
-  sshx sql -h=<host> --engine=sqlite --db-file=/abs/path.db [options] "SQL"
-  sshx sql -h=<host> --db=<name> [options] -- <SQL words...>
-
-  Statements run through the database client already present on the remote
-  host (psql, sqlite3, or mysql/mariadb). sshx embeds no database driver and opens no tunnel.
-  Exactly one statement per invocation. Unknown or dangerous statement heads
-  (DROP DATABASE/SCHEMA, ALTER SYSTEM, COPY, DO, ATTACH, sqlite3 dot-commands,
-  transaction control, multi-statement input), psql meta-commands,
-  EXPLAIN ANALYZE, data-modifying CTE bodies, SELECT INTO, CALL, dblink,
-  load_extension, writable PRAGMA, and other unanalyzable forms are blocked
-  fail-closed. PostgreSQL reads run in a read-only transaction; SQLite reads
-  open the file URI with mode=ro. Direct psql/pgcli/sqlite3 invocations in
-  run/command mode are blocked — use sshx sql. Every invocation is audited
-  with a literal-redacted statement, its exact SHA-256 digest, classification,
-  backup, and outcome.
-
-  --engine=postgres|sqlite|mysql  SQL engine (default: postgres)
-  --db=NAME                 PostgreSQL database name, or SQLite path if --db-file is omitted
-  --db-file=PATH            Absolute SQLite database file path (required for --engine=sqlite)
-  --db-user=USER            Database role (default: remote psql default; sqlite unused)
-  --db-host=HOST            Database host as seen from the remote (default: local socket)
-  --db-port=PORT            Database port
-  --db-password-key=KEY     Keyring key for the DB password; delivered via stdin,
-                            never via argv (implies --db-host=127.0.0.1 when unset)
-  --docker=CONTAINER        Run psql inside this container via docker exec -i
-                            (default connection becomes the container-local socket;
-                            backups still land on the host)
-  --db-cred-from=SOURCE     Resolve DB credentials on the remote host instead of the
-                            local keyring: docker:<container> (container env) or
-                            env-file:<path> (KEY=VALUE file). Recognizes PG*,
-                            POSTGRES_*, DB_* keys and DATABASE_URL. Mutually
-                            exclusive with --db-password-key; --db becomes optional
-                            when the source provides the database name.
-  --cred-cache=off|DURATION Temporary local cache for remotely resolved credentials
-                            (default: 15m). The secret lives only in the secret backend;
-                            ~/.sshx/sql-cred-cache.json records identity + expiry.
-                            Expired entries are deleted from the keyring.
-  --cred-refresh            Drop the cached entry and re-resolve from the source
-  --explain                 Run EXPLAIN only; never executes the statement
-  --row-threshold=N         EXPLAIN row estimate that upgrades a row backup to a
-                            full-table CSV snapshot (default: 1000)
-  --allow-full-table        Required for UPDATE/DELETE without a WHERE clause
-  --no-backup               Skip pre-change backup (requires --force)
-  --backup-dir=PATH         Remote backup directory (default: ~/.sshx/sql-backups)
-  --sudo                    Run sqlite3/psql via sudo -S (SSH user cannot open the file)
-  --force, -f               Confirms DDL; destructive DDL also requires --no-backup
-
-  Safety pipeline for data changes: classify locally (fail-closed), gate by
-  policy, then snapshot and execute. PostgreSQL runs EXPLAIN (FORMAT JSON)
-  and snapshots rows or the table under one transaction plus a SHARE ROW
-  EXCLUSIVE lock. SQLite skips row estimates and snapshots the table (CSV)
-  or the whole file under BEGIN IMMEDIATE. Whole-file .backup uses a second
-  read-only client while the mutation client holds the writer lock; mutation
-  is sent only after snapshot completion. SELECT and other reads skip EXPLAIN
-  and backups.
-  Catalog preflight blocks automatic execution when triggers, rewrite rules,
-  partitions, or cascading referential actions can affect related tables;
-  proceed only after an independent backup with --force --no-backup. Automatic
-  backups are not claimed for destructive DDL, which also requires
-  --force --no-backup. Backup directories/files are owner-only. --dry-run
-  previews the local plan without connecting; runtime catalog checks may block.
-  Row counts are engine-specific evidence, not universal proof of value changes.
-  Commit acknowledgement and verification are separate; uncertain commits need
-  inspection before retry. MySQL atomicity requires a supported, proven strategy:
-  separate-session backup/mutation and implicit-commit DDL are not atomic.
-  Bound SQL cannot depend on remote credential/container identity discovery.
-  SQL evidence.verification=protocol_verified acknowledges the client protocol,
-  not actual changed values; effect_verification remains separate.
-  Mutation state_change stays unknown, including zero affected rows.
-  Missing/malformed evidence reports protocol_error or verification_failed.
-  Guarded MySQL supports simple InnoDB single-table UPDATE/DELETE with a write
-  lock. Its SSHX_MYSQL_HEX_ROWS_V1 backup preserves NULL/binary values and is
-  not CSV, a schema dump, or automatic restore; no backup table/DDL is created.
-
-  sshx sql -h=db1 --db=app "SELECT count(*) FROM users"
-  sshx sql -h=db1 --db=app --db-user=app --db-password-key=app-db \
-      "UPDATE users SET active=false WHERE id=42"
-  sshx sql -h=db1 --db=app --explain "DELETE FROM sessions WHERE expires_at < now()"
-  sshx sql -h=db1 --db=app --force "TRUNCATE staging_events"
-  # Dockerized production DB: credentials live in the container env, psql runs
-  # inside the container, resolved credentials are cached in the keyring for 15m
-  sshx sql -h=prod --docker=pg-prod --db-cred-from=docker:pg-prod \
-      "UPDATE users SET active=false WHERE id=42"
-  sshx sql -h=prod --docker=pg-prod --db-cred-from=env-file:/opt/app/.env \
-      --cred-cache=1h "SELECT count(*) FROM orders"
-  sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --json \
-      "UPDATE users SET active=0 WHERE id=42"
-  sshx sql -h=app --engine=sqlite --db-file=/var/lib/app/app.db --sudo --json \
-      "UPDATE users SET active=0 WHERE id=42"
-
-MikroTik RouterOS (ROS) over SSH:
-  sshx ros -h=<host> [options] <path...> <action> [key=value ...]
-  sshx ros -h=<host> interface print [--json]
-  sshx ros -h=<host> ip address add address=192.168.88.1/24 interface=ether1
-  sshx ros -h=<host> raw "/system/resource/print"
-  sshx ros -h=<host> file upload <local> <remote>
-  sshx ros -h=<host> file download <remote> <local>
-  sshx ros -h=<host> backup download <local.backup> [--name=<name>] [--cleanup]
-  sshx ros -h=<host> export download <local.rsc> [--compact] [--cleanup]
-  sshx ros -h=<host> import <local.rsc> [--cleanup]
-  sshx ros -h=<host> script put <name> --source=@<local.rsc>
-  sshx ros commands [--json]                      # List supported RouterOS commands
-  sshx ros help [command] [--json]                # Show command help and arguments
-  sshx ros schema [command] [--json]              # Emit JSON schema for command
-  sshx ros doctor [-h=<host>] [--include-remote]  # Health & environment check
-  sshx ros explain-error <code>                   # Explain error code and remediation
-
-  ROS Options:
-    --dry-run               Emit execution plan JSON without modifying router
-    --allow-write           Permit raw commands or mutations to alter state
-    --force, -f             Bypass safety guardrails for destructive commands
-    --raw                   Execute without CLI response parsing
-    --ros-version=VER       RouterOS major version hint (v6, v7, auto)
-    --source=@PATH          Local .rsc script file for script put
-    --cleanup               Delete temporary remote files after workflow
-    --compact               Use compact export for export download
-    --name=NAME             Custom backup file name
-
-Guarded File Apply:
-  sshx apply -h=<host> --path=/abs/remote.conf --from=./local.conf [options]
-  sshx apply --target=<name> --path=/abs/remote.conf --from=./local.conf --json
-
-  Replaces one remote regular file. sshx reads the current file, optionally
-  checks --expect-sha256, writes an owner-only backup, then atomically replaces
-  the target while preserving mode and owner. Reload/restart is not part of
-  this command — run a separate sshx run after apply succeeds.
-
-  --path=PATH             Absolute remote file path (required)
-  --from=PATH             Local source file (required)
-  --expect-sha256=HEX     Fail closed unless the current remote hash matches
-  --no-backup             Skip the pre-change copy (requires --force)
-  --backup-dir=PATH       Remote backup directory (default: ~/.sshx/file-backups)
-  --sudo                  Stage the payload over SFTP, then install with sudo
-  --force, -f             Skip the hash precondition; required with --no-backup
-  --bypass-reason=TEXT    Required with --force to overwrite /etc/passwd,
-                          /etc/shadow, or /etc/sudoers
-
-  JSON fields to branch on: success, change_state, executed, verified,
-  verification, completion, error_kind (legacy changed/created remain)
-  (precondition/blocked/remote_io/config/...), before_sha256, after_sha256,
-  backup.path, rollback_available. Identical content is success with
-  changed=false and does not write a backup.
-  Post-write verification_failed can mean the target already changed; inspect
-  hashes/backup before retry. SFTP hash rechecks are not arbitrary-writer CAS.
-
-  sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
-      --expect-sha256=<current> --sudo --json
-  sshx apply -h=prod --path=/etc/nginx/nginx.conf --from=./nginx.conf \
-      --dry-run --json
-
-Text Dissection:
-  sshx text --help
-  sshx text --help --json
-  sshx text -h=<host> --path=/abs/file.log [options]
-  sshx text -h=<host> --journal=UNIT [options]
-
-  Bounded remote text/log anatomy for Agents. Do not wrap grep/journalctl
-  in sshx run for incident triage — text returns structured hits.
-
-  Workflow:
-    1. sshx text --help  (or --help --json)
-    2. --preset=exception --json  (blocks and counts first)
-    3. --around-line=<hit.start_line> --context=5 --json
-    4. --download only for incident archives
-
-  --path=/abs/file          Stream a remote regular file over SFTP (default
-                            scan=end, last 8MiB). Symlinks/dirs refused.
-  --journal=UNIT            sshx-owned journalctl for one systemd unit
-  --preset=exception,error,panic,oom,http5xx
-  --pattern=RE2             Optional linear-time regexp after presets
-  --context=N               Neighbor lines (0..20)
-  --around-line=L           Slice around a previous hit
-  --offset=L --limit=N      Line window inside the scanned bytes
-  --tail=N                  Last N lines of the scanned window
-  --scan=start|end          File origin (default end)
-  --since= --until=         Journal time bounds (no shell metacharacters)
-  --max-hits=N --max-bytes=N --max-scan-bytes=N
-  --sudo                    Read with sudo -S
-  --no-redact               Keep secret-shaped spans (default redacts)
-
-  JSON schema sshx.text.v1: hits[], stats.total_hits vs returned,
-  truncated, truncated_reason, line_origin, redacted.
-  There is no --command; that is sshx run.
-
-  sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json
-  sshx text -h=prod-web --journal=nginx.service --since=1h --preset=error --json
-
-Interactive Login:
-  sshx login <name> [--sudo]
-  sshx login -h=<host> [-u=<user>] [-i=<key>] [--sudo]
-  sshx login --address=<host> [--sudo]
-  sshx login <name> --dry-run --json
-
-  Human-only escape hatch onto a host already known to sshx. It opens one
-  interactive session and attaches the local TTY. This is not an Agent
-  contract: --json is only valid with --dry-run, multi-host selectors are
-  rejected, and login is not exposed over MCP.
-
-  <name> / -h=HOST          Named host or hostname (exactly one)
-  --target=NAME             Long alias of -h= / <name>
-  --address=HOST            Literal address; skip settings.json resolution
-  --sudo                    Land in a privileged login shell (sudo -i)
-                            using the host sudo keyring secret on stdin
-  --dry-run / --json        Local plan only; --json requires --dry-run
-
-  Requires a local TTY. POSIX only; Windows returns an explicit unsupported
-  error. There is no command timeout and no session transcript. Audit records
-  target, auth, sudo, duration, and exit code.
-
-  sshx login prod-web
-  sshx login prod-web --sudo
-  sshx login -h=prod-web --sudo
-  sshx login prod-web --dry-run --json
-
-Plugin Management:
-  sshx plugin create <id> [--runner=sh] [--platform=linux|darwin]
-                          [--privilege=never|optional|required]
-                          [--template=generic|docker|nginx] [--replace] [--json]
-  sshx plugin list [--json]
-  sshx plugin show <id> [--json]
-  sshx plugin validate <id> [--json]
-  sshx plugin test <id> [--fixture=<name>] [--json]
-  sshx plugin trust <id> [--json]
-  sshx plugin remove <id> [--json]
-
-  Local plugins belong to sshx, not to an Agent skill. They are stored under
-  ~/.sshx/plugins/<id> and remain untrusted until their current digest is
-  explicitly trusted. Editing a trusted manifest, schema, or collector changes
-  the digest and blocks remote execution until it is trusted again.
-
-Agent Skill Installation:
-  sshx skill install [--dir=<path>] [--force] [--json]
-
-  The canonical sshx Agent skill is embedded in the binary, so installation
-  does not need a network download or a release archive next to the executable.
-  The default target is ~/.agents/skills/sshx/SKILL.md. Pass --dir to select
-  another sshx skill directory.
-
-  A matching installed skill is left unchanged (or repaired to mode 0644).
-  A prior sshx-managed version is updated using its digest sidecar. Differing
-  unmanaged content is preserved unless --force is explicit. Symlinked targets
-  are rejected. JSON status is installed, current, repaired, or updated;
-  failures use conflict, unsafe_target, or install_error.
-
-Environment Variables (.env):
-  SSH_PASSWORD          SSH password (not recommended, use SSH keys or keyring)
-  SSH_KEY_PATH          SSH private key path
-  SSH_SUDO_KEY          Sudo password keyring key name (default: master)
-  SSH_NO_SAFETY_CHECK   Disable safety checks (true/false)
-  SSH_FORCE             Force execution mode (true/false)
-  SSH_TIMEOUT           Command execution timeout (e.g. 30s, 2m, or 30 = seconds)
-  SSHX_AUDIT_OUTPUT     Audit output directory (default: ~/.sshx/audit)
-  SSHX_NO_AUDIT         Disable audit writing (true/false)
-  SSHX_HOME             Override the local sshx runtime root (default: ~/.sshx)
-  SSHX_SECRET_BACKEND   Secret store: keyring (default) or local-vault
-  SSHX_VAULT_PASSPHRASE Unlock passphrase for local-vault (unattended)
-  SSHX_VAULT_KEY_FILE   0600 file containing the vault passphrase (wins over env)
-
-SSH Examples:
-  # Execute simple command (default user: master)
-  sshx -h=192.168.1.100 "uptime"
-
-  # Execute sudo command (auto password from keyring: master)
-  sshx -h=192.168.1.100 "sudo systemctl status docker"
-
-  # Use custom sudo password key for specific server
-  sshx -h=192.168.1.100 -pk=server-A "sudo systemctl restart nginx"
-  sshx -h=192.168.1.101 -pk=server-B "sudo systemctl restart nginx"
-
-  # Custom SSH port
-  sshx -h=192.168.1.100 -p=2222 "ps aux | grep nginx"
-
-  # Bind the local source address (IP or interface name)
-  sshx -h=prod-web --bind=en0 "uptime"
-
-  # Structured JSON output for scripts/agents (one object on stdout)
-  sshx -h=192.168.1.100 --json "systemctl is-active nginx"
-
-  # Preview the execution plan without connecting or reading secrets
-  sshx -h=prod-web --dry-run --json "sudo systemctl restart nginx"
-
-  # Save audit events for this project
-  sshx -h=prod-web --audit-output=./.sshx-audit "systemctl reload nginx"
-
-  # Bound the command wait (does not guarantee remote termination)
-  sshx -h=192.168.1.100 --timeout=30s "apt-get update"
-
-  # Dangerous command will be blocked
-  sshx -h=192.168.1.100 "sudo rm -rf /tmp/*"  # Safe
-  sshx -h=192.168.1.100 "sudo rm -rf /"       # ⚠️ BLOCKED!
-
-  # Force execute (bypass safety check - use with caution!)
-  sshx -h=192.168.1.100 --force "sudo reboot"
-  sshx -h=192.168.1.100 -f "sudo systemctl reboot"
-
-Inspection Examples:
-  # Inspect stable system/network state in one invocation
-  sshx inspect -h=prod-web system.baseline --json
-
-  # Create a locally editable Docker capability, validate it, then trust it
-  sshx plugin create docker.environment --template=docker --privilege=optional --json
-  sshx plugin validate docker.environment --json
-  sshx plugin test docker.environment --fixture=complete --json
-  sshx plugin trust docker.environment --json
-
-  # Inspect once and persist only the redacted observation on the target
-  sshx inspect -h=prod-web docker.environment --cache=remote-prefer --json
-
-Agent Skill Example:
-  # Install after Homebrew/go install, or refresh after upgrading sshx
-  sshx skill install
-
-  # Replace a locally modified copy after reviewing the difference
-  sshx skill install --force --json
-
-SFTP Examples:
-  # Upload file
-  sshx -h=192.168.1.100 --upload=local.txt --to=/tmp/remote.txt
-
-  # Download file
-  sshx -h=192.168.1.100 --download=/var/log/app.log --to=./app.log
-
-  # List directory
-  sshx -h=192.168.1.100 --list=/var/log
-
-  # Create directory
-  sshx -h=192.168.1.100 --mkdir=/tmp/newdir
-
-  # Remove file
-  sshx -h=192.168.1.100 --rm=/tmp/oldfile.txt
-
-  # Batch upload
-  for file in *.txt; do
-    sshx -h=192.168.1.100 --upload=$file --to=/backup/$file
-  done
-
-Server-to-Server Transfer Examples:
-  # Transfer a file directly between two servers (by IP)
-  sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.log
-
-  # Transfer between configured hosts (from settings.json)
-  sshx --transfer=prod-web:/etc/nginx/nginx.conf --to=staging-web:/etc/nginx/nginx.conf
-
-  # Transfer a whole directory recursively
-  sshx --transfer=prod-db:/var/backups --to=backup-server:/mnt/archive/db
-
-  # If the destination is an existing directory, the source is placed inside it
-  sshx --transfer=prod-web:/var/log/app.log --to=log-server:/var/logs/
-
-  # Preview the transfer plan without connecting
-  sshx --transfer=prod-web:/data --to=prod-db:/data --dry-run
-
-Password Management Examples:
-  # Set default sudo password (interactive prompt)
-  sshx --password-set=master
-
-  # Set sudo password (inline, not recommended for security)
-  sshx --password-set=master:mypassword
-
-  # Set passwords for different servers with same username
-  sshx --password-set=server-A
-  sshx --password-set=server-B
-  sshx --password-set=server-C
-
-  # Use different password keys for different servers
-  sshx -h=192.168.1.100 -pk=server-A "sudo systemctl status nginx"
-  sshx -h=192.168.1.101 -pk=server-B "sudo systemctl status nginx"
-  sshx -h=192.168.1.102 -pk=server-C "sudo systemctl status nginx"
-
-  # Set password for specific user
-  sshx --password-set=root
-  sshx --password-set=admin
-
-  # Get password from OS keyring (refused when using local-vault)
-  sshx --password-get=master
-
-  # Headless server: encrypted local vault (write-only; Agent never sees the value)
-  SSHX_SECRET_BACKEND=local-vault SSHX_VAULT_PASSPHRASE='…' \
-    sshx --password-set=prod-web
-  SSHX_SECRET_BACKEND=local-vault SSHX_VAULT_PASSPHRASE='…' \
-    sshx --password-check=prod-web
-
-
-  # Check if password exists
-  sshx --password-check=server-A
-
-  # List common password keys
-  sshx --password-list
-
-  # Delete password from keyring
-  sshx --password-delete=server-A
-
-Host Management Examples:
-  # Add host interactively
-  sshx --host-add
-
-  # Add host with command line options
-  sshx --host-add --host-name=prod-web -h=192.168.1.100 -u=root -pk=prod-web --host-desc="Production Web Server"
-
-  # Add host with its own SSH private key
-  sshx --host-add --host-name=prod-db -h=192.168.1.200 -u=admin -i=~/.ssh/prod-db.pem
-
-  # Persist a source bind for a named host
-  sshx --host-add --host-name=edge --bind=en0 -h=100.117.253.247 -p=18922
-
-  # Update host IP address
-  sshx --host-update --host-name=prod-web -h=192.168.1.101
-
-  # Update host SSH key
-  sshx --host-update --host-name=prod-web -i=~/.ssh/new-key.pem
-
-  # Update host password key
-  sshx --host-update --host-name=prod-web -pk=new-password-key
-
-  # Update multiple fields
-  sshx --host-update --host-name=prod-web -h=192.168.1.101 -u=admin -pk=new-key
-
-  # List all configured hosts
-  sshx --host-list
-
-  # Test connection to a configured host
-  sshx --host-test=prod-web
-
-  # Test all configured hosts and get a report with auth methods
-  sshx --host-test-all
-
-  # Remove a host from configuration
-  sshx --host-remove=prod-web
-
-  # Use configured host (looks up from settings if not an IP)
-  sshx -h=prod-web "uptime"
-
-Note:
-  - SSH key authentication is tried first; password auth is used only when SSH_PASSWORD is provided
-  - Sudo password is auto-filled only when the remote command starts with sudo
-  - Dry-run never connects, executes, reads keyring secrets, or writes state
-  - Audit events are JSONL files under ~/.sshx/audit by default
-  - SFTP operations use the same SSH connection
-  - Password manager works across macOS/Linux/Windows
-  - Default user: master, Default sudo key: master
-  - Host configurations are stored in ~/.sshx/settings.json`)
+	for _, section := range usageSections() {
+		fmt.Print(section.text)
+	}
+	fmt.Println()
+}
+
+// PrintVerbUsage answers `sshx <verb> --help`: the verb's own blocks, the
+// shared option blocks, and a pointer to the global surface. With --json it
+// emits the sshx.help.v1 document instead of prose. `sshx text` keeps its
+// dedicated Agent-facing document and its own sshx.text.help.v1 schema.
+func PrintVerbUsage(config *sshclient.Config) error {
+	verb := config.HelpVerb
+	if verb == "text" {
+		return HandleTextHelp(config)
+	}
+	sections := verbUsageSections(verb)
+	if len(sections) == 0 {
+		return fmt.Errorf("%w: unknown help verb %q (known verbs: %s)", execution.ErrConfig, verb, strings.Join(helpVerbs, ", "))
+	}
+	if config.JSONOutput {
+		document := verbHelpDocument{
+			SchemaVersion: helpSchemaVersion, Verb: verb,
+			Summary: verbSummary(sections), Usage: helpDocumentSections(sections),
+		}
+		if err := encodeJSON(document); err != nil {
+			return fmt.Errorf("%w: deliver help: %w", execution.ErrLocalIO, err)
+		}
+		return nil
+	}
+	fmt.Print(renderVerbUsage(verb, sections))
+	return nil
+}
+
+// verbHelpDocument is the machine-readable form of a per-verb help surface.
+type verbHelpDocument struct {
+	SchemaVersion string            `json:"schema_version"`
+	Verb          string            `json:"verb"`
+	Summary       string            `json:"summary"`
+	Usage         []verbHelpSection `json:"usage"`
+}
+
+type verbHelpSection struct {
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+// verbUsageSections returns the blocks printed by `sshx <verb> --help`: the
+// verb's own blocks first, then the shared option blocks. An unknown verb
+// returns nil so the caller can report it.
+func verbUsageSections(verb string) []usageSection {
+	if !containsString(helpVerbs, verb) {
+		return nil
+	}
+	var sections []usageSection
+	for _, section := range usageSections() {
+		if section.verb == verb {
+			sections = append(sections, section)
+		}
+	}
+	for _, section := range usageSections() {
+		if section.verb == "" && containsString(verbSharedSections, section.title) {
+			sections = append(sections, section)
+		}
+	}
+	return sections
+}
+
+func verbSummary(sections []usageSection) string {
+	for _, section := range sections {
+		if section.summary != "" {
+			return section.summary
+		}
+	}
+	return ""
+}
+
+func helpDocumentSections(sections []usageSection) []verbHelpSection {
+	document := make([]verbHelpSection, 0, len(sections))
+	for _, section := range sections {
+		document = append(document, verbHelpSection{Title: section.title, Text: strings.TrimRight(section.text, "\n")})
+	}
+	return document
+}
+
+func renderVerbUsage(verb string, sections []usageSection) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "sshx %s — %s\n\n", verb, verbSummary(sections))
+	for _, section := range sections {
+		if section.verb == verb {
+			out.WriteString(section.text)
+		}
+	}
+	out.WriteString("Shared options and semantics:\n")
+	for _, section := range sections {
+		if section.verb == "" {
+			out.WriteString(section.text)
+		}
+	}
+	fmt.Fprintf(&out, "See also:\n  %-28s full help surface\n  %-28s this document as %s\n",
+		"sshx --help", "sshx "+verb+" --help --json", helpSchemaVersion)
+	return out.String()
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // PrintTextUsage is the dedicated Agent-facing help for sshx text.
@@ -792,14 +234,6 @@ Bounds and safety:
 There is no --command. JSON schema is sshx.text.v1. Branch on success,
 hits[].kind, stats.total_hits vs returned, truncated, truncated_reason,
 and line_origin (file vs scanned_window).
-
-Monitoring:
-  A scan that runs longer than a few seconds narrates progress on stderr
-  (bytes, percentage, lines, elapsed, matches). Long or budget-limited scans
-  close with advice naming --offset/--tail/--max-scan-bytes. stderr carries
-  these lines only: stdout stays exactly one JSON document. stats gains
-  expected_scan_bytes (the window budget) alongside file_size/window_start_byte,
-  so a caller can size a scan before trusting total_hits_exact.
 
 Examples:
   sshx text -h=prod-web --path=/var/log/nginx/error.log --preset=exception --json

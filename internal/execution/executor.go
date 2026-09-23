@@ -678,6 +678,16 @@ func executeOneWithMetadata(ctx context.Context, opts RunOptions, target Resolve
 	return res
 }
 
+// SudoKeyForTarget resolves the sudo keyring reference for one run target: the
+// caller's explicit key wins, then the host's configured sudo_password_key, then
+// the built-in default. The caller's key is empty unless it was chosen
+// explicitly (Policy.SudoPasswordKey), so the default key can never shadow a
+// host's own sudo key (issue #78), and the plan, the SSH client, and the keyring
+// lookup all resolve the same reference.
+func SudoKeyForTarget(policyKey, targetKey string) string {
+	return firstNonEmpty(policyKey, targetKey, sshclient.DefaultSudoKey)
+}
+
 func applyExecResult(res *TargetResult, req *Request, execRes sshclient.ExecResult, execErr error) {
 	res.Stdout = execRes.Stdout
 	res.Stderr = execRes.Stderr
@@ -751,7 +761,7 @@ func buildSSHConfig(req *Request, target ResolvedTarget) *sshclient.Config {
 		AllowInsecureHostKey:   req.Policy.AllowInsecureHostKey,
 		KnownHostsPath:         req.Policy.KnownHostsPath,
 		JSONOutput:             true,
-		SudoKey:                firstNonEmpty(target.SudoPasswordKey, req.Policy.SudoPasswordKey),
+		SudoKey:                SudoKeyForTarget(req.Policy.SudoPasswordKey, target.SudoPasswordKey),
 		Command:                req.Action.Command,
 		Mode:                   "ssh",
 		Bind:                   target.Bind,
@@ -853,10 +863,7 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	sudoKey := firstNonEmpty(req.Policy.SudoPasswordKey, target.SudoPasswordKey)
-	if sudoKey == "" {
-		sudoKey = sshclient.DefaultSudoKey
-	}
+	sudoKey := SudoKeyForTarget(req.Policy.SudoPasswordKey, target.SudoPasswordKey)
 	cfg.SudoKey = sudoKey
 	if secrets == nil {
 		return fmt.Errorf("%w: sudo password key %q requested without secret resolver", ErrConfig, sudoKey)

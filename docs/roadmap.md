@@ -143,7 +143,7 @@ Agent / 自动化 / 人类运维者
 
 - **sshx 本地插件生命周期**
 
-  Agent 可通过 `sshx plugin create` 在 `~/.sshx/plugins/`（或 `$SSHX_HOME/plugins/`）创建 Docker、Nginx 或自定义应用探测插件，并完成 list/show/validate/test/trust/remove。插件脚本不由 Agent skill 维护；摘要变化会使信任失效。证据：`internal/app/plugin.go`、`internal/plugin/`、`tests/e2e/inspect_plugin_e2e_test.go`。
+  Agent 可通过 `sshx plugin create` 在 `~/.sshx/plugins/`（或 `$SSHX_HOME/plugins/`）创建 Docker、Nginx 或自定义应用探测插件，也可用 `sshx plugin install <dir>` 在 CLI 内完成已有插件目录的暂存、校验、发布与 `--trust`，并完成 list/show/validate/test/trust/remove。`plugin list` 区分内置能力与本地插件并始终打印本地插件根目录；插件缺失时报错指出实际搜索目录。插件脚本不由 Agent skill 维护；摘要变化会使信任失效。证据：`internal/app/plugin.go`、`internal/plugin/`、`tests/e2e/inspect_plugin_e2e_test.go`。
 
 - **有界远端观察快照**
 
@@ -255,7 +255,7 @@ issue #71 的新增边界、验证状态及外部前提单列在后面的证据�
 | host-key 校验 | 高 | 是，信任状态 | 可能修改 `known_hosts` | ✅ 显式信任后严格复用 | ✅ 未知/变更 key | ✅ strict/accept-unknown | ✅ 首次写入后重新严格连接 | `tests/e2e/cli_e2e_test.go` |
 | 危险动作阻断与显式绕过 | 高 | 是 | 否，仅控制执行准入 | ✅ 显式 `--force` | ✅ 默认阻断且零连接 | ✅ 默认阻断/显式绕过 | 不适用：策略门本身不修改状态 | `tests/e2e/cli_e2e_test.go` |
 | 本地结构化审计 | 高 | 否 | 是，本地 | ✅ | ✅ 不可写目标可观测 | 不适用：本地调用者同权 | ✅ 修复目标后单事件写入 | `tests/e2e/host_audit_e2e_test.go` |
-| 本地探测插件生命周期 | 高 | 本地调用者权限 | 是，本地 | ✅ create/list/show/validate/test/trust/remove | ✅ 路径逃逸、重复创建、manifest/entrypoint/schema/fixture 分类失败 | ✅ 私有目录/文件权限 | ✅ replace/remove 保留可恢复备份 | `tests/e2e/inspect_plugin_e2e_test.go` |
+| 本地探测插件生命周期 | 高 | 本地调用者权限 | 是，本地 | ✅ create/install/list/show/validate/test/trust/remove | ✅ 路径逃逸、重复创建、symlink/非普通文件源、安装前校验失败、manifest/entrypoint/schema/fixture 分类失败 | ✅ 私有目录/文件权限 | ✅ replace/remove 保留可恢复备份；安装校验失败不触碰已发布插件 | `tests/e2e/inspect_plugin_e2e_test.go`、`internal/plugin/install_test.go` |
 | Agent Skill 安装 | 高 | 本地调用者权限 | 是，本地 Agent 信任目录 | ✅ 编译后二进制离线安装/幂等复用 | ✅ 内容冲突与 symlink 目标拒绝 | ✅ 默认目录/显式目录 | ✅ 冲突不覆盖，显式 force 后恢复官方版本 | `tests/e2e/skill_e2e_test.go` |
 | 单主机探测与内置基线 | 高 | 是 | 否，cache off | ✅ 自定义插件与 `system.baseline` | ✅ 未信任、污染/超限输出、超时、非零退出、不支持平台 | ✅ operator/reader/sudo-required | 不适用：不修改远端状态 | `tests/e2e/inspect_plugin_e2e_test.go`、`tests/e2e/keyring_e2e_test.go` |
 | 远端观察缓存 | 高 | 是 | 是，远端 JSON | ✅ 冷写入/热复用/并发原子替换 | ✅ TTL/boot ID、格式、大小、属主、权限、symlink、只读端 | ✅ 可写/只读 SFTP | ✅ 失败写入保留原有效快照 | `tests/e2e/inspect_plugin_e2e_test.go` |

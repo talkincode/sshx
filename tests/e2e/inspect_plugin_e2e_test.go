@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,164 @@ func TestCLIPluginLifecycleCreatesValidRecoverableRuntimeAssets(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(removed.stdout), &removeResult))
 	assert.NotEmpty(t, removeResult.BackupPath)
 	assert.NoDirExists(t, createResult.Path)
+}
+
+// `sshx plugin install <dir>` is the audited provisioning path: it publishes a
+// local plugin directory into the runtime plugin root with sshx's own modes,
+// validates it before publishing, and can trust the digest in the same step.
+func TestCLIPluginInstallProvisionsFromALocalDirectory(t *testing.T) {
+	home := t.TempDir()
+	runtimeRoot := filepath.Join(t.TempDir(), "agent-runtime")
+	runtimeEnv := map[string]string{"SSHX_HOME": runtimeRoot}
+
+	// Stage the source outside the runtime root, the way an operator would.
+	scaffold := runSSHX(t, home, []string{"plugin", "create", "private.environment", "--privilege=optional", "--json"},
+		map[string]string{"SSHX_HOME": filepath.Join(t.TempDir(), "scaffold-runtime")})
+	require.Equal(t, 0, scaffold.exitCode, scaffold.stderr)
+	var scaffoldResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(scaffold.stdout), &scaffoldResult))
+	source := filepath.Join(t.TempDir(), "staging", "private.environment")
+	copyPluginTreeForTest(t, scaffoldResult.Path, source)
+	// A checked-out plugin carries caller-owned modes; install must not inherit them.
+	manifestSource := filepath.Join(source, pluginpkg.ManifestFile)
+	collectorSourcePath := filepath.Join(source, "collectors", "linux.sh")
+	require.NoError(t, os.Chmod(manifestSource, 0o644))      // #nosec G302 -- fixture stages caller-owned source modes on purpose.
+	require.NoError(t, os.Chmod(collectorSourcePath, 0o755)) // #nosec G302 -- fixture stages caller-owned source modes on purpose.
+
+	// A missing plugin names the directory that was searched.
+	missing := runSSHX(t, home, []string{"plugin", "show", "private.environment", "--json"}, runtimeEnv)
+	assert.Equal(t, 255, missing.exitCode)
+	assert.Contains(t, missing.stdout, filepath.Join(runtimeRoot, "plugins"))
+
+	installed := runSSHX(t, home, []string{"plugin", "install", source, "--json"}, runtimeEnv)
+	require.Equal(t, 0, installed.exitCode, installed.stderr)
+	var installResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(installed.stdout), &installResult))
+	assert.True(t, installResult.Success)
+	assert.Equal(t, "private.environment", installResult.PluginID)
+	assert.Equal(t, filepath.Join(runtimeRoot, "plugins", "private.environment"), installResult.Path)
+	assert.Equal(t, filepath.Join(runtimeRoot, "plugins"), installResult.PluginRoot)
+	assert.False(t, installResult.Trusted)
+	assert.Len(t, installResult.Files, 6)
+	for _, relative := range installResult.Files {
+		info, err := os.Stat(filepath.Join(installResult.Path, relative))
+		require.NoError(t, err)
+		want := os.FileMode(0o600)
+		if strings.HasPrefix(relative, "collectors/") {
+			want = 0o700
+		}
+		assert.Equal(t, want, info.Mode().Perm(), relative)
+	}
+
+	// The installed plugin is immediately usable, but still untrusted.
+	tested := runSSHX(t, home, []string{"plugin", "test", "private.environment", "--fixture=complete", "--json"}, runtimeEnv)
+	require.Equal(t, 0, tested.exitCode, tested.stderr)
+	untrusted := runSSHX(t, home, []string{"plugin", "show", "private.environment", "--json"}, runtimeEnv)
+	require.Equal(t, 0, untrusted.exitCode, untrusted.stderr)
+	var untrustedResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(untrusted.stdout), &untrustedResult))
+	assert.False(t, untrustedResult.Trusted)
+	assert.False(t, untrustedResult.Builtin)
+	assert.Equal(t, installResult.Digest, untrustedResult.Digest)
+
+	// Re-installing needs --replace; the previous plugin stays recoverable and the
+	// digest follows the content, so the replacement must be re-trusted.
+	duplicate := runSSHX(t, home, []string{"plugin", "install", source, "--json"}, runtimeEnv)
+	assert.Equal(t, 255, duplicate.exitCode)
+	var duplicateResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(duplicate.stdout), &duplicateResult))
+	assert.Equal(t, "already_exists", duplicateResult.ErrorKind)
+
+	// The digest covers identity-bearing content: changing the collector changes
+	// the digest, so the replaced plugin is untrusted until it is trusted again.
+	trustedFirst := runSSHX(t, home, []string{"plugin", "trust", "private.environment", "--json"}, runtimeEnv)
+	require.Equal(t, 0, trustedFirst.exitCode, trustedFirst.stderr)
+	collectorSource := collectorSourcePath
+	collectorBytes, readErr := os.ReadFile(collectorSource) // #nosec G304 -- fixture reads its own staged source.
+	require.NoError(t, readErr)
+	require.NoError(t, os.WriteFile(collectorSource, append(collectorBytes, []byte("# edited\n")...), 0o755)) // #nosec G306,G703 -- fixture stages a permissive source collector.
+
+	replaced := runSSHX(t, home, []string{"plugin", "install", source, "--replace", "--json"}, runtimeEnv)
+	require.Equal(t, 0, replaced.exitCode, replaced.stderr)
+	var replaceResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(replaced.stdout), &replaceResult))
+	assert.NotEmpty(t, replaceResult.BackupPath)
+	_, err := os.Stat(filepath.Join(replaceResult.BackupPath, pluginpkg.ManifestFile))
+	require.NoError(t, err)
+	assert.False(t, replaceResult.Trusted, "replaced content must be trusted again explicitly")
+	assert.NotEqual(t, installResult.Digest, replaceResult.Digest)
+
+	retrusted := runSSHX(t, home, []string{"plugin", "install", source, "--replace", "--trust", "--json"}, runtimeEnv)
+	require.Equal(t, 0, retrusted.exitCode, retrusted.stderr)
+	var retrustResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(retrusted.stdout), &retrustResult))
+	assert.True(t, retrustResult.Trusted)
+	assert.Equal(t, replaceResult.Digest, retrustResult.Digest)
+
+	// A source that cannot be validated never replaces the published plugin.
+	broken := filepath.Join(t.TempDir(), "broken", "private.environment")
+	copyPluginTreeForTest(t, source, broken)
+	require.NoError(t, os.Remove(filepath.Join(broken, "collectors", "linux.sh")))
+	refused := runSSHX(t, home, []string{"plugin", "install", broken, "--replace", "--json"}, runtimeEnv)
+	assert.Equal(t, 255, refused.exitCode)
+	var refusedResult pluginpkg.ActionResult
+	require.NoError(t, json.Unmarshal([]byte(refused.stdout), &refusedResult))
+	assert.Contains(t, refusedResult.Error, "validate source plugin")
+	stillThere := runSSHX(t, home, []string{"plugin", "validate", "private.environment", "--json"}, runtimeEnv)
+	require.Equal(t, 0, stillThere.exitCode, stillThere.stderr)
+
+	// A symlink in the source is refused: a plugin holds plain files only.
+	symlinked := filepath.Join(t.TempDir(), "symlinked", "private.environment")
+	copyPluginTreeForTest(t, source, symlinked)
+	if symlinkErr := os.Symlink(filepath.Join(symlinked, pluginpkg.ManifestFile), filepath.Join(symlinked, "alias.json")); symlinkErr != nil {
+		t.Logf("skipping symlink assertion: %v", symlinkErr)
+	} else {
+		refusedLink := runSSHX(t, home, []string{"plugin", "install", symlinked, "--json"}, runtimeEnv)
+		assert.Equal(t, 255, refusedLink.exitCode)
+		assert.Contains(t, refusedLink.stdout, "symlink")
+	}
+
+	// The inventory groups provenance, names the local root, and makes an empty
+	// local set visible instead of inferring it from missing rows.
+	listed := runSSHX(t, home, []string{"plugin", "list"}, runtimeEnv)
+	require.Equal(t, 0, listed.exitCode, listed.stderr)
+	assert.Contains(t, listed.stdout, "built-in capabilities (8):")
+	assert.Contains(t, listed.stdout, "local plugins (1) in "+filepath.Join(runtimeRoot, "plugins"))
+	assert.Contains(t, listed.stdout, "trusted=true")
+	empty := runSSHX(t, home, []string{"plugin", "list"}, map[string]string{"SSHX_HOME": filepath.Join(t.TempDir(), "empty-runtime")})
+	require.Equal(t, 0, empty.exitCode, empty.stderr)
+	assert.Contains(t, empty.stdout, "local plugins (0)")
+	assert.Contains(t, empty.stdout, "(none;")
+}
+
+// copyPluginTreeForTest stages a plugin directory outside the runtime root with
+// rooted handles, so the fixture cannot escape either tree while copying.
+func copyPluginTreeForTest(t *testing.T, from, to string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(to, 0o750)) // #nosec G301 -- fixture stages a caller-owned source layout.
+	sourceRoot, err := os.OpenRoot(from)
+	require.NoError(t, err)
+	defer func() { _ = sourceRoot.Close() }() //nolint:errcheck // fixture handle cleanup
+	stageRoot, err := os.OpenRoot(to)
+	require.NoError(t, err)
+	defer func() { _ = stageRoot.Close() }() //nolint:errcheck // fixture handle cleanup
+	walkErr := fs.WalkDir(sourceRoot.FS(), ".", func(relative string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		if entry.IsDir() {
+			return stageRoot.Mkdir(relative, 0o750)
+		}
+		data, readErr := sourceRoot.ReadFile(relative)
+		if readErr != nil {
+			return readErr
+		}
+		return stageRoot.WriteFile(relative, data, 0o600) // #nosec G306 -- fixture copy of its own scaffold.
+	})
+	require.NoError(t, walkErr)
 }
 
 func TestCLIInspectionTrustExecutionRedactionAndRemoteCache(t *testing.T) {

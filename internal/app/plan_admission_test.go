@@ -198,13 +198,13 @@ func TestPlanAdmissionRejectsEmptySFTPPaths(t *testing.T) {
 		args    []string
 		message string
 	}{
-		{"upload without local path", []string{"--upload=", "--to=/remote/file"}, "local path is required"},
-		{"upload without remote path", []string{"--upload=/etc/hosts"}, "remote path is required"},
-		{"download without local path", []string{"--download=/remote/file"}, "local path is required"},
-		{"download without remote path", []string{"--download=", "--to=/local/file"}, "remote path is required"},
-		{"list without remote path", []string{"--list="}, "remote path is required"},
-		{"mkdir without remote path", []string{"--mkdir="}, "remote path is required"},
-		{"remove without remote path", []string{"--rm="}, "remote path is required"},
+		{"upload without local path", []string{"--upload=", "--to=/remote/file"}, "--upload=<local-file> needs a local path"},
+		{"upload without destination", []string{"--upload=/etc/hosts"}, "--upload needs a destination: add --to=<remote-path>"},
+		{"download without local path", []string{"--download=/remote/file"}, "--download needs a destination: add --to=<local-path>"},
+		{"download without remote path", []string{"--download=", "--to=/local/file"}, "--download=<remote-file> needs a remote path"},
+		{"list without remote path", []string{"--list="}, "--list=<path> needs a remote path"},
+		{"mkdir without remote path", []string{"--mkdir="}, "--mkdir=<path> needs a remote path"},
+		{"remove without remote path", []string{"--rm="}, "--rm=<path> needs a remote path"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -161,7 +160,7 @@ func (r *textRun) collect(req textsafe.Request) (textsafe.Result, error) {
 	// A streamed SFTP window is the only source that can idle for minutes, so it
 	// is the one that narrates progress. stdout stays untouched because the
 	// reporter writes to stderr.
-	r.reporter = newTextScanReporter(os.Stderr, req.Pattern != "")
+	r.reporter = newTextScanReporter(noticeWriter(r.config), req.Pattern != "")
 	r.scanStart = time.Now()
 	switch req.Kind {
 	case textsafe.SourceFile:

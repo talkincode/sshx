@@ -131,7 +131,12 @@ type Config struct {
 	PluginPrivilege string
 	PluginTemplate  string
 	PluginFixture   string
-	PluginReplace   bool
+	// PluginSource is the install positional: the local plugin directory that
+	// `sshx plugin install` publishes into the runtime plugin root.
+	PluginSource string
+	// PluginTrust trusts the installed digest in the same install step.
+	PluginTrust   bool
+	PluginReplace bool
 
 	// Agent skill lifecycle fields (Mode == "skill").
 	SkillAction string
@@ -175,6 +180,9 @@ type Config struct {
 
 	// Guarded SQL execution fields (Mode == "sql").
 	SQLStatement string
+	// SQLStatementFile is a local file holding the statement, used when no
+	// positional statement is given (--statement-file=PATH).
+	SQLStatementFile string
 	// SQLEngine names the database engine: "postgres" (default) or "sqlite".
 	SQLEngine   string
 	SQLDatabase string
@@ -252,7 +260,21 @@ type Config struct {
 	TextMaxScanBytes int64
 	TextUseSudo      bool
 	TextRedact       bool
-	TextHelp         bool
+
+	// HelpVerb is the subcommand whose usage document was requested with
+	// `sshx <verb> --help`. It short-circuits parsing and execution: the verb's
+	// own usage is printed instead of running anything.
+	HelpVerb string
+
+	// ShowUsage requests the global `sshx --help` surface. It is answered before
+	// any mode runs, so a usage request never resolves a host, connects, or
+	// writes trust state.
+	ShowUsage bool
+
+	// Quiet suppresses human notices on stderr (deprecation warnings, narration
+	// log lines). It never changes stdout, the exit code, or the machine result,
+	// so a caller that merges stderr under --json can still parse stdout.
+	Quiet bool
 
 	// Interactive login fields (Mode == "login").
 	LoginUseSudo     bool

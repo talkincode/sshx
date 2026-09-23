@@ -210,9 +210,10 @@ func execMCPCommand(ctx context.Context, cmd *exec.Cmd, stdin string, globalTime
 		return nil, nil, err
 	}
 	defer process.close()
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
+	// Always replace the child's stdin: a one-shot tool call must never be able
+	// to read the MCP client's protocol stream, and an empty payload must reach
+	// EOF instead of blocking. Tools that take no stdin payload get "".
+	cmd.Stdin = strings.NewReader(stdin)
 	// Command's copying goroutines drain both pipes independently. Output and
 	// progress are bounded, and neither writer waits for an MCP client.
 	progress, finishProgress := mcpProgressDispatcher(onEvent)

@@ -3,6 +3,8 @@ package execution
 import (
 	"errors"
 	"testing"
+
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 func sampleHosts() []HostRecord {
@@ -135,5 +137,30 @@ func TestResolveTargets_BindInheritOverrideAndClear(t *testing.T) {
 	}
 	if !snap.Targets[0].Literal || snap.Targets[0].Bind != "en0" {
 		t.Fatalf("literal target bind = %#v", snap.Targets[0])
+	}
+}
+
+// The sudo keyring reference is resolved once for the plan, the SSH client, and
+// the keyring lookup: an explicit caller key wins, a host's configured
+// sudo_password_key comes next, and the built-in default is the last resort
+// (issue #78).
+func TestSudoKeyForTargetPrecedence(t *testing.T) {
+	tests := []struct {
+		name      string
+		policyKey string
+		targetKey string
+		want      string
+	}{
+		{"explicit caller key wins", "explicit-sudo", "host-sudo", "explicit-sudo"},
+		{"host key beats the default", "", "host-sudo", "host-sudo"},
+		{"host key fills a target without one", "", "", sshclient.DefaultSudoKey},
+		{"explicit caller key fills a target without one", "explicit-sudo", "", "explicit-sudo"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := SudoKeyForTarget(test.policyKey, test.targetKey); got != test.want {
+				t.Fatalf("SudoKeyForTarget(%q, %q) = %q, want %q", test.policyKey, test.targetKey, got, test.want)
+			}
+		})
 	}
 }
