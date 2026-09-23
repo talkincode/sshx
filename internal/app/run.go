@@ -121,14 +121,14 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 	if execErr != nil {
 		if outcome.RunID != "" {
 			recordRunAudit(audit, config, req, snap, outcome)
-			reportRunSudoPromptFailures(outcome, req.Action.Command)
+			reportRunSudoPromptFailures(config, outcome, req.Action.Command)
 			return execErr
 		}
 		return reportRunRequestFailure(config, audit, execErr)
 	}
 
 	recordRunAudit(audit, config, req, snap, outcome)
-	reportRunSudoPromptFailures(outcome, req.Action.Command)
+	reportRunSudoPromptFailures(config, outcome, req.Action.Command)
 
 	// Single-target --json emits one versioned result document.
 	if req.JSONOutput && !req.JSONLOutput && outcome.Single != nil {
@@ -153,20 +153,21 @@ func HandleRun(config *sshclient.Config, audit *auditRecorder) error {
 // mid-command sudo stops with "a password is required". It writes straight to
 // stderr because the caller explaining a failure may be running with
 // diagnostics quieted, and stdout must keep exactly one result document.
-func reportRunSudoPromptFailures(outcome execution.RunOutcome, command string) {
+func reportRunSudoPromptFailures(config *sshclient.Config, outcome execution.RunOutcome, command string) {
 	hint, needed := sshclient.NonLeadingSudoHint(command)
 	if !needed {
 		return
 	}
+	out := noticeWriter(config)
 	for _, res := range outcome.Results {
 		if !sshclient.SudoPasswordPromptFailure(res.Stderr + res.Stdout) {
 			continue
 		}
 		if label := res.Target.Alias; label != "" {
-			fmt.Fprintf(os.Stderr, "sshx: [%s] %s\n", label, hint)
+			writeDiagnosticNote(out, "sshx: [%s] %s\n", label, hint)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "sshx: %s\n", hint)
+		writeDiagnosticNote(out, "sshx: %s\n", hint)
 	}
 }
 
@@ -385,10 +386,13 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 			UseKeyAuth:           config.UseKeyAuth,
 			KeyPath:              config.KeyPath,
 			SSHPasswordKey:       config.SSHPasswordKey,
-			SudoPasswordKey:      config.SudoKey,
-			SSHPassword:          config.Password,
-			Bind:                 config.Bind,
-			BindSet:              config.BindSet,
+			// Run resolves each target's sudo key from its host record, so the policy
+			// carries only an explicit caller choice: the built-in default must not
+			// shadow a host's sudo_password_key (issue #78).
+			SudoPasswordKey: sudoKeyChoice(config),
+			SSHPassword:     config.Password,
+			Bind:            config.Bind,
+			BindSet:         config.BindSet,
 		},
 		JSONOutput:   config.JSONOutput,
 		JSONLOutput:  config.JSONLOutput,
@@ -492,6 +496,12 @@ func recordRunAudit(audit *auditRecorder, config *sshclient.Config, req *executi
 	audit.event.Concurrency = req.Limits.Concurrency
 	audit.event.FailureMode = req.Policy.FailureMode
 	audit.event.TargetCount = snap.Count
+	// Run resolves the sudo key per target, so the summary records only a caller
+	// choice: the built-in default would misreport a fleet whose hosts each carry
+	// their own sudo_password_key (issue #78). Per-target events record the
+	// reference each host actually used.
+	audit.event.SudoKey = sudoKeyChoice(config)
+	audit.sudoKeyResolved = true
 	audit.completed = true
 	audit.event.Metadata = outcome.Metadata
 	if outcome.Counts.Succeeded == outcome.Counts.Selected && outcome.Counts.Failed == 0 {
@@ -515,10 +525,17 @@ func writeTargetAudit(config *sshclient.Config, runID string, req *execution.Req
 	if config == nil || !config.AuditEnabled || config.DryRun {
 		return nil
 	}
-	rec := newAuditRecorder(config)
+	// The audit event must name the credential this target used: run resolves the
+	// sudo and SSH password keys from the host record, while the caller-level
+	// config still carries the caller's choice or the built-in default.
+	targetConfig := *config
+	targetConfig.SudoKey = execution.SudoKeyForTarget(req.Policy.SudoPasswordKey, tr.Target.SudoPasswordKey)
+	targetConfig.SSHPasswordKey = firstNonEmptyStr(req.Policy.SSHPasswordKey, tr.Target.SSHPasswordKey)
+	rec := newAuditRecorder(&targetConfig)
 	if rec == nil {
 		return nil
 	}
+	rec.sudoKeyResolved = true
 	rec.event.Mode = "run"
 	rec.event.Action = req.Action.Kind
 	rec.event.RunID = runID
@@ -547,7 +564,7 @@ func writeTargetAudit(config *sshclient.Config, runID string, req *execution.Req
 	} else {
 		rec.event.Outcome = auditStatus{Status: "failed"}
 	}
-	return rec.finish(config, nil)
+	return rec.finish(&targetConfig, nil)
 }
 
 func max(a, b int) int {

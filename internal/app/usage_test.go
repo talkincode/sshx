@@ -1,8 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/talkincode/sshx/internal/sshclient"
 )
 
 func TestPrintUsage(t *testing.T) {
@@ -161,4 +166,71 @@ func TestPrintUsage_Examples(t *testing.T) {
 			t.Errorf("Expected output to contain example: %s", example)
 		}
 	}
+}
+
+// Every subcommand renders its own usage document, and sshx.help.v1 carries the
+// same blocks in machine-readable form. The global help points at both.
+func TestPrintVerbUsage(t *testing.T) {
+	// sshx text keeps its own Agent-facing document rather than the generic
+	// section rendering, in both the human and the JSON variant.
+	t.Run("text", func(t *testing.T) {
+		output := string(captureStdout(t, func() {
+			require.NoError(t, PrintVerbUsage(&sshclient.Config{HelpVerb: "text"}))
+		}))
+		require.Contains(t, output, "bounded remote text and log dissection")
+		require.Contains(t, output, "sshx.text.v1")
+	})
+	for _, verb := range helpVerbs {
+		if verb == "text" {
+			continue
+		}
+		t.Run(verb, func(t *testing.T) {
+			var printErr error
+			output := string(captureStdout(t, func() {
+				printErr = PrintVerbUsage(&sshclient.Config{HelpVerb: verb})
+			}))
+			require.NoError(t, printErr)
+			require.Contains(t, output, "sshx "+verb+" — ")
+			require.Contains(t, output, "SSH Options:")
+			require.Contains(t, output, "sshx "+verb+" --help --json")
+			for _, section := range usageSections() {
+				if section.verb == verb {
+					require.Contains(t, output, section.title+":")
+				}
+			}
+		})
+	}
+
+	unknown := PrintVerbUsage(&sshclient.Config{HelpVerb: "no-such-verb"})
+	require.Error(t, unknown)
+}
+
+func TestPrintVerbUsageJSON(t *testing.T) {
+	for _, verb := range helpVerbs {
+		if verb == "text" {
+			continue // covered by TestTextHelpJSON in the compiled-binary E2E suite
+		}
+		t.Run(verb, func(t *testing.T) {
+			output := captureStdout(t, func() {
+				require.NoError(t, PrintVerbUsage(&sshclient.Config{HelpVerb: verb, JSONOutput: true}))
+			})
+			var document verbHelpDocument
+			require.NoError(t, json.Unmarshal(output, &document))
+			require.Equal(t, helpSchemaVersion, document.SchemaVersion)
+			require.Equal(t, verb, document.Verb)
+			require.NotEmpty(t, document.Summary)
+			require.NotEmpty(t, document.Usage)
+			for _, section := range document.Usage {
+				require.NotEmpty(t, section.Title)
+				require.NotEmpty(t, section.Text)
+			}
+		})
+	}
+}
+
+func TestPrintUsageAdvertisesHelpSurfaces(t *testing.T) {
+	output := string(captureStdout(t, PrintUsage))
+	require.Contains(t, output, "sshx <verb> --help")
+	require.Contains(t, output, "--quiet, --no-notices")
+	require.Contains(t, output, "should pass --quiet")
 }

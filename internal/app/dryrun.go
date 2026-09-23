@@ -175,6 +175,49 @@ func emitDryRunPlan(config *sshclient.Config) error {
 	return nil
 }
 
+// sftpPathCheck reports the missing path of an SFTP action, naming the option
+// that supplies it. The compatibility surface splits a transfer across
+// --upload=<local> / --download=<remote> plus --to=<destination>, so a bare
+// "path is required" left the caller guessing which option to add.
+func sftpPathCheck(config *sshclient.Config) string {
+	remote, local := strings.TrimSpace(config.RemotePath), strings.TrimSpace(config.LocalPath)
+	switch config.SftpAction {
+	case "upload":
+		switch {
+		case local == "":
+			return "--upload=<local-file> needs a local path"
+		case remote == "":
+			return "--upload needs a destination: add --to=<remote-path>"
+		}
+	case "download":
+		switch {
+		case remote == "":
+			return "--download=<remote-file> needs a remote path"
+		case local == "":
+			return "--download needs a destination: add --to=<local-path>"
+		}
+	case "list", "mkdir", "remove":
+		if remote == "" {
+			return fmt.Sprintf("%s needs a remote path", sftpActionFlag(config.SftpAction))
+		}
+	}
+	return ""
+}
+
+// sftpActionFlag names the compatibility flag that carries an SFTP action path.
+func sftpActionFlag(action string) string {
+	switch action {
+	case "list":
+		return "--list=<path>"
+	case "mkdir":
+		return "--mkdir=<path>"
+	case "remove":
+		return "--rm=<path>"
+	default:
+		return "--" + action + "=<path>"
+	}
+}
+
 func buildDryRunPlan(config *sshclient.Config) dryRunPlan {
 	plan := dryRunPlan{
 		DryRun:               true,
@@ -346,7 +389,7 @@ func resolveDryRunSSHHost(config *sshclient.Config, plan *dryRunPlan) {
 	if !config.BindSet && hostConfig.Bind != "" {
 		config.Bind = hostConfig.Bind
 	}
-	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
+	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" && !sudoKeyChosen(config) {
 		config.SudoKey = sudoKey
 	}
 	if config.SSHPasswordKey == "" {
@@ -450,7 +493,7 @@ func resolveDryRunHostTest(config *sshclient.Config, plan *dryRunPlan) {
 		config.SSHPasswordKey = sshKey
 		plan.hostTestReadsSecret = true
 	}
-	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" {
+	if sudoKey := hostConfig.EffectiveSudoPasswordKey(); sudoKey != "" && !sudoKeyChosen(config) {
 		config.SudoKey = sudoKey
 	}
 	if !config.BindSet {
@@ -548,19 +591,12 @@ func fillDryRunValidation(config *sshclient.Config, plan *dryRunPlan) {
 		return
 	}
 	if config.Mode == "sftp" {
-		// Mirror the MCP adapter's pre-flight checks: an empty path cannot
-		// produce a plan, and rejecting it here keeps the diagnostic a config
-		// error instead of a misleading connection failure.
-		if strings.TrimSpace(config.RemotePath) == "" {
-			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "remote path is required"}
+		// Match the MCP adapter's pre-flight check for the same condition (an
+		// empty path cannot produce a plan); the CLI wording names the flag that
+		// supplies the missing value, while MCP names its JSON fields.
+		if message := sftpPathCheck(config); message != "" {
+			plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: message}
 			plan.Valid = false
-			return
-		}
-		if config.SftpAction == "upload" || config.SftpAction == "download" {
-			if strings.TrimSpace(config.LocalPath) == "" {
-				plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: "local path is required"}
-				plan.Valid = false
-			}
 		}
 		return
 	}

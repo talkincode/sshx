@@ -1,7 +1,6 @@
 package sshclient
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -66,44 +65,46 @@ func TestApplySudoScriptEvidenceAndCleanup(t *testing.T) {
 			}
 			result := runApplyScriptFixture(t, script, env)
 			outcome, applyErr := parseApplyScriptReport(result)
-			require.NotNil(t, outcome, "%s; %s; %v", result.Stdout, result.Stderr, applyErr)
+			requireApplyOutcome(t, test, result, outcome, applyErr)
 			require.Equal(t, SHA256Hex(before), outcome.BeforeSHA256)
 			require.Equal(t, SHA256Hex(payload), outcome.PayloadSHA256)
-			require.NotNil(t, outcome.UID)
-			require.NotNil(t, outcome.GID)
+			require.NotNil(t, outcome.UID, "%s: uid evidence missing: %s", test, result.Stdout)
+			require.NotNil(t, outcome.GID, "%s: gid evidence missing: %s", test, result.Stdout)
 			require.Equal(t, "640", outcome.Mode)
 			switch test {
 			case "precondition":
 				require.ErrorIs(t, applyErr, ErrPrecondition)
-				require.False(t, *outcome.Executed)
+				require.False(t, requireApplyExecuted(t, test, result, outcome, applyErr))
 				require.Empty(t, outcome.BackupPath)
 			case "before":
 				require.Error(t, applyErr)
-				require.False(t, *outcome.Executed)
+				require.False(t, requireApplyExecuted(t, test, result, outcome, applyErr))
 				require.Equal(t, "unchanged", outcome.ChangeState)
 				require.True(t, outcome.BackupVerified)
 			case "after":
 				require.ErrorIs(t, applyErr, ErrApplyVerification)
-				require.True(t, *outcome.Executed)
+				require.True(t, requireApplyExecuted(t, test, result, outcome, applyErr))
 				require.Equal(t, "changed", outcome.ChangeState)
 				require.Equal(t, SHA256Hex([]byte("other writer\n")), outcome.AfterSHA256)
 				require.False(t, outcome.Verified)
 			case "rename":
 				require.ErrorIs(t, applyErr, ErrApplyVerification)
-				require.Nil(t, outcome.Executed)
+				// Publication was attempted without acknowledgement, so the report must
+				// stay unknown rather than claim the target was never published.
+				require.Nil(t, outcome.Executed, "%s: publication evidence must be unknown: %s", test, result.Stdout)
 				require.Equal(t, "unknown", outcome.ChangeState)
 			case "recheck":
 				require.ErrorIs(t, applyErr, ErrPrecondition)
 				require.Equal(t, "failed", outcome.PreconditionStatus)
 				require.Equal(t, SHA256Hex([]byte("other writer\n")), outcome.PreconditionSHA256)
-				require.False(t, *outcome.Executed)
+				require.False(t, requireApplyExecuted(t, test, result, outcome, applyErr))
 				require.True(t, outcome.BackupVerified)
 				require.Equal(t, "unchanged", outcome.ChangeState)
 			default:
 				require.NoError(t, applyErr, "%s", result.Stderr)
 				require.True(t, outcome.Verified)
 				require.Equal(t, SHA256Hex(payload), outcome.AfterSHA256)
-				require.Equal(t, test != "noop", *outcome.Executed)
+				require.Equal(t, test != "noop", requireApplyExecuted(t, test, result, outcome, applyErr))
 			}
 			if test != "precondition" && test != "noop" {
 				require.True(t, outcome.BackupVerified)
@@ -129,7 +130,7 @@ func TestApplySudoScriptEvidenceAndCleanup(t *testing.T) {
 				result.Stdout, result.ExitCode = strings.Join(lines[:len(lines)-1], "\n"), -1
 				partial, lostErr := parseApplyScriptReport(result)
 				require.ErrorIs(t, lostErr, ErrApplyVerification)
-				require.True(t, *partial.Executed)
+				require.True(t, requireApplyExecuted(t, "replace (truncated report)", result, partial, lostErr))
 				require.Equal(t, "changed", partial.ChangeState)
 				require.True(t, partial.BackupVerified)
 				require.False(t, partial.Verified)
@@ -165,19 +166,56 @@ func applyScriptEnv(env []string) []string {
 	return out
 }
 
+// runApplyScriptFixture runs the generated privileged script the way the remote
+// host does: as a script file, with the child's stdout and stderr going to real
+// files. Piping the script through the child's stdin or capturing it into
+// bytes.Buffer values makes os/exec add pipes and copier goroutines, and a child
+// that finishes while a copier unwinds can then observe EPIPE/SIGPIPE and report
+// a truncated privileged result instead of the behavior under test (issue #83).
 func runApplyScriptFixture(t *testing.T, script []byte, env []string) ExecResult {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command("sh") // #nosec G204 -- executes only the generated apply script in the owned fixture directory.
-	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = bytes.NewReader(script), &stdout, &stderr, applyScriptEnv(env)
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "apply.sh")
+	require.NoError(t, os.WriteFile(scriptPath, script, 0o700)) // #nosec G306 -- owned fixture script.
+	stdoutPath, stderrPath := filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")
+	stdout, createErr := os.Create(stdoutPath) // #nosec G304 -- path is confined to the owned fixture directory.
+	require.NoError(t, createErr)
+	stderr, createErr := os.Create(stderrPath) // #nosec G304 -- path is confined to the owned fixture directory.
+	require.NoError(t, createErr)
+	cmd := exec.Command("sh", scriptPath) // #nosec G204 -- executes only the generated apply script in the owned fixture directory.
+	cmd.Stdout, cmd.Stderr, cmd.Env = stdout, stderr, applyScriptEnv(env)
 	err := cmd.Run()
+	require.NoError(t, stdout.Close())
+	require.NoError(t, stderr.Close())
 	code := 0
 	if err != nil {
 		var exit *exec.ExitError
 		require.True(t, errors.As(err, &exit), "%v", err)
 		code = exit.ExitCode()
 	}
-	return ExecResult{ExitCode: code, Stdout: stdout.String(), Stderr: stderr.String(), Started: true, ExitObserved: true}
+	out, readErr := os.ReadFile(stdoutPath) // #nosec G304 -- path is confined to the owned fixture directory.
+	require.NoError(t, readErr)
+	errOut, readErr := os.ReadFile(stderrPath) // #nosec G304 -- path is confined to the owned fixture directory.
+	require.NoError(t, readErr)
+	return ExecResult{ExitCode: code, Stdout: string(out), Stderr: string(errOut), Started: true, ExitObserved: true}
+}
+
+// requireApplyOutcome reports a missing privileged report with the fixture's
+// captured evidence instead of panicking on a nil pointer: a truncated report
+// must fail the subtest readably, not abort the package run (issue #83).
+func requireApplyOutcome(t *testing.T, stage string, result ExecResult, outcome *ApplyOutcome, parseErr error) *ApplyOutcome {
+	t.Helper()
+	require.NotNil(t, outcome, "%s: no privileged report: exit %d; stdout %q; stderr %q; parse error %v", stage, result.ExitCode, result.Stdout, result.Stderr, parseErr)
+	return outcome
+}
+
+// requireApplyExecuted returns the publication evidence without dereferencing a
+// nil pointer: an absent or truncated report must fail the subtest readably.
+func requireApplyExecuted(t *testing.T, stage string, result ExecResult, outcome *ApplyOutcome, parseErr error) bool {
+	t.Helper()
+	requireApplyOutcome(t, stage, result, outcome, parseErr)
+	require.NotNil(t, outcome.Executed, "%s: publication evidence missing: exit %d; stdout %q; stderr %q; parse error %v", stage, result.ExitCode, result.Stdout, result.Stderr, parseErr)
+	return *outcome.Executed
 }
 
 func TestApplySudoCreatesEmptyAndDoesNotRemoveUnownedTemp(t *testing.T) {
@@ -193,6 +231,7 @@ func TestApplySudoCreatesEmptyAndDoesNotRemoveUnownedTemp(t *testing.T) {
 	require.NoError(t, err)
 	result := runApplyScriptFixture(t, script, os.Environ())
 	outcome, parseErr := parseApplyScriptReport(result)
+	requireApplyOutcome(t, "empty", result, outcome, parseErr)
 	require.NoError(t, parseErr, "%s", result.Stderr)
 	require.True(t, outcome.Created)
 	require.True(t, outcome.Verified)
@@ -210,8 +249,9 @@ func TestApplySudoCreatesEmptyAndDoesNotRemoveUnownedTemp(t *testing.T) {
 	require.NoError(t, err)
 	result = runApplyScriptFixture(t, script, os.Environ())
 	outcome, parseErr = parseApplyScriptReport(result)
+	requireApplyOutcome(t, "unowned temp", result, outcome, parseErr)
 	require.Error(t, parseErr)
-	require.False(t, *outcome.Executed)
+	require.False(t, requireApplyExecuted(t, "unowned temp", result, outcome, parseErr))
 	retained, readErr := os.ReadFile(unowned) // #nosec G304 -- path is confined to the owned test fixture.
 	require.NoError(t, readErr)
 	require.Equal(t, "do not remove", string(retained))
@@ -247,6 +287,7 @@ func TestApplySudoReportStrictValidation(t *testing.T) {
 	}
 	partial, nonzeroErr := parseApplyScriptReport(ExecResult{ExitCode: 1, Stdout: string(valid)})
 	require.ErrorIs(t, nonzeroErr, ErrApplyVerification)
+	require.NotNil(t, partial, "%v", nonzeroErr)
 	require.Equal(t, report.Before, partial.BeforeSHA256)
 	require.Equal(t, report.After, partial.AfterSHA256)
 	require.False(t, partial.Verified)
@@ -255,8 +296,10 @@ func TestApplySudoReportStrictValidation(t *testing.T) {
 	require.NoError(t, err)
 	partial, parseErr := parseApplyScriptReport(ExecResult{ExitCode: -1, Stdout: string(progress) + "\n{\"status\":"})
 	require.ErrorIs(t, parseErr, ErrApplyVerification)
+	require.NotNil(t, partial, "%v", parseErr)
 	require.Equal(t, report.Before, partial.BeforeSHA256)
 	require.Equal(t, report.After, partial.AfterSHA256)
+	require.NotNil(t, partial.Executed, "%v", parseErr)
 	require.True(t, *partial.Executed)
 }
 
@@ -264,6 +307,7 @@ func TestApplySudoUnacknowledgedScriptStartIsUnknown(t *testing.T) {
 	req := ApplyRequest{RemotePath: "/app.conf", Payload: []byte("new")}
 	outcome, err := applySudoOutcome(req, ExecResult{ExitCode: -1, StartAttempted: true})
 	require.ErrorIs(t, err, ErrApplyVerification)
+	require.NotNil(t, outcome, "%v", err)
 	require.Nil(t, outcome.Executed)
 	require.Equal(t, "unknown", outcome.ChangeState)
 	require.Equal(t, "unknown", outcome.Verification)
@@ -271,7 +315,8 @@ func TestApplySudoUnacknowledgedScriptStartIsUnknown(t *testing.T) {
 
 	outcome, err = applySudoOutcome(req, ExecResult{ExitCode: -1})
 	require.Error(t, err)
-	require.NotNil(t, outcome.Executed)
+	require.NotNil(t, outcome, "%v", err)
+	require.NotNil(t, outcome.Executed, "%v", err)
 	require.False(t, *outcome.Executed)
 	require.Equal(t, "unchanged", outcome.ChangeState)
 }

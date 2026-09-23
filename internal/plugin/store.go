@@ -46,6 +46,19 @@ func Path(id string) (string, error) {
 	return filepath.Join(root, id), nil
 }
 
+// ensurePrivateRoot creates the plugin root when it is missing and keeps it
+// owner-only: a group- or world-writable plugin root would let another local
+// account plant a plugin that later gets trusted.
+func ensurePrivateRoot(root string) error {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("create plugin root: %w", err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil { // #nosec G302 -- private directory requires owner traversal.
+		return fmt.Errorf("secure plugin root: %w", err)
+	}
+	return nil
+}
+
 func Resolve(id string) (*Resolved, error) {
 	if builtin, ok := resolveBuiltin(id); ok {
 		return builtin, nil
@@ -62,7 +75,7 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 	rootInfo, rootErr := os.Lstat(pluginRoot)
 	if rootErr != nil {
 		if os.IsNotExist(rootErr) {
-			return nil, fmt.Errorf("plugin %q not found", expectedID)
+			return nil, fmt.Errorf("plugin %q not found in %s", expectedID, pluginRoot)
 		}
 		return nil, fmt.Errorf("inspect plugin root: %w", rootErr)
 	}
@@ -72,7 +85,7 @@ func loadFromPath(pluginPath, expectedID string) (*Resolved, error) {
 	info, statErr := os.Lstat(pluginPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			return nil, fmt.Errorf("plugin %q not found", expectedID)
+			return nil, fmt.Errorf("plugin %q not found in %s", expectedID, pluginRoot)
 		}
 		return nil, fmt.Errorf("inspect plugin path: %w", statErr)
 	}
@@ -373,6 +386,13 @@ func List() ([]Summary, error) {
 		if !entry.IsDir() {
 			continue
 		}
+		// sshx's own staging and scaffold directories (".install-*", ".create-*")
+		// are not plugins, and a dot-prefixed name can never be a valid plugin id:
+		// reporting them as INVALID entries would hide the real inventory after an
+		// interrupted install (issue #88).
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
 		id := entry.Name()
 		resolved, resolveErr := Resolve(id)
 		if resolveErr != nil {
@@ -465,6 +485,14 @@ func Trust(id string) (*Resolved, error) {
 	if resolved.Builtin {
 		return resolved, nil
 	}
+	return trustResolved(resolved)
+}
+
+// trustResolved records one already-resolved plugin digest in the local trust
+// lock. An explicitly trusted digest is the only way a local plugin becomes
+// admissible for remote execution.
+func trustResolved(resolved *Resolved) (*Resolved, error) {
+	id := resolved.Manifest.ID
 	lock, err := loadLock()
 	if err != nil {
 		return nil, err

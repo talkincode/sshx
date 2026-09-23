@@ -156,6 +156,33 @@ func TestBlockedJSONKeepsStdoutPureAndMirrorsStderr(t *testing.T) {
 	assert.NotContains(t, string(stdout), "blocked by safety policy", "the mirror must not leak into stdout")
 }
 
+// TestBlockedJSONMirrorIsSilencedByQuiet: --quiet keeps the same single JSON
+// document on stdout and drops the human mirror from stderr, so a caller that
+// merges the streams still reads exactly one parseable document (issue #86).
+func TestBlockedJSONMirrorIsSilencedByQuiet(t *testing.T) {
+	config := &sshclient.Config{
+		Mode:       "ssh",
+		Host:       "db1.example.net",
+		Port:       "22",
+		User:       "operator",
+		Command:    `docker exec teamsacs_pgdb18 psql -U teamsacs -d teamsacs -At -c 'select 1'`,
+		JSONOutput: true,
+		Quiet:      true,
+	}
+	blocked := &sshclient.CommandBlockedError{
+		Command: config.Command,
+		Reason:  `Direct PostgreSQL client execution ("psql") bypasses the guarded SQL pipeline.`,
+	}
+
+	var runErr error
+	stdout, stderr := captureStreams(t, func() {
+		runErr = reportSSHFailure(config, nil, sshclient.AuthMethodUnknown, "blocked", blocked)
+	})
+	require.ErrorIs(t, runErr, ErrReported)
+	assert.True(t, json.Valid(bytes.TrimSpace(stdout)), "stdout must stay a single JSON document: %q", stdout)
+	assert.Empty(t, stderr, "--quiet must suppress the policy mirror on stderr")
+}
+
 // TestNonBlockedJSONFailureHasNoMirror: a plain remote failure keeps today's
 // behavior and writes nothing extra to stderr.
 func TestNonBlockedJSONFailureHasNoMirror(t *testing.T) {

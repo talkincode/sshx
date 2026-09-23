@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -115,8 +114,9 @@ func emitLifecycleJSON(config *sshclient.Config, value any) error {
 		return err
 	}
 	// Write the human-readable mirror first so the JSON document stays the last
-	// line a caller that merges stderr into stdout would have to parse.
-	reportPolicyRejection(os.Stderr, document)
+	// line a caller that merges stderr into stdout would have to parse. --quiet
+	// suppresses the mirror without touching the document.
+	reportPolicyRejection(noticeWriter(config), document)
 	if err := encodeJSON(document); err != nil {
 		return fmt.Errorf("%w: deliver execution result: %w", execution.ErrLocalIO, err)
 	}

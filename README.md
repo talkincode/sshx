@@ -280,7 +280,9 @@ replacement.
 ### `--json` structured output
 
 Add `--json` to get a single JSON object on stdout (diagnostics still go to
-stderr, so stdout stays pure):
+stderr, so stdout stays pure). Human notices such as deprecation warnings and
+narration never touch stdout, and `--quiet` suppresses them on stderr, so a
+caller that merges the streams (`2>&1`) still reads one parseable document:
 
 ```bash
 sshx -h=prod-web --json "systemctl is-active nginx"
@@ -434,7 +436,11 @@ Use `sshx sql` instead of sending raw `psql` or `sqlite3` commands through
 `sshx run`. It accepts exactly one statement, classifies it locally, blocks
 unbounded or unsupported forms, backs up affected data, and records a
 structured audit event. Direct `psql`/`pgcli`/`sqlite3` invocations in
-run/command mode are blocked.
+run/command mode are blocked. The statement may be a positional argument,
+everything after `--`, a local file (`--statement-file=PATH`), or piped stdin;
+a statement that opens with a SQL comment is statement text, not an option.
+Reading stdin waits for EOF, so close stdin (or use `--statement-file`) when
+another process holds the pipe open.
 
 For PostgreSQL, sshx runs `EXPLAIN (FORMAT JSON)` before DML. Psql backslash
 commands, data-modifying CTE bodies, `EXPLAIN ANALYZE`, `SELECT INTO`, `CALL`,
@@ -454,6 +460,10 @@ sshx sql -h=prod-db --db=app --dry-run --json \
 sshx sql -h=prod-db --db=app --db-user=app \
   --db-password-key=app-db --json \
   "UPDATE users SET active=false WHERE id=42"
+
+# Hand over a .sql file, or pipe the statement in
+sshx sql -h=prod-db --db=app --json --statement-file=./query.sql
+printf '%s' 'SELECT count(*) FROM users' | sshx sql -h=prod-db --db=app --json
 ```
 
 `UPDATE`/`DELETE` without a top-level `WHERE` requires
@@ -567,6 +577,14 @@ sshx plugin test docker.environment --fixture=complete --json
 sshx plugin trust docker.environment --json
 sshx inspect -h=prod-web docker.environment --json
 ```
+
+An existing plugin directory is provisioned through the CLI instead of by hand:
+`sshx plugin install <dir>` stages the source with sshx's own modes, validates it
+through the same loader the executor uses, publishes it only when it is valid,
+and `--trust` records the digest in the same step (`--replace` keeps the previous
+plugin as a backup). `sshx plugin list` groups built-in capabilities and local
+plugins and always names the local plugin root, so "none installed" is visible,
+and a missing plugin names the directory that was searched.
 
 New and edited plugins are untrusted until their current manifest/collector/schema
 digest is explicitly trusted. `inspect` checks that trust before opening SSH,

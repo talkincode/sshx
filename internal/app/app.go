@@ -86,6 +86,11 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	config := ParseArgs(args)
 	config.Context = ctx
 	config.ExecutionID = execution.NewRunID()
+	if config.Quiet {
+		// Notices are advisory narration. --quiet keeps stderr free of them so a
+		// caller that merges streams under --json still reads one document.
+		logger.GetLogger().SetLevel(logger.LogLevelError)
+	}
 	if config.ArgumentError != "" {
 		if config.Mode == "run" {
 			return reportRunRequestFailure(config, nil, fmt.Errorf("%w: %s", execution.ErrConfig, config.ArgumentError))
@@ -106,8 +111,14 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	if config.Mode == "mcp" {
 		return RunMCPServerContext(ctx)
 	}
-	if config.Mode == "text" && config.TextHelp {
-		return HandleTextHelp(config)
+	// A usage request is answered before any mode runs: `sshx <verb> --help` prints
+	// that verb's document and `sshx --help` prints the global surface.
+	if config.ShowUsage {
+		PrintUsage()
+		return nil
+	}
+	if config.HelpVerb != "" {
+		return PrintVerbUsage(config)
 	}
 
 	audit := newAuditRecorder(config)
@@ -382,7 +393,7 @@ func runCommand(client *sshclient.SSHClient, config *sshclient.Config, audit *au
 	res, execErr := client.RunCommand(config.JSONOutput)
 	dur := time.Since(start)
 	audit.recordCommandResult(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr)
-	reportSudoPromptFailure(os.Stderr, config.Command, res.Stderr+res.Stdout)
+	reportSudoPromptFailure(noticeWriter(config), config.Command, res.Stderr+res.Stdout)
 
 	if config.JSONOutput {
 		if outputErr := emitCommandJSON(config, client.AuthMethodUsed(), res, dur, classifyError(execErr), execErr); outputErr != nil {
@@ -590,7 +601,7 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 
 	// Use configured sudo password key if available (legacy password_key is sudo-only).
 	sudoKey := hostConfig.EffectiveSudoPasswordKey()
-	if sudoKey != "" && config.SudoKey == sshclient.DefaultSudoKey {
+	if sudoKey != "" && !sudoKeyChosen(config) {
 		config.SudoKey = sudoKey
 		logger.GetLogger().Success("Using sudo password key: %s", sudoKey)
 	}

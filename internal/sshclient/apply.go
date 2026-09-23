@@ -774,11 +774,21 @@ if [ -n "$EXPECT" ] && [ "$FORCE" = "1" ]; then precondition_status=bypassed; fi
 report() {
   printf '{"status":"%%s","changed":%%s,"created":%%s,"before":"%%s","after":"%%s","backup":"%%s","mode":"%%s","payload":"%%s","executed":%%s,"change_state":"%%s","verified":%%s,"verification":"%%s","backup_verified":%%s,"uid":%%s,"gid":%%s,"cleanup_pending":[%%s],"error":"%%s","replace_method":"%%s","precondition_status":"%%s","precondition_sha256":"%%s"}\n' "$status" "$changed" "$created" "$before" "$after" "$backup" "$mode" "$PAYLOAD_SHA" "$executed" "$change_state" "$verified" "$verification" "$backup_verified" "$uid" "$gid" "$cleanup_pending" "$error" "$replace_method" "$precondition_status" "$precondition_sha256"
 }
+# remove_owned deletes one sshx-owned artifact without trusting a PATH rm: a
+# wrapper named rm earlier in PATH could keep a copy of the payload behind (for
+# example one that moves files to the Trash). An absolute remover is tried
+# first so such a wrapper is bypassed on hosts that have one; POSIX unlink and
+# PATH rm remain as fallbacks, and success means the path is gone rather than
+# merely claimed removed.
 remove_owned() {
-  if ! rm -f "$1"; then
-    cleanup_pending="$cleanup_pending${cleanup_pending:+,}\"$1\""
-    return 1
-  fi
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then return 0; fi
+  for remover in /bin/rm /usr/bin/rm /usr/local/bin/rm; do
+    if [ -x "$remover" ] && "$remover" -f "$1" && [ ! -e "$1" ] && [ ! -L "$1" ]; then return 0; fi
+  done
+  if command -v unlink >/dev/null 2>&1 && unlink "$1" && [ ! -e "$1" ] && [ ! -L "$1" ]; then return 0; fi
+  if command -v rm >/dev/null 2>&1 && rm -f "$1" && [ ! -e "$1" ] && [ ! -L "$1" ]; then return 0; fi
+  cleanup_pending="$cleanup_pending${cleanup_pending:+,}\"$1\""
+  return 1
 }
 finish() {
   rc=$?

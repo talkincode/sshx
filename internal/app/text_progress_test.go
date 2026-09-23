@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/talkincode/sshx/internal/execution"
+	"github.com/talkincode/sshx/internal/sshclient"
 	"github.com/talkincode/sshx/internal/textsafe"
 )
 
@@ -224,7 +225,7 @@ func TestReportRunSudoPromptFailuresPerTarget(t *testing.T) {
 	}
 
 	_, stderr := captureStreams(t, func() {
-		reportRunSudoPromptFailures(outcome, command)
+		reportRunSudoPromptFailures(&sshclient.Config{}, outcome, command)
 	})
 
 	// Only the target that actually hit the prompt is named.
@@ -266,9 +267,17 @@ func TestReportRunSudoPromptFailuresStaysQuiet(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, stderr := captureStreams(t, func() {
-				reportRunSudoPromptFailures(tc.outcome, tc.command)
+				reportRunSudoPromptFailures(&sshclient.Config{}, tc.outcome, tc.command)
 			})
 			assert.Empty(t, string(stderr))
 		})
 	}
+
+	// --quiet suppresses the hint even when it would otherwise be printed.
+	t.Run("quiet suppresses the hint", func(t *testing.T) {
+		_, stderr := captureStreams(t, func() {
+			reportRunSudoPromptFailures(&sshclient.Config{Quiet: true}, refusal, `cd /srv && sudo id`)
+		})
+		assert.Empty(t, string(stderr))
+	})
 }

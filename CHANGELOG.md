@@ -7,16 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- `sshx text` reads remote files through a pipelined SFTP path: read-ahead
-  aperture plus `UseConcurrentReads`, so the SFTP layer keeps multiple requests
-  in flight for one file instead of one round trip per read. On the reporting
-  host the same 8 MiB window went from a median 83.0 s to 26.5 s (88.0/77.9 s →
-  23.8/29.1 s, alternating runs, identical bytes and lines scanned). `--max-scan-bytes`
-  still bounds both the scan and the read-ahead, and the truncation probe reads
-  exactly one byte past the budget.
-
 ### Added
 
 - `sshx text` narrates scan progress on stderr after a short grace period
@@ -38,12 +28,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a leading `sudo`, so it announces the boundary before connecting and explains
   the refusal afterwards, suggesting `sudo sh -c "<command>"`. The auto-fill
   scope is unchanged.
+- Per-verb help: every subcommand now answers `sshx <verb> --help` with its own
+  usage document instead of rejecting `--help` as an unknown option. `--help
+  --json` emits the same blocks as an `sshx.help.v1` document (`sshx text
+  --help --json` keeps its structured `sshx.text.help.v1` document), and the
+  help text is defined once and shared with the global `sshx --help` surface.
+- `--quiet` (alias `--no-notices`): suppresses human notices on stderr
+  (deprecation warnings, policy-block mirrors, sudo-boundary hints, scan
+  progress, narration) so a caller that merges the streams
+  (`2>&1`) under `--json` still reads exactly one parseable document. stdout,
+  the exit code, and the JSON result are unchanged. Like `--help`, it is
+  recognized in option position in any order, so it works before or after other
+  sshx options and never reaches the remote command.
+- `sshx sql --statement-file=PATH` and statement input on stdin: a query no
+  longer has to be assembled as a shell string. `sshx sql` also accepts a
+  statement that opens with a SQL comment (`-- header`) as statement text
+  instead of rejecting it as an unknown option. Reading stdin waits for EOF
+  (like `psql`), so a caller whose stdin pipe stays open should pass
+  `--statement-file` instead.
+- `sshx plugin install <dir> [--replace] [--trust]`: provision an existing local
+  plugin directory through the audited CLI instead of hand-placing files under
+  the runtime plugin root. The source is staged with sshx's own modes, validated
+  through the executor's loader before publishing, and `--trust` records the
+  published digest in the same step. `--replace` preserves the previous plugin
+  as a backup, symlinks and non-regular entries are refused, and the copy is
+  bounded (8MiB, 128 files).
+
+### Changed
+
+- `sshx text` reads remote files through a pipelined SFTP path: read-ahead
+  aperture plus `UseConcurrentReads`, so the SFTP layer keeps multiple requests
+  in flight for one file instead of one round trip per read. On the reporting
+  host the same 8 MiB window went from a median 83.0 s to 26.5 s (88.0/77.9 s →
+  23.8/29.1 s, alternating runs, identical bytes and lines scanned). `--max-scan-bytes`
+  still bounds both the scan and the read-ahead, and the truncation probe reads
+  exactly one byte past the budget.
+
+- `sshx plugin list` groups built-in capabilities and local plugins and always
+  names the local plugin root, so "no local plugins installed" is visible
+  instead of inferred; local entries report provenance, trust, validity, and
+  digest, and `plugin show`/`trust`/`install` report the same state line. A
+  staging directory left by an interrupted install is skipped instead of being
+  reported as an invalid plugin, and a publication that cannot be renamed swaps
+  the previous plugin back in (or reports where the recovery copy was kept).
+- Compatibility mode (`sshx -h=<host> ...`) now accepts the documented
+  `--ssh-password-key=KEY` option instead of forwarding it as part of the remote
+  command, and rejects an unrecognized option instead of forwarding it, naming
+  the offending token and suggesting the intended option when one is close. The guessed
+  `--local`/`--remote` transfer options name the real surface
+  (`--upload=<local> --to=<remote>`), and a missing upload/download destination
+  names `--to` explicitly. Remote command arguments after the first command
+  token, and after `--`, are unchanged.
+- A missing plugin, `--list=`, `--mkdir=`, `--rm=`, `--upload=` or
+  `--download=` now names the searched directory or the option that supplies the
+  missing value (`remote path is required` / `local path is required` diagnosed
+  the wrong cause).
 
 ### Fixed
 
 - `sshx text` no longer looks like a hang: a 60+ second SFTP window used to emit
   nothing at all, and a budget-limited scan returned partial results without
   saying so.
+
+- `sshx run --target=<name>` resolves the sudo keyring reference per host, the
+  same way single-target verbs do: an explicit `-pk` still wins, but the
+  built-in default (`master`) no longer shadows a host's configured
+  `sudo_password_key`. The plan, the SSH client, the keyring lookup, and the
+  audit trail all resolve the same reference, so the plan reports the key that
+  will be used and each target's audit event names the credential it used (the
+  run summary records only a caller-level choice).
+- `sshx apply` removes its staging temp, publication temp, and unverified backup
+  with an absolute remover or POSIX `unlink` before falling back to `PATH rm`, so
+  a host whose `rm` is a trash-move wrapper no longer collects leaked copies of
+  the applied payload. Cleanup success now means the path is gone, and an
+  artifact that cannot be removed still reports `cleanup_pending` with exit 4.
+- `TestApplySudoScriptEvidenceAndCleanup` no longer pipes the generated
+  privileged script through the child's stdin or captures its output through
+  `os/exec` copier goroutines; the fixture runs the script from a file with
+  file-backed streams and reports a truncated report readably instead of
+  panicking on a nil pointer.
+- The CI `Lint` gate is pinned to golangci-lint `v2.13.2` and `.golangci.yml`
+  uses the v2 `linters.exclusions.rules` schema, so an upstream release or the
+  v1-era key can no longer fail the job before any Go file is analysed.
 
 ## [0.17.0] - 2026-09-16
 

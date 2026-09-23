@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -76,6 +77,23 @@ func applySudoKeyFlag(config *sshclient.Config, arg string) bool {
 	}
 }
 
+// sudoKeyChosen reports whether the caller chose the sudo keyring reference:
+// -pk/--password-key/--sudo-password-key, or a non-default SSH_SUDO_KEY. The
+// built-in default ("master") is not a choice, so a host's configured
+// sudo_password_key applies until the caller overrides it.
+func sudoKeyChosen(config *sshclient.Config) bool {
+	return config.SudoKeySet || config.SudoKey != sshclient.DefaultSudoKey
+}
+
+// sudoKeyChoice returns the caller's explicit sudo key, or "" when the key is
+// still the built-in default.
+func sudoKeyChoice(config *sshclient.Config) string {
+	if sudoKeyChosen(config) {
+		return config.SudoKey
+	}
+	return ""
+}
+
 func applyLifecycleFlag(config *sshclient.Config, arg string) bool {
 	key, value, found := strings.Cut(arg, "=")
 	if !found {
@@ -102,6 +120,150 @@ func applyLifecycleFlag(config *sshclient.Config, arg string) bool {
 	return true
 }
 
+// scanVerbFlags scans sshx's own options in a verb invocation before the
+// payload starts. It stops at the `--` separator and, for verbs whose first
+// positional token begins a remote payload (compatibility mode, run, sql, ros),
+// at that token: from there on every argument belongs to the payload, including
+// tokens that look like sshx flags (see AGENT.md "Boundary Contracts").
+//
+// It returns the arguments with the notice flags removed, plus the requested
+// --help / --json / --quiet state. --quiet is stripped because the CLI answers
+// it before any parser runs; --help and --json stay in the list, so a global
+// usage request still reaches the compatibility-mode parser and every parser
+// keeps owning --json.
+func scanVerbFlags(verb string, args []string) (rest []string, help, jsonOutput, quiet bool) {
+	stopAtPayload := verb == "" || verb == "run" || verb == "sql" || verb == "ros"
+	rest = make([]string, 0, len(args))
+	for i, arg := range args {
+		if arg == "--" || stopAtPayload && !strings.HasPrefix(arg, "-") {
+			rest = append(rest, args[i:]...)
+			break
+		}
+		switch arg {
+		case "--help":
+			help = true
+			rest = append(rest, arg)
+		case "--quiet", "--no-notices":
+			quiet = true
+		default:
+			if arg == "--json" {
+				jsonOutput = true
+			}
+			rest = append(rest, arg)
+		}
+	}
+	return rest, help, jsonOutput, quiet
+}
+
+// knownVerb reports whether the first argument selects a subcommand parser
+// rather than compatibility mode.
+func knownVerb(verb string) string {
+	if containsString(helpVerbs, verb) {
+		return verb
+	}
+	return ""
+}
+
+// compatOptionNames are the sshx-owned options accepted in compatibility mode
+// before the remote command starts. It feeds the "did you mean" suggestion for
+// an unrecognized option; TestCompatOptionNamesAreRecognized fails when an entry
+// is not actually parsed, so the list cannot drift into fiction.
+var compatOptionNames = []string{
+	"-h", "--host", "-p", "--port", "-u", "--user", "-i", "--key",
+	"-pk", "--password-key", "--sudo-password-key", "--ssh-password-key",
+	"--no-key", "--password-only", "--key-auth", "--force", "-f",
+	"--bypass-reason", "--accept-unknown-host", "--insecure-hostkey",
+	"--strict-host-key", "--known-hosts", "--no-safety-check", "--dry-run",
+	"--audit-output", "--no-audit", "--json", "--pty", "--timeout",
+	"--expect-plan", "--host-timeout", "--global-timeout", "--bind", "--via",
+	"--sftp", "--upload", "--download", "--transfer", "--to", "--list", "--ls",
+	"--mkdir", "--rm", "--password-set", "--password-get", "--password-delete",
+	"--password-del", "--password-check", "--password-exists", "--password-list",
+	"--password-ls", "--host-add", "--host-import", "--ssh-config",
+	"--host-update", "--host-list", "--host-ls", "--host-test", "--host-test-all",
+	"--host-remove", "--host-rm", "--host-name", "--host-desc", "--host-type",
+}
+
+// compatOptionHints explains the options callers most often guess at. They are
+// not aliases: the upload/download surface is --upload=<local> or
+// --download=<remote> plus --to=<destination>, and the guessed --local/--remote
+// pair is silently useless, so name the real surface instead of only the typo.
+var compatOptionHints = map[string]string{
+	"--local":  "use --upload=<local-file> --to=<remote-path> (or --download=<remote-file> --to=<local-path>)",
+	"--remote": "use --download=<remote-file> --to=<local-path> (or --upload=<local-file> --to=<remote-path>)",
+}
+
+// unknownCompatOption describes an option-shaped token that compatibility mode
+// does not recognize. Before this rule the token was forwarded as part of the
+// remote command, so a misspelled option ran something the caller never asked
+// for and the resulting failure named the wrong cause.
+func unknownCompatOption(token string) string {
+	name := token
+	if index := strings.Index(name, "="); index >= 0 {
+		name = name[:index]
+	}
+	if hint, ok := compatOptionHints[name]; ok {
+		return fmt.Sprintf("unknown option %q: %s", token, hint)
+	}
+	if suggestion := closestCompatOption(name); suggestion != "" {
+		return fmt.Sprintf("unknown option %q (did you mean %q?); sshx options come before the remote command, and a command that starts with \"-\" must follow --", token, suggestion)
+	}
+	return fmt.Sprintf("unknown option %q; sshx options come before the remote command, and a command that starts with \"-\" must follow --", token)
+}
+
+// closestCompatOption returns the compatibility option nearest to an
+// unrecognized one, or "" when nothing is close enough to suggest.
+func closestCompatOption(name string) string {
+	return closestOptionName(name, compatOptionNames)
+}
+
+// closestOptionName returns the known option nearest to an unrecognized token.
+// Short names are specific, so they tolerate only one wrong character while
+// longer names tolerate two, and one-character options are never suggested:
+// each of them is one edit away from every other.
+func closestOptionName(name string, candidates []string) string {
+	long := strings.HasPrefix(name, "--")
+	best, bestDistance := "", 3
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "--") != long {
+			continue
+		}
+		bare := strings.TrimLeft(candidate, "-")
+		if len(bare) < 2 {
+			continue
+		}
+		limit := 2
+		if len(bare) <= 3 {
+			limit = 1
+		}
+		if distance := levenshtein(name, candidate); distance <= limit && distance < bestDistance {
+			best, bestDistance = candidate, distance
+		}
+	}
+	return best
+}
+
+// levenshtein returns the edit distance between two option names.
+func levenshtein(a, b string) int {
+	previous := make([]int, len(b)+1)
+	current := make([]int, len(b)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		current[0] = i
+		for j := 1; j <= len(b); j++ {
+			substitution := previous[j-1]
+			if a[i-1] != b[j-1] {
+				substitution++
+			}
+			current[j] = min(previous[j]+1, current[j-1]+1, substitution)
+		}
+		previous, current = current, previous
+	}
+	return previous[len(b)]
+}
+
 // ParseArgs parses command-line arguments and returns a Config.
 func ParseArgs(args []string) *sshclient.Config {
 	config := &sshclient.Config{
@@ -111,6 +273,25 @@ func ParseArgs(args []string) *sshclient.Config {
 		UseKeyAuth:   true,
 		AuditEnabled: true,
 		RunTags:      map[string]string{},
+	}
+
+	// sshx's own flags come before the payload, so scan them once here: --quiet
+	// must be known before the first notice is emitted, and --help must answer
+	// before any parser can reject it as an unknown option. Compatibility mode
+	// starts at the first argument (an sshx option or the remote command); a
+	// subcommand starts after its verb.
+	verb := ""
+	scanFrom := 1
+	if len(args) > 1 {
+		verb = args[1]
+		if knownVerb(verb) != "" {
+			scanFrom = 2
+		}
+	}
+	verbArgs := []string(nil)
+	var help, jsonOutput bool
+	if len(args) > scanFrom {
+		verbArgs, help, jsonOutput, config.Quiet = scanVerbFlags(knownVerb(verb), args[scanFrom:])
 	}
 
 	if password := os.Getenv("SSH_PASSWORD"); password != "" {
@@ -134,10 +315,10 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 	// High-risk trust relaxations must be explicit CLI/request fields. Inherited
 	// environment values and repository-local .env files must not authorize them.
-	warnDeprecatedTrustEnv("SSH_ACCEPT_UNKNOWN_HOST")
-	warnDeprecatedTrustEnv("SSH_INSECURE_HOST_KEY")
-	warnDeprecatedTrustEnv("SSH_NO_SAFETY_CHECK")
-	warnDeprecatedTrustEnv("SSH_FORCE")
+	warnDeprecatedTrustEnv(config, "SSH_ACCEPT_UNKNOWN_HOST")
+	warnDeprecatedTrustEnv(config, "SSH_INSECURE_HOST_KEY")
+	warnDeprecatedTrustEnv(config, "SSH_NO_SAFETY_CHECK")
+	warnDeprecatedTrustEnv(config, "SSH_FORCE")
 
 	if timeoutStr := os.Getenv("SSH_TIMEOUT"); timeoutStr != "" {
 		if d, err := parseTimeout(timeoutStr); err == nil {
@@ -157,41 +338,53 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 
 	if len(args) > 1 {
-		switch args[1] {
-		case "plugin":
-			parsePluginArgs(config, args[2:])
-			return config
-		case "skill":
-			parseSkillArgs(config, args[2:])
-			return config
-		case "mcp":
-			parseMCPArgs(config, args[2:])
-			return config
-		case "inspect":
-			parseInspectArgs(config, args[2:])
-			return config
-		case "run":
-			parseRunArgs(config, args[2:])
-			return config
-		case "sql":
-			parseSQLArgs(config, args[2:])
-			return config
-		case "apply":
-			parseApplyArgs(config, args[2:])
-			return config
-		case "text":
-			parseTextArgs(config, args[2:])
-			return config
-		case "audit":
-			parseAuditArgs(config, args[2:])
-			return config
-		case "login":
-			parseLoginArgs(config, args[2:])
-			return config
-		case "ros":
-			parseROSArgs(config, args[2:])
+		if help {
+			if verb = knownVerb(verb); verb != "" {
+				config.HelpVerb = verb
+				config.JSONOutput = jsonOutput
+			} else {
+				config.ShowUsage = true
+			}
 			return config
 		}
+		switch verb {
+		case "plugin":
+			parsePluginArgs(config, verbArgs)
+			return config
+		case "skill":
+			parseSkillArgs(config, verbArgs)
+			return config
+		case "mcp":
+			parseMCPArgs(config, verbArgs)
+			return config
+		case "inspect":
+			parseInspectArgs(config, verbArgs)
+			return config
+		case "run":
+			parseRunArgs(config, verbArgs)
+			return config
+		case "sql":
+			parseSQLArgs(config, verbArgs)
+			return config
+		case "apply":
+			parseApplyArgs(config, verbArgs)
+			return config
+		case "text":
+			parseTextArgs(config, verbArgs)
+			return config
+		case "audit":
+			parseAuditArgs(config, verbArgs)
+			return config
+		case "login":
+			parseLoginArgs(config, verbArgs)
+			return config
+		case "ros":
+			parseROSArgs(config, verbArgs)
+			return config
+		}
+		// Compatibility mode: the scanned list already carries the first
+		// argument unless it was an sshx notice flag.
+		args = append([]string{args[0]}, verbArgs...)
 	}
 
 	commandParts := []string{}
@@ -214,6 +407,8 @@ func ParseArgs(args []string) *sshclient.Config {
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
 		case applySudoKeyFlag(config, arg):
+		case strings.HasPrefix(arg, "--ssh-password-key="):
+			config.SSHPasswordKey = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-key", arg == "--password-only":
 			config.UseKeyAuth = false
 			config.KeyPath = ""
@@ -351,8 +546,16 @@ func ParseArgs(args []string) *sshclient.Config {
 		case strings.HasPrefix(arg, "--host-type="):
 			config.HostType = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--help":
-			PrintUsage()
-			os.Exit(0)
+			// Unreachable through ParseArgs (the pre-scan answers --help in option
+			// position), kept for callers that build a compatibility argument list.
+			config.ShowUsage = true
+			return config
+		case strings.HasPrefix(arg, "-"):
+			// Option position: everything here must be an sshx option. Forwarding
+			// an unrecognized token as a command made typos execute with defaults
+			// and produced an error that named the wrong cause.
+			config.ArgumentError = unknownCompatOption(arg)
+			return config
 		default:
 			if config.Mode == "ssh" {
 				commandParts = append(commandParts, args[i:]...)
@@ -416,6 +619,8 @@ func parsePluginArgs(config *sshclient.Config, args []string) {
 			config.DryRun = true
 		case arg == "--replace":
 			config.PluginReplace = true
+		case arg == "--trust":
+			config.PluginTrust = true
 		case strings.HasPrefix(arg, "--runner="):
 			config.PluginRunner = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--platform="):
@@ -430,8 +635,14 @@ func parsePluginArgs(config *sshclient.Config, args []string) {
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
 			config.AuditEnabled = false
-		case !strings.HasPrefix(arg, "-") && config.PluginID == "":
-			config.PluginID = arg
+		case !strings.HasPrefix(arg, "-") && config.PluginID == "" && config.PluginSource == "":
+			// The install positional names the source directory; every other
+			// action takes a plugin id.
+			if config.PluginAction == "install" {
+				config.PluginSource = arg
+			} else {
+				config.PluginID = arg
+			}
 		case !strings.HasPrefix(arg, "-"):
 			config.ArgumentError = fmt.Sprintf("unexpected plugin argument %q", arg)
 		default:
@@ -442,9 +653,9 @@ func parsePluginArgs(config *sshclient.Config, args []string) {
 
 // warnDeprecatedTrustEnv emits a diagnostic when a high-risk env switch is set
 // without applying it. Explicit CLI flags remain the only authorization path.
-func warnDeprecatedTrustEnv(name string) {
+func warnDeprecatedTrustEnv(config *sshclient.Config, name string) {
 	val := os.Getenv(name)
-	if val == "" {
+	if val == "" || config != nil && config.Quiet {
 		return
 	}
 	if strings.EqualFold(val, "true") || val == "1" {
@@ -620,6 +831,85 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 	}
 }
 
+// sqlOptionNames are the options accepted by `sshx sql` before the statement
+// starts. It feeds the "did you mean" suggestion for an unrecognized option;
+// TestSQLOptionNamesAreRecognized fails when an entry is not actually parsed.
+var sqlOptionNames = []string{
+	"-h", "--host", "-p", "--port", "-u", "--user", "-i", "--key", "-pk",
+	"--password-key", "--sudo-password-key", "--ssh-password-key", "--no-key",
+	"--password-only", "--key-auth", "--accept-unknown-host", "--insecure-hostkey",
+	"--strict-host-key", "--known-hosts", "--engine", "--db", "--database",
+	"--db-file", "--db-user", "--db-host", "--db-port", "--db-password-key",
+	"--statement-file", "--row-threshold", "--allow-full-table", "--no-backup",
+	"--explain", "--backup-dir", "--docker", "--db-cred-from", "--cred-cache",
+	"--cred-refresh", "--sudo", "--force", "-f", "--dry-run", "--json",
+	"--timeout", "--bind", "--via", "--audit-output", "--no-audit",
+	"--bypass-reason", "--expect-plan", "--host-timeout", "--global-timeout",
+}
+
+// sqlStatementToken reports whether an argument can only be statement text
+// rather than an sshx option. SQL files, migrations, and dumps conventionally
+// open with a comment header ("-- ..."), which is exactly a token that starts
+// with "--" but cannot be an option because its name part contains whitespace.
+func sqlStatementToken(arg string) bool {
+	if !strings.HasPrefix(arg, "--") {
+		return false
+	}
+	name, _, _ := strings.Cut(arg, "=")
+	return strings.ContainsAny(name, " \t\r\n")
+}
+
+// unknownSQLOption describes an option-shaped SQL token. A statement that opens
+// with a comment can look like an option, so the message names every way to pass
+// a statement that begins with "-".
+func unknownSQLOption(token string) string {
+	name, _, _ := strings.Cut(token, "=")
+	if suggestion := closestSQLOption(name); suggestion != "" {
+		return fmt.Sprintf("unknown sql option %q (did you mean %q?); a statement is accepted as a positional argument, after --, via --statement-file=PATH, or on stdin", token, suggestion)
+	}
+	return fmt.Sprintf("unknown sql option %q; a statement is accepted as a positional argument, after --, via --statement-file=PATH, or on stdin", token)
+}
+
+// closestSQLOption returns the known sql option nearest to an unrecognized one.
+func closestSQLOption(name string) string {
+	return closestOptionName(name, sqlOptionNames)
+}
+
+// maxSQLStatementBytes bounds a statement read from a file or stdin so a stray
+// stream cannot be buffered into memory.
+const maxSQLStatementBytes = 1 << 20
+
+// readSQLStatement loads one statement from a local file or, when stdin is
+// piped rather than a terminal, from stdin. An empty pipe returns "" so the
+// caller keeps its "statement is required" diagnostic.
+func readSQLStatement(path string) (string, error) {
+	if path != "" {
+		data, err := os.ReadFile(path) // #nosec G304 -- caller-selected local statement file.
+		if err != nil {
+			return "", fmt.Errorf("read --statement-file: %w", err)
+		}
+		if len(data) > maxSQLStatementBytes {
+			return "", fmt.Errorf("--statement-file %s exceeds %d bytes", path, maxSQLStatementBytes)
+		}
+		return string(data), nil
+	}
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return "", nil
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return "", nil
+	}
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxSQLStatementBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read SQL statement from stdin: %w", err)
+	}
+	if len(data) > maxSQLStatementBytes {
+		return "", fmt.Errorf("SQL statement on stdin exceeds %d bytes", maxSQLStatementBytes)
+	}
+	return string(data), nil
+}
+
 // parseSQLArgs parses the `sshx sql` guarded SQL execution subcommand. The
 // SQL statement is the positional argument (or everything after `--`).
 func parseSQLArgs(config *sshclient.Config, args []string) {
@@ -667,6 +957,8 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			config.SQLDatabase = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--db-file="):
 			config.SQLFile = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--statement-file="):
+			config.SQLStatementFile = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--db-user="):
 			config.SQLUser = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--db-host="):
@@ -727,14 +1019,37 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			config.AuditOutput = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-audit":
 			config.AuditEnabled = false
+		case strings.HasPrefix(arg, "--") && sqlStatementToken(arg):
+			// A comment-leading statement is statement text, not an option.
+			sqlParts = append(sqlParts, args[i:]...)
+			i = len(args)
 		case !strings.HasPrefix(arg, "-"):
 			sqlParts = append(sqlParts, args[i:]...)
 			i = len(args)
 		default:
-			config.ArgumentError = fmt.Sprintf("unknown sql option %q", arg)
+			config.ArgumentError = unknownSQLOption(arg)
 		}
 	}
 	config.SQLStatement = strings.TrimSpace(strings.Join(sqlParts, " "))
+	switch {
+	case config.ArgumentError != "":
+	case config.SQLStatement != "" && config.SQLStatementFile != "":
+		config.ArgumentError = "--statement-file cannot be combined with a positional SQL statement"
+	case config.SQLStatementFile != "":
+		statement, readErr := readSQLStatement(config.SQLStatementFile)
+		if readErr != nil {
+			config.ArgumentError = readErr.Error()
+		} else {
+			config.SQLStatement = strings.TrimSpace(statement)
+		}
+	case config.SQLStatement == "":
+		statement, readErr := readSQLStatement("")
+		if readErr != nil {
+			config.ArgumentError = readErr.Error()
+		} else {
+			config.SQLStatement = strings.TrimSpace(statement)
+		}
+	}
 
 	// Password auth implies TCP: peer/ident auth on the local socket ignores
 	// PGPASSWORD, so default the database host to loopback in that case.
@@ -930,8 +1245,6 @@ func parseTextArgs(config *sshclient.Config, args []string) {
 			config.TextUseSudo = true
 		case arg == "--no-redact":
 			config.TextRedact = false
-		case arg == "--help":
-			config.TextHelp = true
 		case arg == "--dry-run":
 			config.DryRun = true
 		case arg == "--json":

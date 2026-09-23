@@ -422,7 +422,7 @@ func prepareRunPlan(config *sshclient.Config, req *execution.Request, snap *exec
 			}
 		}
 		copyConfig.SSHPasswordKey = firstNonEmpty(req.Policy.SSHPasswordKey, t.SSHPasswordKey)
-		copyConfig.SudoKey = firstNonEmpty(req.Policy.SudoPasswordKey, t.SudoPasswordKey)
+		copyConfig.SudoKey = execution.SudoKeyForTarget(req.Policy.SudoPasswordKey, t.SudoPasswordKey)
 		plan.Targets = append(plan.Targets, publicPlanTarget(&copyConfig, t.Alias, "target", plan))
 		t.KnownHostsData, t.ExpectedKeyFingerprint = copyConfig.KnownHostsData, copyConfig.ExpectedKeyFingerprint
 		t.Bind = copyConfig.Bind

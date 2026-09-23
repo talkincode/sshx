@@ -271,7 +271,7 @@ sshx: block reason: ⚠️  Dangerous command blocked | ... | Reason: Direct Pos
 
 ### `--json` 结构化输出
 
-加上 `--json` 即可在 stdout 得到单个 JSON 对象（诊断日志仍走 stderr，保证 stdout 纯净）：
+加上 `--json` 即可在 stdout 得到单个 JSON 对象（诊断日志仍走 stderr，保证 stdout 纯净）。人工notice（弃用警告、进度叙述）只会出现在 stderr，`--quiet` 可将其静默：这样把两个流合并（`2>&1`）的调用方在成功与失败路径下都只会读到一份可解析文档：
 
 ```bash
 sshx -h=prod-web --json "systemctl is-active nginx"
@@ -419,6 +419,12 @@ sshx plugin test docker.environment --fixture=complete --json
 sshx plugin trust docker.environment --json
 sshx inspect -h=prod-web docker.environment --json
 ```
+
+已存在的插件目录请通过 CLI 安装，不要手工放置文件：`sshx plugin install <dir>`
+会用 sshx 自己的权限写入暂存副本、用执行器同一套 loader 校验、只有校验通过才发布；
+`--trust` 在同一步记录摘要，`--replace` 保留旧插件作为备份。`sshx plugin list`
+会区分内置能力与本地插件并始终打印本地插件根目录（因此"未安装"是可见状态），
+插件缺失时的报错也会指出实际搜索的目录。
 
 新建或修改后的插件默认不可信。`plugin trust` 显式记录 manifest、collector
 和 schema 的当前摘要；`inspect` 在联网前检查摘要信任，然后只在本次 SSH

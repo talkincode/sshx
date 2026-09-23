@@ -62,11 +62,8 @@ func Create(options CreateOptions) (*CreateResult, error) {
 	if rootErr != nil {
 		return nil, rootErr
 	}
-	if mkdirErr := os.MkdirAll(root, 0o700); mkdirErr != nil {
-		return nil, fmt.Errorf("create plugin root: %w", mkdirErr)
-	}
-	if chmodErr := os.Chmod(root, 0o700); chmodErr != nil { // #nosec G302 -- private directory requires owner traversal.
-		return nil, fmt.Errorf("secure plugin root: %w", chmodErr)
+	if rootErr := ensurePrivateRoot(root); rootErr != nil {
+		return nil, rootErr
 	}
 	target := filepath.Join(root, options.ID)
 	var backupPath string
@@ -93,9 +90,7 @@ func Create(options CreateOptions) (*CreateResult, error) {
 			_ = os.RemoveAll(tempDir) //nolint:errcheck // best-effort cleanup inside constrained plugin root
 		}
 	}()
-	if chmodErr := os.Chmod(tempDir, 0o700); chmodErr != nil { // #nosec G302 -- private directory requires owner traversal.
-		return nil, chmodErr
-	}
+	// os.MkdirTemp already created the scaffold directory owner-only (0700).
 
 	manifest := templateManifest(options)
 	manifestData, marshalErr := json.MarshalIndent(manifest, "", "  ")
@@ -127,9 +122,11 @@ func Create(options CreateOptions) (*CreateResult, error) {
 		}
 		written = append(written, relative)
 	}
-	if renameErr := os.Rename(tempDir, target); renameErr != nil {
-		return nil, fmt.Errorf("install plugin: %w", renameErr)
+	published, renameErr := publishStagedDir(tempDir, target, backupPath)
+	if renameErr != nil {
+		return nil, renameErr
 	}
+	backupPath = published
 	cleanup = false
 	sort.Strings(written)
 	resolved, resolveErr := Resolve(options.ID)
@@ -166,6 +163,23 @@ func Remove(id string) (string, error) {
 		return "", saveErr
 	}
 	return backup, nil
+}
+
+// publishStagedDir moves a staged plugin directory into place and restores the
+// previous plugin when the move fails, so a failed publication never leaves the
+// plugin missing while a recovery copy exists elsewhere. It returns the backup
+// path that still holds the previous plugin ("" when the restore consumed it).
+func publishStagedDir(tempDir, target, backupPath string) (string, error) {
+	if err := os.Rename(tempDir, target); err != nil {
+		if backupPath != "" {
+			if restoreErr := os.Rename(backupPath, target); restoreErr == nil {
+				return "", fmt.Errorf("publish plugin: %w (previous plugin restored)", err)
+			}
+			return backupPath, fmt.Errorf("publish plugin: %w (previous plugin kept at %s)", err, backupPath)
+		}
+		return "", fmt.Errorf("publish plugin: %w", err)
+	}
+	return backupPath, nil
 }
 
 func backupExisting(source, id string) (string, error) {

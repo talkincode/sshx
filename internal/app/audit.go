@@ -176,6 +176,9 @@ type auditRecorder struct {
 	completed      bool
 	persisted      bool
 	persistenceErr error
+	// sudoKeyResolved marks an event whose sudo key was resolved per target, so
+	// finish() does not overwrite it with the caller-level value.
+	sudoKeyResolved bool
 }
 
 var (
@@ -531,7 +534,9 @@ func (r *auditRecorder) refresh(config *sshclient.Config) {
 		r.event.UsesSudo = config.LoginUseSudo
 		r.event.Command = ""
 	}
-	r.event.SudoKey = config.SudoKey
+	if !r.sudoKeyResolved {
+		r.event.SudoKey = config.SudoKey
+	}
 	if config.Timeout > 0 {
 		r.event.Timeout = config.Timeout.String()
 	}

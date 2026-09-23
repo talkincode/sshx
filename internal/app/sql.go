@@ -262,7 +262,7 @@ func validateSQLConfig(config *sshclient.Config) error {
 		return fmt.Errorf("host is required (use -h=<host>)")
 	}
 	if config.SQLStatement == "" {
-		return fmt.Errorf("SQL statement is required (positional argument or after --)")
+		return fmt.Errorf("SQL statement is required (positional argument, after --, --statement-file=PATH, or on stdin)")
 	}
 	if config.SQLEngine == sqlsafe.EngineSQLite {
 		return validateSQLiteConfig(config)
