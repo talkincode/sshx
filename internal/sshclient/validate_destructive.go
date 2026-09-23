@@ -425,6 +425,29 @@ func containerExecTokens(args []string) ([]string, bool) {
 // commandInPosition walks environment assignments and command wrappers to find
 // the token that actually executes, mirroring analyzeSegment in validate_sql.go.
 func commandInPosition(tokens []string) (string, []string, positionKind) {
+	i := commandTokenIndex(tokens)
+	if i >= len(tokens) {
+		return "", nil, positionNone
+	}
+	name := strings.ToLower(commandBasename(tokens[i]))
+	if name == "docker" || name == "podman" || name == "nerdctl" {
+		if inner, ok := containerExecTokens(tokens[i+1:]); ok {
+			return commandInPosition(inner)
+		}
+		return name, tokens[i+1:], positionCommand
+	}
+	if shellNames[name] {
+		if script, ok := shellScriptArg(tokens[i+1:]); ok {
+			return name, []string{script}, positionShellScript
+		}
+		return name, tokens[i+1:], positionShellStdin
+	}
+	return name, tokens[i+1:], positionCommand
+}
+
+// commandTokenIndex returns the index of the token that actually executes a
+// simple command, skipping environment assignments and command wrappers.
+func commandTokenIndex(tokens []string) int {
 	i := 0
 	for i < len(tokens) {
 		tok := tokens[i]
@@ -433,31 +456,17 @@ func commandInPosition(tokens []string) (string, []string, positionKind) {
 			continue
 		}
 		name := strings.ToLower(commandBasename(tok))
-		if valueFlags, ok := commandWrappers[name]; ok {
+		valueFlags, ok := commandWrappers[name]
+		if !ok {
+			return i
+		}
+		i++
+		i = skipFlags(tokens, i, valueFlags)
+		if name == "timeout" && i < len(tokens) && looksLikeDuration(tokens[i]) {
 			i++
-			i = skipFlags(tokens, i, valueFlags)
-			if name == "timeout" && i < len(tokens) && looksLikeDuration(tokens[i]) {
-				i++
-			}
-			continue
 		}
-		if name == "docker" || name == "podman" || name == "nerdctl" {
-			if inner, ok := containerExecTokens(tokens[i+1:]); ok {
-				tokens = inner
-				i = 0
-				continue
-			}
-			return name, tokens[i+1:], positionCommand
-		}
-		if shellNames[name] {
-			if script, ok := shellScriptArg(tokens[i+1:]); ok {
-				return name, []string{script}, positionShellScript
-			}
-			return name, tokens[i+1:], positionShellStdin
-		}
-		return name, tokens[i+1:], positionCommand
 	}
-	return "", nil, positionNone
+	return i
 }
 
 // shellScriptArg returns the script passed to a shell via -c (including

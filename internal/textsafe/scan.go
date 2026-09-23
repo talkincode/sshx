@@ -43,6 +43,12 @@ type openBlock struct {
 
 // Scan reads r once and returns bounded, classified hits.
 func Scan(r io.Reader, req Request) (Result, error) {
+	return ScanWithProgress(r, req, nil)
+}
+
+// ScanWithProgress is Scan with bounded progress samples. The observer must not
+// block and must not write to stdout.
+func ScanWithProgress(r io.Reader, req Request, observer ProgressObserver) (Result, error) {
 	if err := req.Normalize(); err != nil {
 		return Result{}, err
 	}
@@ -61,11 +67,13 @@ func Scan(r io.Reader, req Request) (Result, error) {
 	scanner.Buffer(buf, MaxLineBytes)
 
 	var (
-		lines     []lineRec
-		n         int
-		skipped   bool
-		probe     []byte
-		truncated string
+		lines           []lineRec
+		n               int
+		skipped         bool
+		probe           []byte
+		truncated       string
+		matchedLines    int
+		lastSampleBytes int64
 	)
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -86,6 +94,18 @@ func Scan(r io.Reader, req Request) (Result, error) {
 			continue
 		}
 		n++
+		if observer != nil && pattern != nil && pattern.Match(raw) {
+			matchedLines++
+		}
+		if observer != nil && (n%progressSampleLines == 0 || limited.n-lastSampleBytes >= progressSampleBytes) {
+			lastSampleBytes = limited.n
+			observer.Progress(ScanProgress{
+				Bytes:        limited.n,
+				Lines:        n,
+				MatchedLines: matchedLines,
+				FileSize:     req.FileSize,
+			})
+		}
 		text := string(raw)
 		if !utf8.ValidString(text) {
 			text = strings.ToValidUTF8(text, "\uFFFD")
@@ -132,11 +152,12 @@ func Scan(r io.Reader, req Request) (Result, error) {
 			Context: req.Context,
 		},
 		Stats: Stats{
-			LinesScanned:    n,
-			BytesScanned:    limited.n,
-			TotalHitsExact:  truncated == "",
-			WindowStartByte: req.WindowStartByte,
-			FileSize:        req.FileSize,
+			LinesScanned:      n,
+			BytesScanned:      limited.n,
+			TotalHitsExact:    truncated == "",
+			WindowStartByte:   req.WindowStartByte,
+			FileSize:          req.FileSize,
+			ExpectedScanBytes: expectedScanBytes(req),
 		},
 		Hits:       []Hit{},
 		Redacted:   req.Redact,
@@ -445,6 +466,29 @@ func looksLikeLogLine(line string) bool {
 	return false
 }
 
+// progressSampleLines and progressSampleBytes bound how often the scan offers a
+// progress sample, whichever trips first.
+const (
+	progressSampleLines = 4096
+	progressSampleBytes = 512 << 10
+)
+
+// expectedScanBytes is how much this request could still read from its window.
+// Zero means the source size is unknown (journal), not "nothing to scan".
+func expectedScanBytes(req Request) int64 {
+	if req.FileSize <= 0 {
+		return 0
+	}
+	available := req.FileSize - req.WindowStartByte
+	if available <= 0 {
+		return 0
+	}
+	if req.MaxScanBytes > 0 && req.MaxScanBytes < available {
+		return req.MaxScanBytes
+	}
+	return available
+}
+
 type limitReader struct {
 	r     io.Reader
 	n     int64
@@ -509,4 +553,17 @@ func joinReason(existing, next string) string {
 		return existing
 	}
 	return existing + "," + next
+}
+
+// HasTruncationReason reports whether the comma-joined truncated_reason list
+// contains want. One window can stop for several reasons at once
+// ("max_scan_bytes,max_hits"), so callers must test membership rather than
+// string equality.
+func HasTruncationReason(reason, want string) bool {
+	for _, part := range strings.Split(reason, ",") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
 }

@@ -91,7 +91,7 @@ func (c *SSHClient) newSFTPClient() (*sftp.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := sftp.NewClient(conn)
+	client, err := sftp.NewClient(conn, sftpClientOptions()...)
 	if err != nil {
 		return nil, c.transportError("remote_io", "open SFTP session", err)
 	}

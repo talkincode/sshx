@@ -312,7 +312,9 @@ tests.
 4. **Sudo auto-fill only supports leading `sudo`.** `CommandUsesSudo` returns
    true only when the remote command starts with `sudo`, matching the exact
    form `sudoStdinCommand` can safely rewrite. Non-leading sudo inside shell
-   wrappers or pipelines is left untouched.
+   wrappers or pipelines is left untouched and is never silently ignored: sshx
+   warns on stderr before connecting and again when the remote reports
+   `sudo: a password is required`, suggesting `sudo sh -c "<command>"`.
 5. **Command safety checks.** Destructive operations (`rm -rf /`, `mkfs`, `dd`,
    fork bombs, `curl | sh`, critical file edits, shutdown/reboot) are blocked
    unless `--force`/`-f` or `--no-safety-check` is given. Matching happens on

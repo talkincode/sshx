@@ -28,9 +28,9 @@ func (c *SSHClient) OpenRemoteText(remotePath string, fromEnd bool, maxBytes int
 	if maxBytes <= 0 {
 		maxBytes = 8 << 20
 	}
-	client, err := sftp.NewClient(c.client)
+	client, err := c.newSFTPClient()
 	if err != nil {
-		return nil, meta, fmt.Errorf("open SFTP session: %w", err)
+		return nil, meta, err
 	}
 	info, statErr := client.Lstat(remotePath)
 	if statErr != nil {
@@ -56,12 +56,24 @@ func (c *SSHClient) OpenRemoteText(remotePath string, fromEnd bool, maxBytes int
 		}
 		meta.SkipPartial = true
 	}
-	return &sftpReadCloser{File: file, session: client}, meta, nil
+	// maxBytes bounds read-ahead too: a scan never pulls more than its window
+	// from the remote file, except for the single probe byte that detects
+	// --max-scan-bytes truncation.
+	return &sftpReadCloser{
+		reader:  newPipelinedReader(file, sftpReadApertureBytes, maxBytes),
+		File:    file,
+		session: client,
+	}, meta, nil
 }
 
 type sftpReadCloser struct {
+	reader io.Reader
 	*sftp.File
 	session *sftp.Client
+}
+
+func (f *sftpReadCloser) Read(p []byte) (int, error) {
+	return f.reader.Read(p)
 }
 
 func (f *sftpReadCloser) Close() error {

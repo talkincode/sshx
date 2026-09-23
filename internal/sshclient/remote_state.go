@@ -15,9 +15,9 @@ import (
 
 // RemoteHome resolves the authenticated user's home directory through SFTP.
 func (c *SSHClient) RemoteHome() (string, error) {
-	client, err := sftp.NewClient(c.client)
+	client, err := c.newSFTPClient()
 	if err != nil {
-		return "", fmt.Errorf("open SFTP session: %w", err)
+		return "", err
 	}
 	defer func() { _ = client.Close() }() //nolint:errcheck // best-effort close after read-only query
 	home, err := client.RealPath(".")
@@ -36,9 +36,9 @@ func (c *SSHClient) ReadRemoteFile(remotePath string, limit int64, expectedUID s
 	if err := validateAbsoluteRemotePath(remotePath); err != nil {
 		return nil, err
 	}
-	client, clientErr := sftp.NewClient(c.client)
+	client, clientErr := c.newSFTPClient()
 	if clientErr != nil {
-		return nil, fmt.Errorf("open SFTP session: %w", clientErr)
+		return nil, clientErr
 	}
 	defer func() { _ = client.Close() }() //nolint:errcheck // best-effort close
 	info, statErr := client.Lstat(remotePath)
@@ -127,9 +127,9 @@ func (c *SSHClient) WriteRemoteFileAtomic(remotePath string, data []byte) error 
 	if err := validateAbsoluteRemotePath(remotePath); err != nil {
 		return err
 	}
-	client, clientErr := sftp.NewClient(c.client)
+	client, clientErr := c.newSFTPClient()
 	if clientErr != nil {
-		return fmt.Errorf("open SFTP session: %w", clientErr)
+		return clientErr
 	}
 	defer func() { _ = client.Close() }() //nolint:errcheck // best-effort close
 	dir := path.Dir(remotePath)

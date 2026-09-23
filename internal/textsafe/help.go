@@ -58,7 +58,7 @@ func Help() HelpDocument {
 		Bounds: []HelpFlag{
 			{Flag: "--max-hits=N", Description: "Returned hits cap (default 20). stats.total_hits may be larger."},
 			{Flag: "--max-bytes=N", Description: "Returned hit text cap (default 64KiB)."},
-			{Flag: "--max-scan-bytes=N", Description: "Remote bytes scanned (default 8MiB)."},
+			{Flag: "--max-scan-bytes=N", Description: "Remote bytes scanned (default 8MiB). A scan that stops here warns on stderr and sets truncated_reason=max_scan_bytes; stats.expected_scan_bytes reports the window budget so a caller can size a scan before trusting total_hits_exact."},
 			{Flag: "--no-redact", Description: "Keep secret-shaped spans. Default redacts password=/token=/bearer/JWT."},
 		},
 		Presets: []HelpPreset{

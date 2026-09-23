@@ -27,8 +27,8 @@ linters:
     misspell:
       locale: US
 
-issues:
-  exclude-rules:
-    - text: "misspelling of"
-      linters:
-        - misspell
+  exclusions:
+    rules:
+      - text: "misspelling of"
+        linters:
+          - misspell
