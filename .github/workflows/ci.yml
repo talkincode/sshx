@@ -251,7 +251,9 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          # Pinned deliberately: `latest` silently changed the linter and broke
+          # this gate (see issue #82). Bump this together with .golangci.yml.
+          version: v2.13.2
           args: --timeout=5m
 
   security:
