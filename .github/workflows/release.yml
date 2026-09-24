@@ -122,7 +122,7 @@ jobs:
               --bundle "${artifact}.cosign.bundle" \
               "$artifact"
           done
-          sha256sum -- * > checksums.txt
+          sha256sum -- sshx-* > checksums.txt
           cat checksums.txt
 
       - name: Attest build provenance
