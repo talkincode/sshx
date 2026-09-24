@@ -24,6 +24,7 @@ type applyResult struct {
 	PayloadBytes      int    `json:"payload_bytes"`
 	Completion        string `json:"completion"`
 	ErrorKind         string `json:"error_kind"`
+	Error             string `json:"error"`
 	RemotePath        string `json:"remote_path"`
 	BeforeSHA256      string `json:"before_sha256"`
 	AfterSHA256       string `json:"after_sha256"`
@@ -203,6 +204,62 @@ func TestApplyRejectsSymlinkAndReadOnlyTarget(t *testing.T) {
 	require.Equal(t, 255, denied.exitCode, denied.stderr)
 	_, err = os.Stat(filepath.Join(server.root, "forbidden.conf"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestApplyDiagnosesUnwritableParentBeforeCreatingArtifacts(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	home := t.TempDir()
+	dir := filepath.Join(server.root, "readonly")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	target := filepath.Join(dir, "app.conf")
+	require.NoError(t, os.WriteFile(target, []byte("before\n"), 0o600))
+	require.NoError(t, os.Chmod(dir, 0o500)) // #nosec G302 -- make the fixture directory read/execute-only to simulate denied writes.
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- restore the private fixture directory so t.TempDir can clean up.
+			t.Errorf("restore apply fixture directory permissions: %v", err)
+		}
+	})
+
+	local := filepath.Join(home, "app.conf")
+	require.NoError(t, os.WriteFile(local, []byte("after\n"), 0o600))
+	backupDir := filepath.Join(server.root, "apply-backups")
+	args := []string{
+		"apply",
+		"-h=" + server.host,
+		"-p=" + server.port,
+		"-u=operator",
+		"--no-key",
+		"--json",
+		"--accept-unknown-host",
+		"--path=" + filepath.ToSlash(target),
+		"--from=" + local,
+		"--backup-dir=" + filepath.ToSlash(backupDir),
+	}
+	env := map[string]string{"SSH_PASSWORD": operatorPassword}
+
+	withoutSudo := runSSHX(t, home, args, env)
+	require.Equal(t, 255, withoutSudo.exitCode, withoutSudo.stderr)
+	var result applyResult
+	require.NoError(t, json.Unmarshal([]byte(withoutSudo.stdout), &result))
+	assert.Equal(t, "parent_directory_not_writable", result.ErrorKind)
+	assert.Contains(t, result.Error, "atomic replacement requires write and execute permission on the parent directory")
+	assert.NotContains(t, result.Error, "--sudo")
+	assert.Equal(t, "not_started", result.Completion)
+	got, err := os.ReadFile(target) // #nosec G304 -- target is confined to the isolated fixture directory.
+	require.NoError(t, err)
+	assert.Equal(t, "before\n", string(got))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "app.conf", entries[0].Name())
+	_, err = os.Stat(backupDir)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	withConfiguredSudo := runSSHX(t, home, append(append([]string{}, args...), "-pk=apply-sudo"), env)
+	require.Equal(t, 255, withConfiguredSudo.exitCode, withConfiguredSudo.stderr)
+	require.NoError(t, json.Unmarshal([]byte(withConfiguredSudo.stdout), &result))
+	assert.Equal(t, "parent_directory_not_writable", result.ErrorKind)
+	assert.Contains(t, result.Error, "--sudo")
 }
 
 func TestApplySudoInstallsStagedPayload(t *testing.T) {

@@ -380,6 +380,13 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 			}
 			server.writeState(strings.TrimPrefix(payload.Command, "set-state "))
 			_, _ = io.WriteString(channel, "state-updated\n") //nolint:errcheck // fixture response
+		case strings.HasPrefix(payload.Command, "test -w "):
+			parent, ok := applyParentAccessCheckPath(payload.Command)
+			if !ok {
+				exitCode = 127
+			} else if !applyParentDirectoryWritable(parent) {
+				exitCode = 1
+			}
 		case strings.Contains(payload.Command, "sqlite3"):
 			handleSQLiteSession(channel, server, payload.Command)
 			return
@@ -408,6 +415,43 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 		sendExitStatus(channel, exitCode)
 		return
 	}
+}
+
+func applyParentAccessCheckPath(command string) (string, bool) {
+	const (
+		writePrefix = "test -w "
+		executeMark = " && test -x "
+	)
+	if !strings.HasPrefix(command, writePrefix) {
+		return "", false
+	}
+	writeArg, executeArg, ok := strings.Cut(strings.TrimPrefix(command, writePrefix), executeMark)
+	if !ok {
+		return "", false
+	}
+	writePath, ok := parseShellQuotedPath(writeArg)
+	if !ok {
+		return "", false
+	}
+	executePath, ok := parseShellQuotedPath(executeArg)
+	if !ok || executePath != writePath {
+		return "", false
+	}
+	return writePath, true
+}
+
+func parseShellQuotedPath(value string) (string, bool) {
+	if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
+		return "", false
+	}
+	path := strings.ReplaceAll(value[1:len(value)-1], `'\''`, "'")
+	quoted := "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+	return path, quoted == value
+}
+
+func applyParentDirectoryWritable(parent string) bool {
+	info, err := os.Stat(parent)
+	return err == nil && info.IsDir() && info.Mode().Perm()&0o300 == 0o300
 }
 
 func handleSQLiteSession(channel ssh.Channel, server *testSSHServer, cmdline string) {

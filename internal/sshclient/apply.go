@@ -40,13 +40,14 @@ var (
 
 // ApplyRequest is one guarded regular-file replacement.
 type ApplyRequest struct {
-	RemotePath   string
-	Payload      []byte
-	ExpectSHA256 string
-	Backup       bool
-	BackupDir    string
-	Force        bool
-	UseSudo      bool
+	RemotePath     string
+	Payload        []byte
+	ExpectSHA256   string
+	Backup         bool
+	BackupDir      string
+	Force          bool
+	UseSudo        bool
+	SudoConfigured bool
 }
 
 // ApplyOutcome is the observed result of one apply.
@@ -101,6 +102,26 @@ type applyScriptReport struct {
 type applyCleanupError struct {
 	path string
 	err  error
+}
+
+type applyParentDirectoryError struct {
+	path           string
+	sudoConfigured bool
+}
+
+func (e *applyParentDirectoryError) Error() string {
+	message := fmt.Sprintf(
+		"parent directory %q is not writable; atomic replacement requires write and execute permission on the parent directory",
+		e.path,
+	)
+	if e.sudoConfigured {
+		message += "; a sudo credential is configured, retry with --sudo"
+	}
+	return message
+}
+
+func (e *applyParentDirectoryError) ErrorKind() string {
+	return "parent_directory_not_writable"
 }
 
 func (e *applyCleanupError) Error() string {
@@ -219,7 +240,7 @@ func (c *SSHClient) applyWithSFTP(req ApplyRequest) (outcome *ApplyOutcome, err 
 		return outcome, clientErr
 	}
 	defer func() { _ = client.Close() }() //nolint:errcheck // teardown cannot invalidate verified remote evidence
-	outcome, err = c.applySFTPFile(client, req)
+	outcome, err = c.applySFTPFile(client, req, c.checkApplyParentWritable)
 	if err != nil {
 		var cleanup *applyCleanupError
 		if errors.As(err, &cleanup) {
@@ -234,7 +255,7 @@ func (c *SSHClient) applyWithSFTP(req ApplyRequest) (outcome *ApplyOutcome, err 
 	return outcome, err
 }
 
-func (c *SSHClient) applySFTPFile(client *sftp.Client, req ApplyRequest) (outcome *ApplyOutcome, err error) {
+func (c *SSHClient) applySFTPFile(client *sftp.Client, req ApplyRequest, checkParentWritable func(string, bool) error) (outcome *ApplyOutcome, err error) {
 	outcome = newApplyOutcome(req)
 	info, statErr := client.Lstat(req.RemotePath)
 	created := false
@@ -285,6 +306,20 @@ func (c *SSHClient) applySFTPFile(client *sftp.Client, req ApplyRequest) (outcom
 	if !created && beforeHash == payloadHash {
 		outcome.AfterSHA256, outcome.Verified, outcome.Verification = beforeHash, true, "passed"
 		return outcome, nil
+	}
+
+	parentDir := path.Dir(req.RemotePath)
+	parentInfo, parentErr := client.Stat(parentDir)
+	if parentErr != nil {
+		return outcome, fmt.Errorf("inspect apply parent directory: %w", parentErr)
+	}
+	if !parentInfo.IsDir() {
+		return outcome, fmt.Errorf("%w: parent path %q is not a directory", ErrApplyBlocked, parentDir)
+	}
+	if checkParentWritable != nil {
+		if checkErr := checkParentWritable(parentDir, req.SudoConfigured); checkErr != nil {
+			return outcome, checkErr
+		}
 	}
 
 	backupPath := ""
@@ -346,6 +381,22 @@ func (c *SSHClient) applySFTPFile(client *sftp.Client, req ApplyRequest) (outcom
 	}
 	outcome.Verified, outcome.Verification = true, "passed"
 	return outcome, nil
+}
+
+func (c *SSHClient) checkApplyParentWritable(parentDir string, sudoConfigured bool) error {
+	quotedParent := applyShellQuote(parentDir)
+	result, err := c.RunCommandWithInput("test -w "+quotedParent+" && test -x "+quotedParent, nil)
+	if err != nil {
+		return fmt.Errorf("check apply parent directory access: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return &applyParentDirectoryError{path: parentDir, sudoConfigured: sudoConfigured}
+	}
+	return nil
+}
+
+func applyShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func checkApplyPrecondition(created bool, beforeHash string, req ApplyRequest) error {

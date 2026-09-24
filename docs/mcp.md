@@ -42,6 +42,11 @@ Claude Desktop / generic MCP client entry:
 | `sshx_transfer` | `--transfer` | Server-to-server streaming through the local machine |
 | `sshx_host_list` | `--host-list --json` | Read-only `sshx.hosts.v1` inventory |
 
+For row-filtered SQL, a backup that would widen to a full-table snapshot is
+blocked by default. Set `allow_full_table_backup: true` on `sshx_sql` only when
+that broader before-image is intentional; this does not authorize an
+`UPDATE`/`DELETE` without `WHERE`.
+
 Tool results contain the CLI's versioned JSON verbatim (for example
 `sshx.result.v1` from `sshx_run`), so `success`, `error_kind`, `completion`,
 and retry guidance keep exactly the semantics documented for the CLI. A

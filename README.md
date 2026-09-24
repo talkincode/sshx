@@ -470,8 +470,14 @@ printf '%s' 'SELECT count(*) FROM users' | sshx sql -h=prod-db --db=app --json
 `--allow-full-table`. Destructive DDL requires `--force --no-backup`; sshx does
 not claim an automatic restorable backup for schema destruction. Skipping a DML
 backup also requires both `--no-backup` and `--force`. Small changes receive a
-row CSV snapshot; complex or large changes receive a full-table CSV snapshot
-under `~/.sshx/sql-backups/`. Backup and mutation run in one PostgreSQL
+row CSV snapshot. If a row-filtered mutation cannot be backed up narrowly, or
+the EXPLAIN estimate exceeds `--row-threshold`, the full-table before-image is
+blocked by default (`unreproducible_select` or
+`full_table_backup_requires_opt_in`). Pass `--allow-full-table-backup` to
+explicitly permit that wider backup; it does not replace `--allow-full-table`
+for a mutation without `WHERE`. SQLite likewise uses row CSV for stable
+predicates and blocks an unreproducible full-table fallback by default.
+Backups land under `~/.sshx/sql-backups/`. Backup and mutation run in one PostgreSQL
 transaction while holding a target-table write lock, closing the concurrency
 window between them. Catalog preflight blocks automatic execution when
 triggers, rewrite rules, partitions, or cascading referential actions can

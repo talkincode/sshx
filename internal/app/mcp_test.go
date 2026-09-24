@@ -607,16 +607,17 @@ func TestBuildRunArgsRequiresExactlyOnePayload(t *testing.T) {
 
 func TestBuildSQLArgs(t *testing.T) {
 	args, err := buildSQLArgs(mcpSQLInput{
-		Target:        "db-1",
-		Statement:     "SELECT count(*) FROM users",
-		Engine:        "postgres",
-		DB:            "app",
-		DBUser:        "app",
-		DBPasswordKey: "app-db",
-		Explain:       true,
-		RowThreshold:  500,
-		Sudo:          true,
-		DryRun:        true,
+		Target:               "db-1",
+		Statement:            "SELECT count(*) FROM users",
+		Engine:               "postgres",
+		DB:                   "app",
+		DBUser:               "app",
+		DBPasswordKey:        "app-db",
+		Explain:              true,
+		RowThreshold:         500,
+		AllowFullTableBackup: true,
+		Sudo:                 true,
+		DryRun:               true,
 	})
 	if err != nil {
 		t.Fatalf("buildSQLArgs: %v", err)
@@ -625,6 +626,7 @@ func TestBuildSQLArgs(t *testing.T) {
 		"sql", "--json", "-h=db-1",
 		"--engine=postgres", "--db=app", "--db-user=app",
 		"--db-password-key=app-db", "--explain", "--row-threshold=500",
+		"--allow-full-table-backup",
 		"--sudo", "--dry-run",
 		"--", "SELECT count(*) FROM users",
 	}

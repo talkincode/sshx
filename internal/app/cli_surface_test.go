@@ -173,6 +173,17 @@ func TestParseArgsSQLStatementSources(t *testing.T) {
 	require.Contains(t, missing.ArgumentError, "read --statement-file")
 }
 
+func TestParseArgsSQLTargetAlias(t *testing.T) {
+	for _, selector := range []string{"--target=db", "--host=db", "-h=db"} {
+		t.Run(selector, func(t *testing.T) {
+			config := ParseArgs([]string{"sshx", "sql", selector, "--db=app", "SELECT 1"})
+			require.Empty(t, config.ArgumentError)
+			require.Equal(t, "db", config.Host)
+			require.Equal(t, "SELECT 1", config.SQLStatement)
+		})
+	}
+}
+
 // The suggestion lists must describe options the parser really accepts, so a
 // typo never points at a name that does not exist.
 func TestCompatOptionNamesAreRecognized(t *testing.T) {

@@ -40,6 +40,10 @@ Claude Desktop / 通用 MCP 客户端条目：
 | `sshx_transfer` | `--transfer` | 经本机中转的服务器到服务器流式传输 |
 | `sshx_host_list` | `--host-list --json` | 只读 `sshx.hosts.v1` 清单 |
 
+带行过滤条件的 SQL 若需扩大为整表快照，默认会阻断。只有确实接受更宽的 before-image
+时，才在 `sshx_sql` 中设置 `allow_full_table_backup: true`；这不允许没有 `WHERE` 的
+`UPDATE` / `DELETE`。
+
 工具结果就是 CLI 的版本化 JSON（例如 `sshx_run` 的 `sshx.result.v1`），因此
 `success`、`error_kind`、`completion` 和重试指引与 CLI 文档完全一致。子进程
 非零退出会把 MCP 结果标成 tool error，但保留结构化载荷。

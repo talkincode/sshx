@@ -71,6 +71,7 @@ func applySudoKeyFlag(config *sshclient.Config, arg string) bool {
 	case strings.HasPrefix(arg, "-pk="), strings.HasPrefix(arg, "--password-key="), strings.HasPrefix(arg, "--sudo-password-key="):
 		config.SudoKey = strings.SplitN(arg, "=", 2)[1]
 		config.SudoKeySet = true
+		config.SudoKeyConfigured = config.SudoKey != ""
 		return true
 	default:
 		return false
@@ -329,6 +330,7 @@ func ParseArgs(args []string) *sshclient.Config {
 	}
 
 	sudoKey := os.Getenv("SSH_SUDO_KEY")
+	config.SudoKeyConfigured = sudoKey != ""
 	if sudoKey == "" {
 		sudoKey = sshclient.DefaultSudoKey
 	}
@@ -835,12 +837,12 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 // starts. It feeds the "did you mean" suggestion for an unrecognized option;
 // TestSQLOptionNamesAreRecognized fails when an entry is not actually parsed.
 var sqlOptionNames = []string{
-	"-h", "--host", "-p", "--port", "-u", "--user", "-i", "--key", "-pk",
+	"-h", "--host", "--target", "-p", "--port", "-u", "--user", "-i", "--key", "-pk",
 	"--password-key", "--sudo-password-key", "--ssh-password-key", "--no-key",
 	"--password-only", "--key-auth", "--accept-unknown-host", "--insecure-hostkey",
 	"--strict-host-key", "--known-hosts", "--engine", "--db", "--database",
 	"--db-file", "--db-user", "--db-host", "--db-port", "--db-password-key",
-	"--statement-file", "--row-threshold", "--allow-full-table", "--no-backup",
+	"--statement-file", "--row-threshold", "--allow-full-table", "--allow-full-table-backup", "--no-backup",
 	"--explain", "--backup-dir", "--docker", "--db-cred-from", "--cred-cache",
 	"--cred-refresh", "--sudo", "--force", "-f", "--dry-run", "--json",
 	"--timeout", "--bind", "--via", "--audit-output", "--no-audit",
@@ -926,7 +928,7 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 		case applyLifecycleFlag(config, arg):
 		case strings.HasPrefix(arg, "--bypass-reason="):
 			config.BypassReason = strings.TrimPrefix(arg, "--bypass-reason=")
-		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
+		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--target="):
 			config.Host = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-p="), strings.HasPrefix(arg, "--port="):
 			config.Port = strings.SplitN(arg, "=", 2)[1]
@@ -977,6 +979,8 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			}
 		case arg == "--allow-full-table":
 			config.SQLAllowFullTable = true
+		case arg == "--allow-full-table-backup":
+			config.SQLAllowFullTableBackup = true
 		case arg == "--no-backup":
 			config.SQLNoBackup = true
 		case arg == "--explain":

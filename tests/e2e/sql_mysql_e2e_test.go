@@ -191,7 +191,7 @@ func TestSQLMySQLFakeProtocolUnavailableEstimate(t *testing.T) {
 	}{
 		{"insert", "INSERT INTO users (id, name) VALUES (2, 'inserted')", "none", nil},
 		{"insert bypass", "INSERT INTO users (id, name) VALUES (2, 'inserted')", "none", []string{"--force", "--no-backup"}},
-		{"update backup", "UPDATE users SET name='new' WHERE id=1", "table", nil},
+		{"update backup", "UPDATE users SET name='new' WHERE id=1", "table", []string{"--allow-full-table-backup"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := startSSHServer(t, serverOptions{})
@@ -214,6 +214,33 @@ func TestSQLMySQLFakeProtocolUnavailableEstimate(t *testing.T) {
 			assert.Equal(t, "acknowledged", payload.Evidence.Commit)
 		})
 	}
+}
+
+func TestSQLMySQLFullTableBackupRequiresOptIn(t *testing.T) {
+	server := startSSHServer(t, serverOptions{})
+	installFakeMySQL(t, server)
+	require.NoError(t, os.WriteFile(filepath.Join(server.root, "mysql-fixture-options.json"), []byte(`{"omit_row_estimate":true}`), 0o600))
+	home := t.TempDir()
+	backupDir := filepath.Join(home, "sql-backups")
+	args := []string{
+		"sql", "-h=" + server.host, "-p=" + server.port, "-u=operator",
+		"--no-key", "--accept-unknown-host", "--engine=mysql", "--db=app", "--json",
+		"--backup-dir=" + filepath.ToSlash(backupDir),
+		"UPDATE users SET name='new' WHERE id=1",
+	}
+	result := runSSHX(t, home, args, map[string]string{"SSH_PASSWORD": operatorPassword})
+	require.Equal(t, 255, result.exitCode, result.stdout+result.stderr)
+	var payload sqlResult
+	require.NoError(t, json.Unmarshal([]byte(result.stdout), &payload))
+	assert.False(t, payload.Success)
+	assert.Equal(t, "full_table_backup_requires_opt_in", payload.ErrorKind)
+	assert.Contains(t, payload.Error, "--allow-full-table-backup")
+	require.NotNil(t, payload.Backup)
+	assert.Equal(t, "table", payload.Backup.Kind)
+	assert.Equal(t, "estimate_unavailable", payload.Backup.ReasonCode)
+	assert.Equal(t, "not_performed", payload.Evidence.BackupStatus)
+	_, err := os.Stat(backupDir)
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestSQLRealMySQLInsertUnavailableEstimate(t *testing.T) {

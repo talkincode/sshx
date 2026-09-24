@@ -85,7 +85,19 @@ func reportPlanFailure(config *sshclient.Config, audit *auditRecorder, err error
 		if classification, classifyErr := sqlsafe.ClassifyFor(config.SQLEngine, config.SQLStatement); classifyErr == nil {
 			run.cls = classification
 		}
+		if prepared := preparedFrom(config); prepared != nil && prepared.preview.SQL != nil {
+			preview := prepared.preview.SQL
+			if preview.BackupKind != "" && preview.BackupKind != string(sqlsafe.BackupNone) {
+				run.backup = &sqlBackupJSON{
+					Kind: preview.BackupKind, Table: preview.Table,
+					ReasonCode: preview.BackupReasonCode, Reason: preview.BackupReason,
+				}
+			}
+		}
 		failure := run.baseResult()
+		if failure.Backup != nil {
+			failure.Evidence.BackupStatus = "not_performed"
+		}
 		failure.ExitCode, failure.ErrorKind, failure.Error = -1, kind, redactError(err)
 		value = failure
 	case "inspect":

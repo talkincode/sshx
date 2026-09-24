@@ -11,6 +11,9 @@ type Options struct {
 	Force bool
 	// AllowFullTable allows UPDATE/DELETE without a top-level WHERE clause.
 	AllowFullTable bool
+	// AllowFullTableBackup explicitly permits a full-table before-image for a
+	// row-filtered mutation when a narrower row snapshot is unavailable.
+	AllowFullTableBackup bool
 	// NoBackup disables pre-change backups. It requires Force.
 	NoBackup bool
 	// RowThreshold is the estimated-row boundary between a row-level CSV
@@ -78,9 +81,45 @@ const (
 
 // BackupPlan describes the pre-change backup decided for one statement.
 type BackupPlan struct {
-	Kind   BackupKind `json:"kind"`
-	Table  string     `json:"table,omitempty"`
-	Reason string     `json:"reason"`
+	Kind       BackupKind `json:"kind"`
+	Table      string     `json:"table,omitempty"`
+	ReasonCode string     `json:"reason_code,omitempty"`
+	Reason     string     `json:"reason"`
+}
+
+const (
+	BackupReasonUnreproducibleSelect = "unreproducible_select"
+	BackupReasonRowThresholdExceeded = "row_threshold_exceeded"
+	BackupReasonEstimateUnavailable  = "estimate_unavailable"
+)
+
+type backupScopeError struct {
+	kind   string
+	verb   string
+	reason string
+}
+
+func (e *backupScopeError) Error() string {
+	return fmt.Sprintf(
+		"row-filtered %s would require a full-table before-image (%s), which may persist unrelated rows and sensitive columns; pass --allow-full-table-backup to explicitly permit this backup scope",
+		e.verb, e.reason,
+	)
+}
+
+func (e *backupScopeError) ErrorKind() string { return e.kind }
+
+// CheckBackupScope requires explicit intent before a row-filtered mutation
+// writes a whole-table before-image.
+func CheckBackupScope(cls *Classification, plan BackupPlan, opts Options) error {
+	if opts.NoBackup || opts.AllowFullTableBackup || cls.Class != ClassDML ||
+		!cls.HasWhere || plan.Kind != BackupTable {
+		return nil
+	}
+	kind := "full_table_backup_requires_opt_in"
+	if plan.ReasonCode == BackupReasonUnreproducibleSelect {
+		kind = BackupReasonUnreproducibleSelect
+	}
+	return &backupScopeError{kind: kind, verb: cls.Verb, reason: plan.Reason}
 }
 
 // DecideBackup chooses the backup strategy for a classified statement given
@@ -111,7 +150,8 @@ func DecideBackup(cls *Classification, estimatedRows int64, opts Options) (Backu
 
 	if cls.Destructive || cls.ComplexSource {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
-			Reason: "affected rows cannot be reproduced by a simple SELECT; taking a full-table CSV snapshot"}, nil
+			ReasonCode: BackupReasonUnreproducibleSelect,
+			Reason:     "affected rows cannot be reproduced by a simple SELECT; taking a full-table CSV snapshot"}, nil
 	}
 	if !cls.HasWhere {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
@@ -119,15 +159,18 @@ func DecideBackup(cls *Classification, estimatedRows int64, opts Options) (Backu
 	}
 	if containsNewline(cls.WhereClause) {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
-			Reason: "WHERE clause spans multiple lines; taking a full-table CSV snapshot instead of a row snapshot"}, nil
+			ReasonCode: BackupReasonUnreproducibleSelect,
+			Reason:     "WHERE clause spans multiple lines; taking a full-table CSV snapshot instead of a row snapshot"}, nil
 	}
 	if !stableBackupPredicate(cls.WhereClause) {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
-			Reason: "predicate may be evaluated differently during backup and mutation; taking a full-table snapshot"}, nil
+			ReasonCode: BackupReasonUnreproducibleSelect,
+			Reason:     "predicate may be evaluated differently during backup and mutation; taking a full-table snapshot"}, nil
 	}
 	if estimatedRows >= 0 && estimatedRows > opts.rowThreshold() {
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
-			Reason: fmt.Sprintf("estimated %d affected rows exceeds the row-backup threshold (%d); taking a full-table CSV snapshot", estimatedRows, opts.rowThreshold())}, nil
+			ReasonCode: BackupReasonRowThresholdExceeded,
+			Reason:     fmt.Sprintf("estimated %d affected rows exceeds the row-backup threshold (%d); taking a full-table CSV snapshot", estimatedRows, opts.rowThreshold())}, nil
 	}
 	return BackupPlan{Kind: BackupRows, Table: cls.Table,
 		Reason: "snapshotting affected rows selected by the statement's WHERE clause"}, nil
