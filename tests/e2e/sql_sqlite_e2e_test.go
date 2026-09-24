@@ -20,6 +20,7 @@ type sqlResult struct {
 	Success        bool                  `json:"success"`
 	ExitCode       int                   `json:"exit_code"`
 	ErrorKind      string                `json:"error_kind"`
+	Error          string                `json:"error"`
 	Class          string                `json:"class"`
 	Verb           string                `json:"verb"`
 	Table          string                `json:"table"`
@@ -32,6 +33,8 @@ type sqlResult struct {
 	Backup         *struct {
 		Kind        string `json:"kind"`
 		Path        string `json:"path"`
+		ReasonCode  string `json:"reason_code"`
+		Reason      string `json:"reason"`
 		RestoreHint string `json:"restore_hint"`
 	} `json:"backup"`
 }
@@ -79,7 +82,7 @@ func TestSQLSQLiteDryRunDoesNotConnect(t *testing.T) {
 	require.Equal(t, 0, result.exitCode, result.stderr)
 	assert.Equal(t, connectionsBefore, server.connections.Load())
 	assert.Contains(t, result.stdout, `"engine": "sqlite"`)
-	assert.Contains(t, result.stdout, `"backup_kind": "table"`)
+	assert.Contains(t, result.stdout, `"backup_kind": "rows"`)
 	assert.Contains(t, result.stdout, "sqlite3")
 }
 
@@ -139,7 +142,7 @@ func TestSQLSQLiteReadAndGuardedUpdate(t *testing.T) {
 		Kind: "sql_affected_rows_semantics", Subject: "sqlite:" + dbPath + ":users", Expected: "sqlite_changes", Observed: "sqlite_changes", Status: "passed",
 	})
 	require.NotNil(t, updatePayload.Backup)
-	assert.Equal(t, "table", updatePayload.Backup.Kind)
+	assert.Equal(t, "rows", updatePayload.Backup.Kind)
 	assert.NotEmpty(t, updatePayload.Backup.Path)
 	assert.Contains(t, updatePayload.Preconditions, execution.Condition{
 		Kind: "sql_backup", Subject: updatePayload.Backup.Path, Expected: "ready", Observed: "ready", Status: "passed",
@@ -156,6 +159,112 @@ func TestSQLSQLiteReadAndGuardedUpdate(t *testing.T) {
 	got, err := exec.Command("sqlite3", dbPath, "SELECT name FROM users WHERE id=1;").Output() // #nosec G204 -- isolated fixture
 	require.NoError(t, err)
 	assert.Equal(t, "new\n", string(got))
+}
+
+func TestSQLSQLiteNarrowBackupAndFullTableBackupOptIn(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("requires the real sqlite3 client")
+	}
+	server := startSSHServer(t, serverOptions{})
+	dbPath := filepath.Join(server.root, "sensitive.db")
+	setup := exec.Command("sqlite3", dbPath, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, api_key TEXT); INSERT INTO users VALUES (1, 'first', 'secret-row-one'), (2, 'second', 'secret-row-two');") // #nosec G204 -- isolated sensitive-column fixture
+	require.NoError(t, setup.Run())
+
+	home := t.TempDir()
+	base := []string{
+		"sql",
+		"-h=" + server.host,
+		"-p=" + server.port,
+		"-u=operator",
+		"--no-key",
+		"--accept-unknown-host",
+		"--engine=sqlite",
+		"--db-file=" + dbPath,
+		"--json",
+	}
+	env := map[string]string{"SSH_PASSWORD": operatorPassword}
+	rowBackupDir := filepath.Join(server.root, "row-backups")
+	rowUpdate := runSSHX(t, home, append(append([]string{}, base...),
+		"--backup-dir="+filepath.ToSlash(rowBackupDir),
+		"UPDATE users SET name='updated' WHERE id=1",
+	), env)
+	require.Equal(t, 0, rowUpdate.exitCode, rowUpdate.stderr+"\n"+rowUpdate.stdout)
+	var rowResult sqlResult
+	require.NoError(t, json.Unmarshal([]byte(rowUpdate.stdout), &rowResult))
+	require.NotNil(t, rowResult.Backup)
+	assert.Equal(t, "rows", rowResult.Backup.Kind)
+	rowBackup, err := os.ReadFile(rowResult.Backup.Path) // #nosec G304 -- fixture backup is under the isolated SSH root
+	require.NoError(t, err)
+	assert.Contains(t, string(rowBackup), "secret-row-one")
+	assert.NotContains(t, string(rowBackup), "secret-row-two")
+
+	fullBackupDir := filepath.Join(server.root, "full-backups")
+	updateWithUnreproduciblePredicate := "UPDATE users SET name='blocked' WHERE id IN (SELECT id FROM users WHERE id=2)"
+	connectionsBefore := server.connections.Load()
+	preview := runSSHX(t, home, append(append([]string{}, base...),
+		"--backup-dir="+filepath.ToSlash(fullBackupDir),
+		"--dry-run",
+		updateWithUnreproduciblePredicate,
+	), env)
+	require.Equal(t, 0, preview.exitCode, preview.stderr+"\n"+preview.stdout)
+	assert.Equal(t, connectionsBefore, server.connections.Load(), "dry-run must not connect")
+	var previewPlan struct {
+		SafetyCheck struct {
+			Status    string `json:"status"`
+			ErrorKind string `json:"error_kind"`
+			Message   string `json:"message"`
+		} `json:"safety_check"`
+		SQL struct {
+			BackupKind       string `json:"backup_kind"`
+			BackupReasonCode string `json:"backup_reason_code"`
+			BackupReason     string `json:"backup_reason"`
+		} `json:"sql"`
+		WouldConnect bool `json:"would_connect"`
+		WouldExecute bool `json:"would_execute"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(preview.stdout), &previewPlan))
+	assert.Equal(t, "blocked", previewPlan.SafetyCheck.Status)
+	assert.Equal(t, "unreproducible_select", previewPlan.SafetyCheck.ErrorKind)
+	assert.Contains(t, previewPlan.SafetyCheck.Message, "--allow-full-table-backup")
+	assert.Equal(t, "table", previewPlan.SQL.BackupKind)
+	assert.Equal(t, "unreproducible_select", previewPlan.SQL.BackupReasonCode)
+	assert.Contains(t, previewPlan.SQL.BackupReason, "full-table")
+	assert.False(t, previewPlan.WouldConnect)
+	assert.False(t, previewPlan.WouldExecute)
+
+	blocked := runSSHX(t, home, append(append([]string{}, base...),
+		"--backup-dir="+filepath.ToSlash(fullBackupDir),
+		updateWithUnreproduciblePredicate,
+	), env)
+	require.Equal(t, 255, blocked.exitCode, blocked.stderr+"\n"+blocked.stdout)
+	var blockedResult sqlResult
+	require.NoError(t, json.Unmarshal([]byte(blocked.stdout), &blockedResult))
+	assert.Equal(t, "unreproducible_select", blockedResult.ErrorKind)
+	assert.Contains(t, blockedResult.Error, "--allow-full-table-backup")
+	require.NotNil(t, blockedResult.Backup, blocked.stdout)
+	assert.Equal(t, "table", blockedResult.Backup.Kind)
+	assert.Equal(t, "unreproducible_select", blockedResult.Backup.ReasonCode)
+	_, err = os.Stat(fullBackupDir)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	got := exec.Command("sqlite3", dbPath, "SELECT name FROM users WHERE id=2;") // #nosec G204 -- isolated fixture query
+	output, err := got.Output()
+	require.NoError(t, err)
+	assert.Equal(t, "second\n", string(output))
+
+	allowed := runSSHX(t, home, append(append([]string{}, base...),
+		"--backup-dir="+filepath.ToSlash(fullBackupDir),
+		"--allow-full-table-backup",
+		updateWithUnreproduciblePredicate,
+	), env)
+	require.Equal(t, 0, allowed.exitCode, allowed.stderr+"\n"+allowed.stdout)
+	var allowedResult sqlResult
+	require.NoError(t, json.Unmarshal([]byte(allowed.stdout), &allowedResult))
+	require.NotNil(t, allowedResult.Backup)
+	assert.Equal(t, "table", allowedResult.Backup.Kind)
+	fullBackup, err := os.ReadFile(allowedResult.Backup.Path) // #nosec G304 -- explicit opt-in test snapshot under fixture root
+	require.NoError(t, err)
+	assert.Contains(t, string(fullBackup), "secret-row-one")
+	assert.Contains(t, string(fullBackup), "secret-row-two")
 }
 
 func TestSQLSQLiteAuditCapturesAuthenticatedPeer(t *testing.T) {

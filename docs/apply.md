@@ -60,6 +60,14 @@ approval meanings. It cannot bypass `--expect-plan`.
 
 SFTP runs as the SSH user. Use `--sudo` when the target is not writable by that user. sshx stages the payload under the remote home directory, then runs a privileged stdin script to install it. The script is never left on the host.
 
+Before writing a backup or replacement temp, `apply` checks that the target's
+parent directory is writable and searchable by the SSH user. Atomic replacement
+requires both write and execute permission on that directory, regardless of
+the target file's owner. A denial returns
+`error_kind: parent_directory_not_writable`; when a sudo password key is
+configured, the error suggests `--sudo`. This preflight cannot prevent a
+concurrent permission change after the check.
+
 ```bash
 sshx apply --target=prod-web --path=/etc/nginx/nginx.conf \
     --from=./nginx.conf --sudo --json

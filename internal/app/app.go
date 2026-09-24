@@ -603,6 +603,7 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 	sudoKey := hostConfig.EffectiveSudoPasswordKey()
 	if sudoKey != "" && !sudoKeyChosen(config) {
 		config.SudoKey = sudoKey
+		config.SudoKeyConfigured = true
 		logger.GetLogger().Success("Using sudo password key: %s", sudoKey)
 	}
 	// SSH login password key is a distinct role and never falls back to sudo keys.

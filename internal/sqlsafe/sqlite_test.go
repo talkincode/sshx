@@ -123,13 +123,21 @@ func TestValidateSQLitePath(t *testing.T) {
 }
 
 func TestDecideSQLiteBackup(t *testing.T) {
-	t.Run("bounded update uses table snapshot", func(t *testing.T) {
+	t.Run("bounded update uses row snapshot", func(t *testing.T) {
 		cls, err := ClassifySQLite("UPDATE users SET x=1 WHERE id=1")
 		require.NoError(t, err)
 		plan, err := DecideSQLiteBackup(cls, Options{})
 		require.NoError(t, err)
-		assert.Equal(t, BackupTable, plan.Kind)
+		assert.Equal(t, BackupRows, plan.Kind)
 		assert.Equal(t, "users", plan.Table)
+	})
+	t.Run("unreproducible row filter uses table snapshot", func(t *testing.T) {
+		cls, err := ClassifySQLite("UPDATE users SET x=1 WHERE id IN (SELECT id FROM candidates)")
+		require.NoError(t, err)
+		plan, err := DecideSQLiteBackup(cls, Options{})
+		require.NoError(t, err)
+		assert.Equal(t, BackupTable, plan.Kind)
+		assert.Equal(t, BackupReasonUnreproducibleSelect, plan.ReasonCode)
 	})
 	t.Run("replace uses file snapshot", func(t *testing.T) {
 		cls, err := ClassifySQLite("REPLACE INTO users (id) VALUES (1)")

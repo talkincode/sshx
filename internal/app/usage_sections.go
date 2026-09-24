@@ -85,6 +85,11 @@ Run Contract (preferred for Agents):
     --script-stdin           byte-preserving script from stdin
     --shell=NAME             interpreter override: sh, bash, zsh, dash, ksh, ash
                              (default: the script's #! line, else sh)
+    --sudo                   run the selected script interpreter via sudo
+
+  --sudo runs the whole script interpreter with sudo. Do not embed sudo
+  commands in a script: its stdin is occupied by the script, so sshx cannot
+  inject the password for a nested sudo command.
 
   Limits / policy:
     --concurrency=N          default 4, hard max 32
@@ -339,12 +344,13 @@ Inspection Capabilities:
 
 const usageSQL = `
 Guarded SQL Execution:
-  sshx sql -h=<host> --db=<name> [options] "<single SQL statement>"
+  sshx sql --target=<host> --db=<name> [options] "<single SQL statement>"
   sshx sql -h=<host> --engine=sqlite --db-file=/abs/path.db [options] "SQL"
   sshx sql -h=<host> --db=<name> [options] -- <SQL words...>
   sshx sql -h=<host> --db=<name> [options] --statement-file=./query.sql
   printf '%s' 'select 1' | sshx sql -h=<host> --db=<name> [options]
 
+  Host selectors --target=NAME, --host=NAME, and -h=NAME are equivalent.
   The statement may be a positional argument, everything after --, a local file
   via --statement-file=PATH, or stdin when it is piped rather than a terminal.
   Reading stdin waits for EOF, so close stdin when another process holds the pipe
@@ -391,8 +397,10 @@ Guarded SQL Execution:
                             Expired entries are deleted from the keyring.
   --cred-refresh            Drop the cached entry and re-resolve from the source
   --explain                 Run EXPLAIN only; never executes the statement
-  --row-threshold=N         EXPLAIN row estimate that upgrades a row backup to a
-                            full-table CSV snapshot (default: 1000)
+  --row-threshold=N         EXPLAIN estimate that may widen a row backup to a
+                            full-table snapshot (default: 1000); blocked by default
+  --allow-full-table-backup Explicitly permit a full-table backup before-image for a
+                            row-filtered mutation when a row snapshot is unavailable
   --allow-full-table        Required for UPDATE/DELETE without a WHERE clause
   --no-backup               Skip pre-change backup (requires --force)
   --backup-dir=PATH         Remote backup directory (default: ~/.sshx/sql-backups)
@@ -402,8 +410,9 @@ Guarded SQL Execution:
   Safety pipeline for data changes: classify locally (fail-closed), gate by
   policy, then snapshot and execute. PostgreSQL runs EXPLAIN (FORMAT JSON)
   and snapshots rows or the table under one transaction plus a SHARE ROW
-  EXCLUSIVE lock. SQLite skips row estimates and snapshots the table (CSV)
-  or the whole file under BEGIN IMMEDIATE. Whole-file .backup uses a second
+  EXCLUSIVE lock. SQLite uses a row CSV before-image when its WHERE clause is
+  stable, otherwise a full-table before-image is blocked unless explicitly
+  allowed. Whole-file .backup uses a second
   read-only client while the mutation client holds the writer lock; mutation
   is sent only after snapshot completion. SELECT and other reads skip EXPLAIN
   and backups.
@@ -479,9 +488,12 @@ Guarded File Apply:
   sshx apply --target=<name> --path=/abs/remote.conf --from=./local.conf --json
 
   Replaces one remote regular file. sshx reads the current file, optionally
-  checks --expect-sha256, writes an owner-only backup, then atomically replaces
-  the target while preserving mode and owner. Reload/restart is not part of
-  this command — run a separate sshx run after apply succeeds.
+  checks --expect-sha256, checks parent-directory write access before creating
+  backup/temp files, then atomically replaces the target while preserving mode
+  and owner. Atomic replacement needs write and execute permission on the
+  parent directory; error_kind=parent_directory_not_writable reports a denial.
+  Reload/restart is not part of this command — run a separate sshx run after
+  apply succeeds.
 
   --path=PATH             Absolute remote file path (required)
   --from=PATH             Local source file (required)

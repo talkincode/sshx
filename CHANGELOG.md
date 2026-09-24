@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-24
+
+### Added
+
+- `sshx sql --target=<name>` as an alias for `-h` / `--host`, matching the
+  target selector used by `run` and `apply`.
+- `sshx sql --allow-full-table-backup` as an explicit opt-in for row-filtered
+  mutations whose before-image must include the full table.
+
+### Changed
+
+- Row-filtered SQL mutations now use a narrow before-image when the selected
+  rows can be safely reproduced. If backup planning must widen to a full-table
+  snapshot, execution is blocked by default with a stable reason code; dry-run
+  and JSON results expose the planned backup scope.
+- `sshx apply` checks parent-directory write and execute permission before
+  creating backup or temporary files, returning
+  `parent_directory_not_writable` and suggesting `--sudo` when a sudo
+  credential is configured.
+- `sshx run --help` distinguishes `--sudo` for the selected script interpreter
+  from nested `sudo` commands in the script, whose stdin prevents password
+  injection.
+
 ## [0.18.0] - 2026-09-23
 
 ### Added

@@ -140,7 +140,7 @@ func TestApplySFTPPartialEvidence(t *testing.T) {
 			if tc.fault == "recheck" {
 				req.ExpectSHA256 = SHA256Hex(before)
 			}
-			outcome, err := (&SSHClient{}).applySFTPFile(client, req)
+			outcome, err := (&SSHClient{}).applySFTPFile(client, req, nil)
 			require.Error(t, err)
 			require.NotNil(t, outcome)
 			require.Equal(t, tc.verificationError, errors.Is(err, ErrApplyVerification), "%v", err)
@@ -184,12 +184,12 @@ func TestApplySFTPPartialEvidence(t *testing.T) {
 func TestApplySFTPZeroByteNoopAndPrecondition(t *testing.T) {
 	client, _ := newApplyTestSFTP(t, "")
 	req := ApplyRequest{RemotePath: "/app.conf", Payload: []byte{}, Backup: true, BackupDir: "/backups"}
-	outcome, err := (&SSHClient{}).applySFTPFile(client, req)
+	outcome, err := (&SSHClient{}).applySFTPFile(client, req, nil)
 	require.NoError(t, err)
 	require.True(t, outcome.Created)
 	require.True(t, outcome.Verified)
 	require.Equal(t, SHA256Hex(nil), outcome.AfterSHA256)
-	outcome, err = (&SSHClient{}).applySFTPFile(client, req)
+	outcome, err = (&SSHClient{}).applySFTPFile(client, req, nil)
 	require.NoError(t, err)
 	require.False(t, *outcome.Executed)
 	require.False(t, outcome.Changed)
@@ -197,12 +197,12 @@ func TestApplySFTPZeroByteNoopAndPrecondition(t *testing.T) {
 	require.Empty(t, outcome.BackupPath)
 	req.Payload = []byte("different")
 	req.ExpectSHA256 = SHA256Hex([]byte("wrong"))
-	outcome, err = (&SSHClient{}).applySFTPFile(client, req)
+	outcome, err = (&SSHClient{}).applySFTPFile(client, req, nil)
 	require.ErrorIs(t, err, ErrPrecondition)
 	require.Equal(t, SHA256Hex(nil), outcome.BeforeSHA256)
 	require.False(t, *outcome.Executed)
 	req.Force = true
-	outcome, err = (&SSHClient{}).applySFTPFile(client, req)
+	outcome, err = (&SSHClient{}).applySFTPFile(client, req, nil)
 	require.NoError(t, err)
 	require.True(t, outcome.Changed)
 	require.True(t, outcome.BackupVerified)
@@ -211,7 +211,7 @@ func TestApplySFTPZeroByteNoopAndPrecondition(t *testing.T) {
 
 func TestApplyRenameFallbackOnlyWhenUnsupported(t *testing.T) {
 	client, fs := newApplyTestSFTP(t, "unsupported")
-	outcome, err := (&SSHClient{}).applySFTPFile(client, ApplyRequest{RemotePath: "/app.conf", Payload: []byte("new")})
+	outcome, err := (&SSHClient{}).applySFTPFile(client, ApplyRequest{RemotePath: "/app.conf", Payload: []byte("new")}, nil)
 	require.NoError(t, err)
 	require.True(t, outcome.Verified)
 	fs.mu.Lock()

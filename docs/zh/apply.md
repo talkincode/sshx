@@ -52,6 +52,11 @@ POSIX-rename 扩展返回 `SSH_FX_OP_UNSUPPORTED` 时可尝试普通 rename，
 
 SFTP 以 SSH 用户身份运行。目标对该用户不可写时使用 `--sudo`。sshx 先把 payload 暂存到远端 home，再通过 stdin 执行特权安装脚本；脚本不会留在主机上。
 
+写入备份或替换临时文件前，`apply` 会先检查 SSH 用户是否能写入并访问目标父目录。
+原子替换要求父目录同时具备写入和执行权限，与目标文件所有者无关。权限不足时返回
+`error_kind: parent_directory_not_writable`；已配置 sudo 密码 key 时会提示 `--sudo`。
+该预检不能阻止检查后发生的并发权限变更。
+
 校验和 reload 用另一次 `sshx run`：
 
 ```bash

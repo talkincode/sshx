@@ -228,6 +228,34 @@ func TestPrintVerbUsageJSON(t *testing.T) {
 	}
 }
 
+func TestSQLHelpDocumentsTargetHostSelector(t *testing.T) {
+	output := string(captureStdout(t, func() {
+		require.NoError(t, PrintVerbUsage(&sshclient.Config{HelpVerb: "sql"}))
+	}))
+	require.Contains(t, output, "--target=NAME")
+	require.Contains(t, output, "Host selectors --target=NAME, --host=NAME, and -h=NAME are equivalent")
+}
+
+func TestRunHelpExplainsSudoScriptPayloads(t *testing.T) {
+	output := string(captureStdout(t, func() {
+		require.NoError(t, PrintVerbUsage(&sshclient.Config{HelpVerb: "run"}))
+	}))
+	require.Contains(t, output, "--sudo")
+	require.Contains(t, output, "run the selected script interpreter via sudo")
+	require.Contains(t, output, "Do not embed sudo")
+	require.Contains(t, output, "its stdin is occupied by the script")
+	require.Contains(t, output, "inject the password for a nested sudo command")
+}
+
+func TestSQLHelpDocumentsFullTableBackupOptIn(t *testing.T) {
+	output := string(captureStdout(t, func() {
+		require.NoError(t, PrintVerbUsage(&sshclient.Config{HelpVerb: "sql"}))
+	}))
+	require.Contains(t, output, "--allow-full-table-backup")
+	require.Contains(t, output, "full-table backup")
+	require.Contains(t, output, "blocked by default")
+}
+
 func TestPrintUsageAdvertisesHelpSurfaces(t *testing.T) {
 	output := string(captureStdout(t, PrintUsage))
 	require.Contains(t, output, "sshx <verb> --help")

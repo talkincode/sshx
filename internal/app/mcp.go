@@ -717,33 +717,34 @@ type mcpRunInput struct {
 }
 
 type mcpSQLInput struct {
-	ExpectPlan        string `json:"expect_plan,omitempty" jsonschema:"Expected sha256 execution plan hash; mismatch is rejected before connecting."`
-	HostTimeoutSecs   int    `json:"host_timeout_seconds,omitempty" jsonschema:"Optional whole-target budget in seconds."`
-	GlobalTimeoutSecs int    `json:"global_timeout_seconds,omitempty" jsonschema:"Optional whole-operation budget in seconds; MCP also has a 30-minute watchdog."`
-	BypassReason      string `json:"bypass_reason,omitempty" jsonschema:"Optional recorded justification for SQL policy bypasses."`
-	Target            string `json:"target" jsonschema:"Configured host name or address to reach over SSH."`
-	Statement         string `json:"statement" jsonschema:"Exactly one SQL statement; multi-statement input is blocked fail-closed."`
-	Engine            string `json:"engine,omitempty" jsonschema:"postgres (default), sqlite, or mysql."`
-	DB                string `json:"db,omitempty" jsonschema:"PostgreSQL database name."`
-	DBFile            string `json:"db_file,omitempty" jsonschema:"Absolute SQLite database file path (required for engine=sqlite)."`
-	DBUser            string `json:"db_user,omitempty" jsonschema:"Database role."`
-	DBHost            string `json:"db_host,omitempty" jsonschema:"Database host as seen from the remote host."`
-	DBPort            string `json:"db_port,omitempty" jsonschema:"Database port."`
-	DBPasswordKey     string `json:"db_password_key,omitempty" jsonschema:"OS-keyring key holding the DB password; delivered via stdin, never argv."`
-	Docker            string `json:"docker,omitempty" jsonschema:"Run the database client inside this container via docker exec -i."`
-	DBCredFrom        string `json:"db_cred_from,omitempty" jsonschema:"Resolve credentials on the remote host: docker:<container> or env-file:<path>."`
-	CredCache         string `json:"cred_cache,omitempty" jsonschema:"off or a duration for caching remotely resolved credentials (default 15m)."`
-	CredRefresh       bool   `json:"cred_refresh,omitempty" jsonschema:"Drop the cached credential entry and re-resolve."`
-	Explain           bool   `json:"explain,omitempty" jsonschema:"Run EXPLAIN only; never executes the statement."`
-	RowThreshold      int    `json:"row_threshold,omitempty" jsonschema:"EXPLAIN row estimate that upgrades a row backup to a full-table snapshot (default 1000)."`
-	AllowFullTable    bool   `json:"allow_full_table,omitempty" jsonschema:"Required for UPDATE/DELETE without a WHERE clause."`
-	NoBackup          bool   `json:"no_backup,omitempty" jsonschema:"Skip the pre-change backup; requires force."`
-	BackupDir         string `json:"backup_dir,omitempty" jsonschema:"Remote backup directory (default ~/.sshx/sql-backups)."`
-	Sudo              bool   `json:"sudo,omitempty" jsonschema:"Run the remote database client via sudo -S when the SSH user cannot open the database file."`
-	Force             bool   `json:"force,omitempty" jsonschema:"Confirms DDL; destructive DDL also requires no_backup."`
-	DryRun            bool   `json:"dry_run,omitempty" jsonschema:"Preview the guarded SQL plan without connecting."`
-	TimeoutSecs       int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
-	Bind              string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
+	ExpectPlan           string `json:"expect_plan,omitempty" jsonschema:"Expected sha256 execution plan hash; mismatch is rejected before connecting."`
+	HostTimeoutSecs      int    `json:"host_timeout_seconds,omitempty" jsonschema:"Optional whole-target budget in seconds."`
+	GlobalTimeoutSecs    int    `json:"global_timeout_seconds,omitempty" jsonschema:"Optional whole-operation budget in seconds; MCP also has a 30-minute watchdog."`
+	BypassReason         string `json:"bypass_reason,omitempty" jsonschema:"Optional recorded justification for SQL policy bypasses."`
+	Target               string `json:"target" jsonschema:"Configured host name or address to reach over SSH."`
+	Statement            string `json:"statement" jsonschema:"Exactly one SQL statement; multi-statement input is blocked fail-closed."`
+	Engine               string `json:"engine,omitempty" jsonschema:"postgres (default), sqlite, or mysql."`
+	DB                   string `json:"db,omitempty" jsonschema:"PostgreSQL database name."`
+	DBFile               string `json:"db_file,omitempty" jsonschema:"Absolute SQLite database file path (required for engine=sqlite)."`
+	DBUser               string `json:"db_user,omitempty" jsonschema:"Database role."`
+	DBHost               string `json:"db_host,omitempty" jsonschema:"Database host as seen from the remote host."`
+	DBPort               string `json:"db_port,omitempty" jsonschema:"Database port."`
+	DBPasswordKey        string `json:"db_password_key,omitempty" jsonschema:"OS-keyring key holding the DB password; delivered via stdin, never argv."`
+	Docker               string `json:"docker,omitempty" jsonschema:"Run the database client inside this container via docker exec -i."`
+	DBCredFrom           string `json:"db_cred_from,omitempty" jsonschema:"Resolve credentials on the remote host: docker:<container> or env-file:<path>."`
+	CredCache            string `json:"cred_cache,omitempty" jsonschema:"off or a duration for caching remotely resolved credentials (default 15m)."`
+	CredRefresh          bool   `json:"cred_refresh,omitempty" jsonschema:"Drop the cached credential entry and re-resolve."`
+	Explain              bool   `json:"explain,omitempty" jsonschema:"Run EXPLAIN only; never executes the statement."`
+	RowThreshold         int    `json:"row_threshold,omitempty" jsonschema:"EXPLAIN row estimate that may widen a row backup to a full-table snapshot (default 1000); expansion is blocked by default."`
+	AllowFullTable       bool   `json:"allow_full_table,omitempty" jsonschema:"Required for UPDATE/DELETE without a WHERE clause."`
+	AllowFullTableBackup bool   `json:"allow_full_table_backup,omitempty" jsonschema:"Explicitly permit a full-table before-image when a row-filtered mutation cannot be backed up narrowly; does not permit a mutation without WHERE."`
+	NoBackup             bool   `json:"no_backup,omitempty" jsonschema:"Skip the pre-change backup; requires force."`
+	BackupDir            string `json:"backup_dir,omitempty" jsonschema:"Remote backup directory (default ~/.sshx/sql-backups)."`
+	Sudo                 bool   `json:"sudo,omitempty" jsonschema:"Run the remote database client via sudo -S when the SSH user cannot open the database file."`
+	Force                bool   `json:"force,omitempty" jsonschema:"Confirms DDL; destructive DDL also requires no_backup."`
+	DryRun               bool   `json:"dry_run,omitempty" jsonschema:"Preview the guarded SQL plan without connecting."`
+	TimeoutSecs          int    `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds."`
+	Bind                 string `json:"bind,omitempty" jsonschema:"Local source address: literal IP or network interface name."`
 }
 
 type mcpROSInput struct {
@@ -985,6 +986,9 @@ func buildSQLArgs(in mcpSQLInput) ([]string, error) {
 	}
 	if in.AllowFullTable {
 		args = append(args, "--allow-full-table")
+	}
+	if in.AllowFullTableBackup {
+		args = append(args, "--allow-full-table-backup")
 	}
 	if in.NoBackup {
 		args = append(args, "--no-backup")

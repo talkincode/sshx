@@ -73,12 +73,12 @@ func TestParseArgs_SQLAfterDoubleDash(t *testing.T) {
 
 func TestParseArgs_SQLSafetyFlags(t *testing.T) {
 	config := ParseArgs([]string{
-		"sshx", "sql", "-h=db1", "--db=app", "--allow-full-table",
+		"sshx", "sql", "-h=db1", "--db=app", "--allow-full-table", "--allow-full-table-backup",
 		"--no-backup", "--force", "--explain", "--row-threshold=50",
 		"--backup-dir=/tmp/bk", "--dry-run",
 		"DELETE FROM users",
 	})
-	if !config.SQLAllowFullTable || !config.SQLNoBackup || !config.Force || !config.SQLExplainOnly {
+	if !config.SQLAllowFullTable || !config.SQLAllowFullTableBackup || !config.SQLNoBackup || !config.Force || !config.SQLExplainOnly {
 		t.Fatalf("safety flags not parsed: %#v", config)
 	}
 	if config.SQLRowThreshold != 50 {
@@ -220,6 +220,34 @@ func TestFillDryRunSQL(t *testing.T) {
 		}
 	})
 
+	t.Run("unreproducible row filter blocks full-table backup by default", func(t *testing.T) {
+		config := ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--dry-run",
+			"UPDATE users SET active=false WHERE id IN (SELECT id FROM candidates)",
+		})
+		plan := buildDryRunPlan(config)
+		if plan.SQL == nil || plan.SQL.BackupKind != string(sqlsafe.BackupTable) {
+			t.Fatalf("expected a visible full-table backup scope, got %#v", plan.SQL)
+		}
+		if plan.SafetyCheck.Status != "blocked" || plan.SafetyCheck.ErrorKind != "unreproducible_select" {
+			t.Fatalf("expected unreproducible_select block, got %#v", plan.SafetyCheck)
+		}
+		if !strings.Contains(plan.SafetyCheck.Message, "--allow-full-table-backup") {
+			t.Fatalf("block must describe the explicit opt-in: %#v", plan.SafetyCheck)
+		}
+		if plan.WouldConnect || plan.WouldExecute || plan.WouldMutateRemote {
+			t.Fatalf("blocked backup plan must not report side effects: %#v", plan)
+		}
+
+		allowed := buildDryRunPlan(ParseArgs([]string{
+			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "--allow-full-table-backup",
+			"UPDATE users SET active=false WHERE id IN (SELECT id FROM candidates)",
+		}))
+		if !allowed.Valid || allowed.SQL == nil || allowed.SQL.BackupKind != string(sqlsafe.BackupTable) {
+			t.Fatalf("explicitly allowed full-table backup should remain visible: %#v", allowed)
+		}
+	})
+
 	t.Run("full table delete is blocked", func(t *testing.T) {
 		config := ParseArgs([]string{
 			"sshx", "sql", "-h=db1", "--db=app", "--dry-run", "DELETE FROM users",
@@ -278,7 +306,7 @@ func TestFillDryRunSQL(t *testing.T) {
 		if plan.SQL.Engine != sqlsafe.EngineSQLite || plan.SQL.Database != "/var/lib/app/app.db" {
 			t.Fatalf("unexpected sqlite identity: %#v", plan.SQL)
 		}
-		if plan.SQL.Class != string(sqlsafe.ClassDML) || plan.SQL.BackupKind != string(sqlsafe.BackupTable) {
+		if plan.SQL.Class != string(sqlsafe.ClassDML) || plan.SQL.BackupKind != string(sqlsafe.BackupRows) {
 			t.Fatalf("unexpected sqlite plan: %#v", plan.SQL)
 		}
 		if !strings.Contains(plan.SQL.ExecuteCommand, "sqlite3 -batch -bail /var/lib/app/app.db") {

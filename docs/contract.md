@@ -22,7 +22,7 @@ renaming, or changing the meaning of a field, flag, exit code, or
 | Text dissection | `sshx.text.v1` | `sshx text --json`; help document is `sshx.text.help.v1` |
 | Exit codes | `0`, `1..254`, `255` | Remote status vs sshx-level failure |
 | JSON sshx failure | `exit_code: -1` | Distinguishes a remote `exit 255` |
-| `error_kind` | `timeout`, `auth`, `host_key`, `connect`, `blocked`, `exit_missing`, `config`, `error`, plus SQL/apply additions | Branch on this field, not prose |
+| `error_kind` | `timeout`, `auth`, `host_key`, `connect`, `blocked`, `exit_missing`, `config`, `error`, plus SQL/apply additions including `unreproducible_select`, `full_table_backup_requires_opt_in`, and `parent_directory_not_writable` | Branch on this field, not prose |
 | JSONL event types | `run_started`, `target_started`, `target_finished`, `run_finished` | |
 
 CLI flags listed in `sshx --help` for a released minor version remain valid

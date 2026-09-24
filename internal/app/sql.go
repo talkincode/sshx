@@ -21,6 +21,7 @@ type sqlBackupJSON struct {
 	Table       string `json:"table,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Rows        *int64 `json:"rows,omitempty"`
+	ReasonCode  string `json:"reason_code,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	RestoreHint string `json:"restore_hint,omitempty"`
 }
@@ -92,10 +93,11 @@ type sqlRun struct {
 
 func sqlOptions(config *sshclient.Config) sqlsafe.Options {
 	return sqlsafe.Options{
-		Force:          config.Force,
-		AllowFullTable: config.SQLAllowFullTable,
-		NoBackup:       config.SQLNoBackup,
-		RowThreshold:   config.SQLRowThreshold,
+		Force:                config.Force,
+		AllowFullTable:       config.SQLAllowFullTable,
+		AllowFullTableBackup: config.SQLAllowFullTableBackup,
+		NoBackup:             config.SQLNoBackup,
+		RowThreshold:         config.SQLRowThreshold,
 	}
 }
 
@@ -505,6 +507,30 @@ func (r *sqlRun) backupPhase() error {
 	if planErr != nil {
 		return r.fail("blocked", planErr)
 	}
+	r.backup = &sqlBackupJSON{
+		Kind: string(plan.Kind), Table: plan.Table,
+		ReasonCode: plan.ReasonCode, Reason: plan.Reason,
+	}
+	if plan.Kind == sqlsafe.BackupNone {
+		return nil
+	}
+
+	path := sqlsafe.BackupPath(r.config.SQLBackupDir, r.config.SQLDatabase, plan.Table, plan.Kind)
+	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineMySQL {
+		path = strings.TrimSuffix(path, ".csv") + ".mysql-hex"
+	}
+	r.backup.Path = path
+	r.backup.RestoreHint = sqlsafe.RestoreHintFor(r.config.SQLEngine, plan, path)
+	if scopeErr := sqlsafe.CheckBackupScope(r.cls, plan, r.opts); scopeErr != nil {
+		r.evidence.BackupStatus = "not_performed"
+		kind := "blocked"
+		var typed interface{ ErrorKind() string }
+		if errors.As(scopeErr, &typed) {
+			kind = typed.ErrorKind()
+		}
+		return r.fail(kind, scopeErr)
+	}
+
 	needImpact := !r.opts.NoBackup && plan.Kind != sqlsafe.BackupFile &&
 		(plan.Kind != sqlsafe.BackupNone || r.cls.Class == sqlsafe.ClassDML)
 	if needImpact {
@@ -518,17 +544,6 @@ func (r *sqlRun) backupPhase() error {
 				r.cls.Verb))
 		}
 	}
-	r.backup = &sqlBackupJSON{Kind: string(plan.Kind), Table: plan.Table, Reason: plan.Reason}
-	if plan.Kind == sqlsafe.BackupNone {
-		return nil
-	}
-
-	path := sqlsafe.BackupPath(r.config.SQLBackupDir, r.config.SQLDatabase, plan.Table, plan.Kind)
-	if sqlsafe.NormalizeEngine(r.config.SQLEngine) == sqlsafe.EngineMySQL {
-		path = strings.TrimSuffix(path, ".csv") + ".mysql-hex"
-	}
-	r.backup.Path = path
-	r.backup.RestoreHint = sqlsafe.RestoreHintFor(r.config.SQLEngine, plan, path)
 	return nil
 }
 
@@ -851,7 +866,7 @@ func addSQLEvidenceConditions(result *sqlJSONResult) {
 			execution.Condition{Kind: "sql_affected_rows_semantics", Subject: target + ":" + result.Table, Expected: semantics, Observed: evidence.AffectedRowsSemantics, Status: semanticsStatus},
 		)
 	}
-	if result.Backup == nil || result.Backup.Kind == string(sqlsafe.BackupNone) {
+	if result.Backup == nil || result.Backup.Kind == string(sqlsafe.BackupNone) || result.Backup.Path == "" {
 		return
 	}
 	backupStatus := evidence.BackupStatus

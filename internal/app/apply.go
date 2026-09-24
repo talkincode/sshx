@@ -137,13 +137,14 @@ func HandleApply(config *sshclient.Config, audit *auditRecorder) (err error) {
 
 	run.phase = "apply"
 	outcome, applyErr := client.ApplyRegularFile(sshclient.ApplyRequest{
-		RemotePath:   config.RemotePath,
-		Payload:      payload,
-		ExpectSHA256: config.ApplyExpectSHA256,
-		Backup:       !config.ApplyNoBackup,
-		BackupDir:    config.ApplyBackupDir,
-		Force:        config.Force,
-		UseSudo:      config.ApplyUseSudo,
+		RemotePath:     config.RemotePath,
+		Payload:        payload,
+		ExpectSHA256:   config.ApplyExpectSHA256,
+		Backup:         !config.ApplyNoBackup,
+		BackupDir:      config.ApplyBackupDir,
+		Force:          config.Force,
+		UseSudo:        config.ApplyUseSudo,
+		SudoConfigured: config.SudoKeyConfigured,
 	})
 	if applyErr != nil {
 		run.outcome = outcome

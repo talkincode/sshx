@@ -45,6 +45,7 @@ func (mysqlDialect) DecideBackup(cls *Classification, estimatedRows int64, opts 
 		plan.Reason = strings.ReplaceAll(plan.Reason, "CSV", "hex-row")
 		if estimatedRows < 0 && plan.Kind == BackupRows {
 			plan.Kind = BackupTable
+			plan.ReasonCode = BackupReasonEstimateUnavailable
 			plan.Reason = "MySQL row estimate unavailable; taking a full-table hex-row snapshot"
 		}
 	}

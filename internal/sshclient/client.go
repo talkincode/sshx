@@ -59,6 +59,7 @@ type Config struct {
 	KeyPath             string
 	UseKeyAuth          bool
 	SudoKey             string
+	SudoKeyConfigured   bool
 	// SudoKeySet is true when -pk/--password-key/--sudo-password-key was
 	// present on the command line, including an explicit empty value.
 	// Host inventory must persist the key only when this is set; the
@@ -204,6 +205,9 @@ type Config struct {
 	SQLRowThreshold int64
 	// SQLAllowFullTable permits UPDATE/DELETE without a top-level WHERE.
 	SQLAllowFullTable bool
+	// SQLAllowFullTableBackup permits whole-table before-images for a
+	// row-filtered mutation when sshx cannot safely reproduce the selected rows.
+	SQLAllowFullTableBackup bool
 	// SQLNoBackup skips pre-change backups; requires Force.
 	SQLNoBackup bool
 	// SQLExplainOnly stops after the remote EXPLAIN gate.

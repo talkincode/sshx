@@ -132,8 +132,11 @@ func (c SQLiteConn) ExecuteReadCommand(stmt string) RemoteCommand {
 // ExecuteWithBackupCommand locks the database with BEGIN IMMEDIATE, captures
 // a preimage before sending the mutation, and acknowledges only after COMMIT.
 func (c SQLiteConn) ExecuteWithBackupCommand(stmt, table, where, path string, kind BackupKind) (RemoteCommand, error) {
-	if kind != BackupTable && kind != BackupFile {
+	if kind != BackupRows && kind != BackupTable && kind != BackupFile {
 		return RemoteCommand{}, fmt.Errorf("unsupported sqlite backup kind %q", kind)
+	}
+	if kind == BackupRows && (containsNewline(where) || !stableBackupPredicate(where)) {
+		return RemoteCommand{}, &BlockedError{Reason: "SQLite row backup requires a stable, single-line WHERE clause"}
 	}
 	if !safeArgRE.MatchString(path) {
 		return RemoteCommand{}, &BlockedError{Reason: "backup path contains characters that cannot be embedded in a sqlite3 script"}
@@ -147,12 +150,15 @@ func (c SQLiteConn) ExecuteWithBackupCommand(stmt, table, where, path string, ki
 	p.BackupForm = "csv"
 	lines := []string{p.sqlite("start", "1"), "BEGIN IMMEDIATE;"}
 	switch kind {
-	case BackupTable:
+	case BackupRows, BackupTable:
 		if err := ValidateTableIdent(table); err != nil {
 			return RemoteCommand{}, err
 		}
-		// A table backup must contain the entire table, not merely the rows
-		// selected by the mutation. Recheck impact after acquiring the lock.
+		filter := ""
+		if kind == BackupRows {
+			filter = " WHERE " + strings.TrimSpace(where)
+		}
+		snapshot := "SELECT * FROM " + table + filter + ";"
 		guard := "__sshx_guard_" + p.Token
 		expression := sqliteRelatedEffectsExpression(table, mutationVerb(stmt))
 		literal := "'" + strings.ReplaceAll(tableIdentName(table), "'", "''") + "'"
@@ -165,7 +171,7 @@ func (c SQLiteConn) ExecuteWithBackupCommand(stmt, table, where, path string, ki
 			p.sqlite("copy", "begin"),
 			".headers on",
 			".mode csv",
-			"SELECT * FROM "+table+";",
+			snapshot,
 			p.sqlite("copy", "end"),
 		)
 	case BackupFile:
@@ -238,9 +244,9 @@ func tableIdentName(table string) string {
 	return strings.Trim(table, `"`)
 }
 
-// DecideSQLiteBackup chooses a SQLite backup. L1 never uses row-level CSV:
-// bounded single-table DML snapshots the table; everything else that needs a
-// backup snapshots the whole database file (always available).
+// DecideSQLiteBackup chooses a SQLite backup. Stable row filters use a
+// transaction-locked row snapshot; wider or unreproducible changes require a
+// table or whole-file snapshot.
 func DecideSQLiteBackup(cls *Classification, opts Options) (BackupPlan, error) {
 	if opts.NoBackup {
 		return BackupPlan{Kind: BackupNone, Reason: "backups disabled by --no-backup"}, nil
@@ -253,9 +259,14 @@ func DecideSQLiteBackup(cls *Classification, opts Options) (BackupPlan, error) {
 	case cls.Class == ClassDDL && !cls.Destructive:
 		return BackupPlan{Kind: BackupNone, Reason: "non-destructive DDL/maintenance statement"}, nil
 	}
-	if cls.Class == ClassDML && cls.HasWhere && !cls.ComplexSource && cls.Table != "" {
+	if cls.Class == ClassDML && cls.HasWhere && cls.Table != "" {
+		if !cls.ComplexSource && !containsNewline(cls.WhereClause) && stableBackupPredicate(cls.WhereClause) {
+			return BackupPlan{Kind: BackupRows, Table: cls.Table,
+				Reason: "snapshotting affected rows selected by the statement's stable WHERE clause"}, nil
+		}
 		return BackupPlan{Kind: BackupTable, Table: cls.Table,
-			Reason: "SQLite snapshots the whole target table before mutation (no row-estimate gate)"}, nil
+			ReasonCode: BackupReasonUnreproducibleSelect,
+			Reason:     "affected rows cannot be safely reproduced as a narrow SQLite snapshot; taking a full-table CSV snapshot"}, nil
 	}
 	return BackupPlan{Kind: BackupFile, Table: cls.Table,
 		Reason: "taking a consistent whole-file snapshot with sqlite3 .backup under BEGIN IMMEDIATE"}, nil
@@ -275,8 +286,8 @@ func RestoreHintFor(engine string, plan BackupPlan, path string) string {
 
 func sqliteRestoreHint(plan BackupPlan, path string) string {
 	switch plan.Kind {
-	case BackupTable:
-		return fmt.Sprintf("restore table data with: sqlite3 <db> \".mode csv\" \".import %s %s\" (reconcile existing rows first)", path, plan.Table)
+	case BackupRows, BackupTable:
+		return fmt.Sprintf("restore selected table rows with: sqlite3 <db> \".mode csv\" \".import %s %s\" (reconcile existing rows first)", path, plan.Table)
 	case BackupFile:
 		return fmt.Sprintf("restore the database file from %s (stop writers, replace the live file plus any leftover -wal/-shm, then reopen)", path)
 	default:

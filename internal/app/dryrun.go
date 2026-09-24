@@ -141,23 +141,24 @@ type applyDryRunPlan struct {
 // The backup decision shown here uses no EXPLAIN estimate; a row-level backup
 // may still upgrade to a table dump at execution time.
 type sqlDryRunPlan struct {
-	Engine         string       `json:"engine"`
-	Database       string       `json:"database"`
-	Statement      string       `json:"statement"`
-	StatementHash  string       `json:"statement_sha256"`
-	Class          string       `json:"class,omitempty"`
-	Verb           string       `json:"verb,omitempty"`
-	Table          string       `json:"table,omitempty"`
-	HasWhere       bool         `json:"has_where"`
-	Docker         string       `json:"docker,omitempty"`
-	CredSource     string       `json:"cred_source,omitempty"`
-	CredCache      string       `json:"cred_cache,omitempty"`
-	PolicyCheck    dryRunStatus `json:"policy_check"`
-	BackupKind     string       `json:"backup_kind,omitempty"`
-	BackupReason   string       `json:"backup_reason,omitempty"`
-	ExplainCommand string       `json:"explain_command,omitempty"`
-	ExecuteCommand string       `json:"execute_command,omitempty"`
-	UseSudo        bool         `json:"use_sudo,omitempty"`
+	Engine           string       `json:"engine"`
+	Database         string       `json:"database"`
+	Statement        string       `json:"statement"`
+	StatementHash    string       `json:"statement_sha256"`
+	Class            string       `json:"class,omitempty"`
+	Verb             string       `json:"verb,omitempty"`
+	Table            string       `json:"table,omitempty"`
+	HasWhere         bool         `json:"has_where"`
+	Docker           string       `json:"docker,omitempty"`
+	CredSource       string       `json:"cred_source,omitempty"`
+	CredCache        string       `json:"cred_cache,omitempty"`
+	PolicyCheck      dryRunStatus `json:"policy_check"`
+	BackupKind       string       `json:"backup_kind,omitempty"`
+	BackupReasonCode string       `json:"backup_reason_code,omitempty"`
+	BackupReason     string       `json:"backup_reason,omitempty"`
+	ExplainCommand   string       `json:"explain_command,omitempty"`
+	ExecuteCommand   string       `json:"execute_command,omitempty"`
+	UseSudo          bool         `json:"use_sudo,omitempty"`
 }
 
 func emitDryRunPlan(config *sshclient.Config) error {
@@ -861,12 +862,23 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 		return
 	}
 	sqlPlan.BackupKind = string(backup.Kind)
+	sqlPlan.BackupReasonCode = backup.ReasonCode
 	sqlPlan.BackupReason = backup.Reason
-	if backup.Kind == sqlsafe.BackupRows {
-		sqlPlan.BackupReason += " (may upgrade to a full-table CSV snapshot if the EXPLAIN estimate exceeds the row threshold)"
+	if backup.Kind == sqlsafe.BackupRows && sqlsafe.NormalizeEngine(config.SQLEngine) != sqlsafe.EngineSQLite {
+		sqlPlan.BackupReason += " (an EXPLAIN estimate above --row-threshold may select a full-table backup, which is blocked by default; pass --allow-full-table-backup to opt in)"
 	}
 	if cls.Class == sqlsafe.ClassDML && !opts.NoBackup && backup.Kind != sqlsafe.BackupFile {
 		sqlPlan.BackupReason += " (runtime catalog preflight blocks triggers, rewrite rules, partitions, and cascading referential actions)"
+	}
+	if scopeErr := sqlsafe.CheckBackupScope(cls, backup, opts); scopeErr != nil {
+		kind := "blocked"
+		if typed, ok := scopeErr.(interface{ ErrorKind() string }); ok {
+			kind = typed.ErrorKind()
+		}
+		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: kind, Message: scopeErr.Error()}
+		sqlPlan.PolicyCheck = plan.SafetyCheck
+		plan.Valid = false
+		return
 	}
 
 	conn := newSQLExecutor(config, "")

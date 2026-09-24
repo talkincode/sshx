@@ -320,9 +320,17 @@ func TestDecideBackup(t *testing.T) {
 		assert.Equal(t, "t", plan.Table)
 	})
 	t.Run("large update table backup", func(t *testing.T) {
-		plan, err := DecideBackup(classify(t, "UPDATE t SET x=1 WHERE id > 0"), 50000, Options{})
+		cls := classify(t, "UPDATE t SET x=1 WHERE id > 0")
+		plan, err := DecideBackup(cls, 50000, Options{})
 		require.NoError(t, err)
 		assert.Equal(t, BackupTable, plan.Kind)
+		assert.Equal(t, BackupReasonRowThresholdExceeded, plan.ReasonCode)
+		scopeErr := CheckBackupScope(cls, plan, Options{})
+		require.Error(t, scopeErr)
+		var typed interface{ ErrorKind() string }
+		require.ErrorAs(t, scopeErr, &typed)
+		assert.Equal(t, "full_table_backup_requires_opt_in", typed.ErrorKind())
+		assert.NoError(t, CheckBackupScope(cls, plan, Options{AllowFullTableBackup: true}))
 	})
 	t.Run("threshold boundary stays rows", func(t *testing.T) {
 		plan, err := DecideBackup(classify(t, "UPDATE t SET x=1 WHERE id > 0"), DefaultRowThreshold, Options{})
