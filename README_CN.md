@@ -78,8 +78,21 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 13. 源地址绑定（`--bind=<ip|iface>`），对齐 OpenSSH `-b` / `BindAddress` / `BindInterface`。
 14. 会话内跳板（`via` / `--via=`）：嵌套 SSH 进入私网目标，每跳独立信任与审计，不在本机开隧道。
 15. `sshx text`：有界远端日志/文本解剖（异常块、preset、行窗），经 SFTP 或 sshx 持有的 journalctl；读取走并发流水线，扫描进度写 stderr，宽窗口不再像卡死。
+16. Agent skill（`skills/sshx/SKILL.md`）：`npx skills add talkincode/sshx` 或 `sshx skill install`。
 
 ## 安装
+
+### 安装 Agent skill
+
+技能文件是 [`skills/sshx/SKILL.md`](skills/sshx/SKILL.md)。
+
+```bash
+# skills.sh / skills CLI：发现本仓库中的 skills/*/SKILL.md
+npx skills add talkincode/sshx
+
+# 已安装的 sshx 二进制：把内嵌 skill 写入 ~/.agents/skills/sshx/SKILL.md
+sshx skill install
+```
 
 ### 使用 Go 快速安装（推荐 Go 用户）
 

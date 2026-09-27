@@ -84,8 +84,21 @@ It remains a single binary with one-shot invocations and no resident component o
 15. `sshx text`: bounded remote log/text dissection (exception blocks, presets,
     line windows) over SFTP or sshx-owned journalctl, with pipelined reads and
     stderr scan progress so a wide window is never mistaken for a hang.
+16. Agent skill (`skills/sshx/SKILL.md`): `npx skills add talkincode/sshx` or `sshx skill install`.
 
 ## Installation
+
+### Agent skill
+
+The skill file is [`skills/sshx/SKILL.md`](skills/sshx/SKILL.md).
+
+```bash
+# skills.sh / skills CLI: discovers skills/*/SKILL.md in this repository
+npx skills add talkincode/sshx
+
+# Installed sshx binary: writes the embedded skill to ~/.agents/skills/sshx/SKILL.md
+sshx skill install
+```
 
 ### Quick Install with Go (Recommended for Go Users)
 
