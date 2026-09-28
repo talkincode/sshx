@@ -16,7 +16,7 @@ import (
 	"github.com/talkincode/sshx/pkg/logger"
 )
 
-const secretsSchemaVersion = "sshx.secrets.v1" //nolint:gosec // schema id, not a credential
+const secretsSchemaVersion = "sshx.secrets.v1" // #nosec G101 -- fixed schema identifier, not a credential
 
 // errPasswordNotFound is returned by --password-check when the named key is
 // absent. Callers that branch on exit code must treat this as failure.

@@ -492,3 +492,27 @@ func TestCommandUsesSudo(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsSudoCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{"script starts with sudo", "#!/bin/sh\nsudo -n true\n", true},
+		{"sudo in later shell segment", "echo ready && sudo id -u", true},
+		{"sudo in shell wrapper", "sh -c 'sudo whoami'", true},
+		{"sudo as argument", "echo sudo", false},
+		{"sudo in a comment", "# sudo reboot\necho ready", false},
+		{"sudo inside container command", "docker exec db sudo id", false},
+		{"no sudo", "id -u", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ContainsSudoCommand(tt.command); got != tt.want {
+				t.Errorf("ContainsSudoCommand(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}

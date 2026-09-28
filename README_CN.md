@@ -319,6 +319,10 @@ sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
 sshx run --target=prod-web --script-file=./check.sh --json
 ```
 
+脚本模式下，`--sudo` 会以 sudo 运行所选解释器。若 sshx 检测到脚本含有嵌套
+`sudo` 命令但未指定 `--sudo`，会在连接前向 stderr 提示：脚本占用了 stdin，
+sshx 无法向嵌套进程注入已保存的 sudo 密码。`--quiet` 可以静默此提示。
+
 多主机退出码：`0` 全部成功，`1` 部分失败/跳过/不确定，`255` 请求级失败。
 
 ### `--dry-run` 执行计划预览

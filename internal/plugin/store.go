@@ -53,7 +53,8 @@ func ensurePrivateRoot(root string) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create plugin root: %w", err)
 	}
-	if err := os.Chmod(root, 0o700); err != nil { // #nosec G302 -- private directory requires owner traversal.
+	// #nosec G302 -- directories require execute bits for owner traversal.
+	if err := os.Chmod(root, 0o700); err != nil {
 		return fmt.Errorf("secure plugin root: %w", err)
 	}
 	return nil

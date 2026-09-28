@@ -246,12 +246,16 @@ func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err
 	}
 	meta := execution.NewMetadata(plan, config.ExecutionID)
 	attachPrepared(config, &preparedOperation{plan: plan, meta: meta, audit: audit})
+	phase := execution.PhaseResolve
+	if kind == execution.ErrorKindBlocked {
+		phase = execution.PhaseAdmission
+	}
 	res := execution.Result{
 		Metadata:      meta,
 		SchemaVersion: execution.ResultSchemaVersion,
 		RunID:         config.ExecutionID,
 		Status:        execution.StatusFailed,
-		Phase:         execution.PhaseResolve,
+		Phase:         phase,
 		Completion:    execution.CompletionNotStarted,
 		ExitCode:      -1,
 		Success:       false,
@@ -462,6 +466,9 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 		// instead of being silently run by sh.
 		if runner := runnerFromConfig(config, payload); runner != "" {
 			req.Action.ScriptRunner = runner
+		}
+		if !req.Action.UseSudo && sshclient.ContainsSudoCommand(string(payload.Bytes)) {
+			writeDiagnosticNote(noticeWriter(config), "sshx: the script contains `sudo` but --sudo was not requested; sshx cannot inject a password for a nested sudo (its stdin carries the script). Re-run with --sudo to run the interpreter privileged, or remove the sudo calls.\n")
 		}
 	}
 

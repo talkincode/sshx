@@ -90,6 +90,8 @@ Run Contract (preferred for Agents):
   --sudo runs the whole script interpreter with sudo. Do not embed sudo
   commands in a script: its stdin is occupied by the script, so sshx cannot
   inject the password for a nested sudo command.
+  If sshx detects nested sudo without --sudo, it warns before connecting;
+  --quiet suppresses this notice.
 
   Limits / policy:
     --concurrency=N          default 4, hard max 32

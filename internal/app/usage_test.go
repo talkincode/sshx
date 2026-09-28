@@ -245,6 +245,8 @@ func TestRunHelpExplainsSudoScriptPayloads(t *testing.T) {
 	require.Contains(t, output, "Do not embed sudo")
 	require.Contains(t, output, "its stdin is occupied by the script")
 	require.Contains(t, output, "inject the password for a nested sudo command")
+	require.Contains(t, output, "it warns before connecting")
+	require.Contains(t, output, "--quiet suppresses this notice")
 }
 
 func TestSQLHelpDocumentsFullTableBackupOptIn(t *testing.T) {
