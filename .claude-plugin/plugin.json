@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "sshx",
+  "version": "0.19.0",
+  "description": "Agent-oriented remote host execution over SSH — JSON results, dry-run plans, safety rails, audit trail, MCP server, and an installable Agent skill.",
+  "author": {
+    "name": "talkincode",
+    "url": "https://github.com/talkincode"
+  },
+  "homepage": "https://talkincode.github.io/sshx/",
+  "repository": "https://github.com/talkincode/sshx",
+  "license": "MIT",
+  "keywords": ["ssh", "remote-execution", "mcp", "agent-skill"]
+}
