@@ -156,6 +156,36 @@ func TestBlockedJSONKeepsStdoutPureAndMirrorsStderr(t *testing.T) {
 	assert.NotContains(t, string(stdout), "blocked by safety policy", "the mirror must not leak into stdout")
 }
 
+func TestRunJSONBlockedAdmissionMirrorsReason(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	args := []string{
+		"sshx", "run", "--address=192.0.2.1", "--json", "--no-audit", "--",
+		`docker exec db psql -U app -c 'SELECT 1'`,
+	}
+	var runErr error
+	stdout, stderr := captureStreams(t, func() {
+		runErr = Run(args)
+	})
+	require.ErrorIs(t, runErr, ErrReported)
+
+	var document struct {
+		Phase string `json:"phase"`
+		Error struct {
+			Kind    string `json:"kind"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(stdout, &document), string(stdout))
+	assert.Equal(t, "admission", document.Phase)
+	assert.Equal(t, "blocked", document.Error.Kind)
+	assert.Contains(t, document.Error.Message, "bypasses the guarded SQL pipeline")
+	assert.Contains(t, string(stderr), "phase=admission")
+	assert.Contains(t, string(stderr), "sshx: block reason:")
+	assert.Contains(t, string(stderr), "bypasses the guarded SQL pipeline")
+	assert.Contains(t, string(stderr), "sshx sql")
+}
+
 // TestBlockedJSONMirrorIsSilencedByQuiet: --quiet keeps the same single JSON
 // document on stdout and drops the human mirror from stderr, so a caller that
 // merges the streams still reads exactly one parseable document (issue #86).

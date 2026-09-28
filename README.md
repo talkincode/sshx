@@ -332,6 +332,11 @@ sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
 sshx run --target=prod-web --script-file=./check.sh --json
 ```
 
+For script payloads, `--sudo` runs the selected interpreter with privilege. If
+sshx detects a nested `sudo` command without `--sudo`, it writes a notice to
+stderr before connecting: the script occupies stdin, so sshx cannot inject a
+stored sudo password into that nested process. `--quiet` suppresses the notice.
+
 Multi-target exit codes: `0` all succeeded, `1` partial failure/skip/uncertain,
 `255` request-level failure (invalid selectors, zero matches, bad input).
 

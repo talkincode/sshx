@@ -97,6 +97,13 @@ func CommandUsesSudo(command string) bool {
 	return ok
 }
 
+// ContainsSudoCommand reports whether any shell segment runs sudo as its
+// command. It is used for script payloads, where even a leading sudo reads from
+// stdin and cannot use sshx's password auto-fill.
+func ContainsSudoCommand(command string) bool {
+	return sudoInCommandPosition(strings.TrimSpace(command), 0)
+}
+
 func leadingSudoRemainder(command string) (string, bool) {
 	trimmed := strings.TrimLeft(command, " \t\r\n")
 	if trimmed == "sudo" {

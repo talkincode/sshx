@@ -484,6 +484,27 @@ func TestValidateTableIdent(t *testing.T) {
 	}
 }
 
+func TestValidateDatabaseNameExplainsAllowedCharactersAndPlaceholders(t *testing.T) {
+	for _, name := range []string{"app", "app_db", "app-db", "db123"} {
+		assert.NoError(t, ValidateDatabaseName(name), name)
+	}
+
+	err := ValidateDatabaseName("my db;drop")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allowed: [A-Za-z0-9_-]")
+	assert.NotContains(t, err.Error(), "redacted placeholder")
+
+	placeholderErr := ValidateDatabaseName("[REDACTED]")
+	require.Error(t, placeholderErr)
+	assert.Contains(t, placeholderErr.Error(), "allowed: [A-Za-z0-9_-]")
+	assert.Contains(t, placeholderErr.Error(), "looks like a redacted placeholder")
+	assert.Contains(t, placeholderErr.Error(), "pass the real database name")
+
+	lowercaseErr := ValidateDatabaseName("[redacted]")
+	require.Error(t, lowercaseErr)
+	assert.NotContains(t, lowercaseErr.Error(), "redacted placeholder")
+}
+
 func TestValidateBackupDir(t *testing.T) {
 	assert.NoError(t, ValidateBackupDir(".sshx/sql-backups"))
 	assert.NoError(t, ValidateBackupDir("/tmp/operator's backups"))

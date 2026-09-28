@@ -312,12 +312,17 @@ func ValidateTableIdent(table string) error {
 
 // ValidateDatabaseName bounds the database name used in argv and paths.
 var databaseNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var redactedDatabaseNameRE = regexp.MustCompile(`^\[[A-Z][A-Z0-9 _-]*\]$`)
 
 func ValidateDatabaseName(name string) error {
-	if !databaseNameRE.MatchString(name) {
-		return &BlockedError{Reason: fmt.Sprintf("database name %q contains unsupported characters", name)}
+	if databaseNameRE.MatchString(name) {
+		return nil
 	}
-	return nil
+	reason := fmt.Sprintf("database name %q contains unsupported characters; allowed: [A-Za-z0-9_-]", name)
+	if redactedDatabaseNameRE.MatchString(name) {
+		reason += "; value looks like a redacted placeholder; pass the real database name"
+	}
+	return &BlockedError{Reason: reason}
 }
 
 // ValidateBackupDir rejects control characters that could escape psql

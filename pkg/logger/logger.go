@@ -139,7 +139,7 @@ func (l *Logger) EnableFileLogging(logPath string) error {
 	}
 
 	// 打开日志文件
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // controlled log path
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- explicit caller-selected log destination; the CLI uses ~/.sshx/sshx.log
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

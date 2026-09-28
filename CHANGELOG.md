@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-09-28
+
+### Fixed
+
+- `sshx run --json` mirrors the structured reason for safety-policy blocks to
+  stderr and reports the block as `phase=admission`, matching command mode.
+- `sshx run --script-file` and `--script-stdin` warn when nested `sudo` is
+  present without `--sudo`, explaining that the script occupies stdin and how
+  to run the interpreter privileged.
+- `sshx sql` database-name validation errors state the allowed characters and
+  identify bracketed uppercase values that look like redacted placeholders.
+
 ## [0.19.0] - 2026-09-24
 
 ### Added
@@ -833,7 +845,9 @@ diagnostics).
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/talkincode/sshx/compare/v0.19.0...v0.19.1
+[0.19.0]: https://github.com/talkincode/sshx/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/talkincode/sshx/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/talkincode/sshx/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/talkincode/sshx/compare/v0.16.0...v0.16.1

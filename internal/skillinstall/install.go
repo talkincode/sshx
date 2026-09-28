@@ -160,7 +160,8 @@ func ensureTargetDir(dir string) error {
 		return fmt.Errorf("inspect skill directory %s: %w", dir, err)
 	}
 
-	if mkdirErr := os.MkdirAll(dir, 0o755); mkdirErr != nil { // #nosec G301 -- Agent skills are public documentation, not secrets.
+	// #nosec G301 -- Agent skills are public documentation, not secrets.
+	if mkdirErr := os.MkdirAll(dir, 0o755); mkdirErr != nil {
 		return fmt.Errorf("create skill directory %s: %w", dir, mkdirErr)
 	}
 	info, err = os.Lstat(dir)

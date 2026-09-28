@@ -158,7 +158,7 @@ func reportPolicyRejection(w io.Writer, document map[string]json.RawMessage) {
 	}
 	writeDiagnosticNote(w, "sshx: blocked by safety policy (phase=%s, error_kind=%s, executed=%s, exit_code=%d); no remote command ran\n",
 		phase, execution.ErrorKindBlocked, executed, exitCode)
-	if reason := flattenPolicyReason(documentString(document, "error")); reason != "" {
+	if reason := flattenPolicyReason(documentErrorMessage(document)); reason != "" {
 		writeDiagnosticNote(w, "sshx: block reason: %s\n", reason)
 	}
 }
@@ -182,6 +182,24 @@ func documentString(document map[string]json.RawMessage, key string) string {
 		_ = json.Unmarshal(raw, &text) //nolint:errcheck // only reads optional string projections
 	}
 	return text
+}
+
+func documentErrorMessage(document map[string]json.RawMessage) string {
+	raw, ok := document["error"]
+	if !ok {
+		return ""
+	}
+	var message string
+	if err := json.Unmarshal(raw, &message); err == nil {
+		return message
+	}
+	var info struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return ""
+	}
+	return info.Message
 }
 
 func finalizeLifecycle(config *sshclient.Config, value any) (map[string]json.RawMessage, error) {
