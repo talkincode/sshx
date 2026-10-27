@@ -7,6 +7,14 @@ sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
     --expect-sha256=<current> --sudo --json
 ```
 
+## Private staging on another filesystem
+
+With `--sudo`, `--stage-dir=/absolute/private/path` overrides the SFTP staging
+area under the remote home. It is included in the plan hash and retains the
+private-directory/symlink checks. `--backup-dir` remains independent; the final
+publication still uses the target filesystem's atomic primitive. MCP exposes
+`stage_dir` with the same sudo requirement. See [execution safety](execution-safety.md).
+
 ## What Apply Does
 
 1. Refuse anything that is not a clean absolute regular-file path.

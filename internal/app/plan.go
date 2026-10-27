@@ -139,6 +139,7 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 		plan.Inputs["remote_path"] = config.RemotePath
 		plan.Inputs["expect_sha256"] = config.ApplyExpectSHA256
 		plan.Inputs["backup_dir"] = config.ApplyBackupDir
+		plan.Inputs["stage_dir"] = config.ApplyStageDir
 		plan.Inputs["no_backup"] = strconv.FormatBool(config.ApplyNoBackup)
 	case "sftp":
 		plan.Inputs["remote_path"] = config.RemotePath

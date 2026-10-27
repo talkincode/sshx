@@ -71,7 +71,7 @@ func (p Plan) CanonicalBytes() ([]byte, error) {
 
 func (p *Plan) Seal() error {
 	p.SchemaVersion = PlanSchemaVersion
-	p.Semantics = "sshx.execution.v1"
+	p.Semantics = "sshx.execution.v2"
 	if p.Inputs == nil {
 		p.Inputs = map[string]string{}
 	}

@@ -88,8 +88,8 @@ sshx login -h=prod-web --sudo
 sshx login prod-web --dry-run --json
 ```
 
-`--sudo` starts a privileged login shell after feeding the host sudo secret
-from the OS keyring. Login requires a local TTY, is POSIX-only, and is not
+`--sudo` starts `sudo -i`; authenticate at the human TTY when prompted.
+No stored sudo credential is read or prefilled. Login requires a local TTY, is POSIX-only, and is not
 part of the Agent/MCP contract.
 
 ## Save A Sudo Password

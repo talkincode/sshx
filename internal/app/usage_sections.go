@@ -502,6 +502,7 @@ Guarded File Apply:
   --expect-sha256=HEX     Fail closed unless the current remote hash matches
   --no-backup             Skip the pre-change copy (requires --force)
   --backup-dir=PATH       Remote backup directory (default: ~/.sshx/file-backups)
+  --stage-dir=PATH        Private SFTP staging directory (--sudo only; plan-bound)
   --sudo                  Stage the payload over SFTP, then install with sudo
   --force, -f             Skip the hash precondition; required with --no-backup
   --bypass-reason=TEXT    Required with --force to overwrite /etc/passwd,
@@ -584,7 +585,7 @@ Interactive Login:
   --target=NAME             Long alias of -h= / <name>
   --address=HOST            Literal address; skip settings.json resolution
   --sudo                    Land in a privileged login shell (sudo -i)
-                            using the host sudo keyring secret on stdin
+                            authenticate at the human TTY; no sudo secret prefill
   --dry-run / --json        Local plan only; --json requires --dry-run
 
   Requires a local TTY. POSIX only; Windows returns an explicit unsupported

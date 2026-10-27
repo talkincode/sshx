@@ -33,9 +33,11 @@ type auditStatus struct {
 }
 
 type auditRedaction struct {
-	SecretsRedacted bool `json:"secrets_redacted"`
-	StdoutOmitted   bool `json:"stdout_omitted"`
-	StderrOmitted   bool `json:"stderr_omitted"`
+	Policy          string `json:"policy,omitempty"`
+	Completeness    string `json:"completeness,omitempty"`
+	SecretsRedacted bool   `json:"secrets_redacted"`
+	StdoutOmitted   bool   `json:"stdout_omitted"`
+	StderrOmitted   bool   `json:"stderr_omitted"`
 }
 
 type auditEvent struct {
@@ -182,10 +184,10 @@ type auditRecorder struct {
 }
 
 var (
-	sensitiveQuotedAssignmentRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)=("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
-	sensitiveQuotedFlagRE       = regexp.MustCompile(`(?i)(--(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
-	sensitiveAssignmentRE       = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key)=([^\s&;]+)`)
-	sensitiveFlagRE             = regexp.MustCompile(`(?i)(--(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s]+)`)
+	sensitiveQuotedAssignmentRE = regexp.MustCompile(`(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|authorization))=("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
+	sensitiveQuotedFlagRE       = regexp.MustCompile(`(?i)(--[a-z0-9_-]*(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
+	sensitiveAssignmentRE       = regexp.MustCompile(`(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|authorization))=([^\s&;]+)`)
+	sensitiveFlagRE             = regexp.MustCompile(`(?i)(--[a-z0-9_-]*(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s]+)`)
 )
 
 func newAuditRecorder(config *sshclient.Config) *auditRecorder {
@@ -209,6 +211,7 @@ func newAuditRecorder(config *sshclient.Config) *auditRecorder {
 			HostInput:     config.Host,
 			Outcome:       auditStatus{Status: "started"},
 			Redaction: auditRedaction{
+				Policy: "sshx.secret-shapes.v2", Completeness: "best_effort",
 				SecretsRedacted: true,
 				StdoutOmitted:   true,
 				StderrOmitted:   true,
@@ -711,6 +714,8 @@ func expandHome(path string) (string, error) {
 
 func auditAction(config *sshclient.Config) string {
 	switch config.Mode {
+	case "ros":
+		return config.ROSAction
 	case "ssh":
 		return "command"
 	case "sftp":
@@ -774,7 +779,7 @@ func auditWouldReadSecret(config *sshclient.Config) bool {
 	case "text":
 		return config.TextUseSudo && config.SudoKey != ""
 	case "login":
-		return (config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != ""
+		return config.SSHPasswordKey != ""
 	default:
 		return false
 	}
@@ -791,6 +796,11 @@ func auditLocalManagementEffects(config *sshclient.Config) (execution.Risk, exec
 
 func auditWouldMutateRemote(config *sshclient.Config) bool {
 	switch config.Mode {
+	case "ros":
+		if p := preparedFrom(config); p != nil {
+			return p.meta.Effects.RemoteWrite
+		}
+		return true
 	case "ssh":
 		return config.Command != ""
 	case "sftp":
@@ -814,10 +824,15 @@ func auditWouldMutateRemote(config *sshclient.Config) bool {
 	}
 }
 
+var auditContinuationRE = regexp.MustCompile(`\\\r?\n[ \t]*`)
+var auditAuthorizationRE = regexp.MustCompile(`(?i)(\bauthorization[=:][ \t]*)(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:bearer|basic)[ \t]+[^\s'";]+|[^\s'";]+)`)
+
 func redactSensitiveText(value string) string {
 	if value == "" {
 		return ""
 	}
+	value = auditContinuationRE.ReplaceAllString(value, "")
+	value = auditAuthorizationRE.ReplaceAllString(value, "$1<redacted>")
 	value = sensitiveQuotedAssignmentRE.ReplaceAllString(value, "$1=<redacted>")
 	value = sensitiveQuotedFlagRE.ReplaceAllString(value, "$1<redacted>")
 	value = sensitiveAssignmentRE.ReplaceAllString(value, "$1=<redacted>")

@@ -8,10 +8,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestPrivilegedLoginCommandUsesStdinSudo(t *testing.T) {
+func TestPrivilegedLoginUsesHumanAuthentication(t *testing.T) {
 	cmd := PrivilegedLoginCommand
-	if !strings.HasPrefix(cmd, "sudo -S -p ''") {
-		t.Fatalf("privileged login must use sudo -S stdin injection, got %q", cmd)
+	if cmd != "sudo -i" {
+		t.Fatalf("privileged login must leave authentication to the TTY, got %q", cmd)
 	}
 	if strings.Contains(cmd, "SudoPassword") || strings.Contains(cmd, "${") {
 		t.Fatal("privileged login command must not interpolate secrets")

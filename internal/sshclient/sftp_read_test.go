@@ -177,8 +177,8 @@ func (r *eofWithDataReader) Read(p []byte) (int, error) {
 // the fix: the options that keep pkg/sftp overlapping reads must stay wired.
 func TestSFTPClientOptionsEnablePipelining(t *testing.T) {
 	opts := sftpClientOptions()
-	if len(opts) != 2 {
-		t.Fatalf("sftpClientOptions returned %d options, want 2 (UseConcurrentReads + MaxConcurrentRequestsPerFile)", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("sftpClientOptions returned %d options, want 3 (concurrent reads/writes + bounded window)", len(opts))
 	}
 	if sftpMaxConcurrentRequests <= 1 {
 		t.Fatalf("sftpMaxConcurrentRequests = %d, want a pipelining window", sftpMaxConcurrentRequests)

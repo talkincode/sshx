@@ -186,10 +186,23 @@ func renderSFTPOutcome(w io.Writer, out *SFTPOutcome) error {
 }
 
 // ExecuteSftpResult returns evidence without writing human output.
-func (c *SSHClient) ExecuteSftpResult() (out *SFTPOutcome, err error) {
-	out = &SFTPOutcome{Action: c.config.SftpAction, SourcePath: c.config.LocalPath, DestinationPath: c.config.RemotePath, Phase: "connect"}
+func (c *SSHClient) ExecuteSftpResult() (*SFTPOutcome, error) {
+	return c.executeSftpResult(c.config)
+}
+
+// CopyFile reuses the same publication and recovery contract for domain adapters.
+// It never mutates the connection's Config or creates a second transport.
+func (c *SSHClient) CopyFile(action, localPath, remotePath string) (*SFTPOutcome, error) {
+	config := *c.config
+	config.SftpAction, config.LocalPath, config.RemotePath = action, localPath, remotePath
+	config.PreparedPayload = nil
+	return c.executeSftpResult(&config)
+}
+
+func (c *SSHClient) executeSftpResult(config *Config) (out *SFTPOutcome, err error) {
+	out = &SFTPOutcome{Action: config.SftpAction, SourcePath: config.LocalPath, DestinationPath: config.RemotePath, Phase: "connect"}
 	if out.Action == "download" {
-		out.SourcePath, out.DestinationPath = c.config.RemotePath, c.config.LocalPath
+		out.SourcePath, out.DestinationPath = config.RemotePath, config.LocalPath
 	}
 	defer func() {
 		if err != nil {
@@ -210,16 +223,16 @@ func (c *SSHClient) ExecuteSftpResult() (out *SFTPOutcome, err error) {
 	defer closeSFTP(client, &err)
 	ctx := c.transportContext()
 	out.Phase = "execute"
-	switch c.config.SftpAction {
+	switch config.SftpAction {
 	case "upload":
-		entry := FileOutcome{SourcePath: c.config.LocalPath, Path: c.config.RemotePath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
+		entry := FileOutcome{SourcePath: config.LocalPath, Path: config.RemotePath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
 		defer func() { out.Entries = append(out.Entries, entry) }()
 		var source io.Reader
-		size := int64(len(c.config.PreparedPayload))
-		if c.config.PreparedPayload != nil {
-			source = bytes.NewReader(bytes.Clone(c.config.PreparedPayload))
+		size := int64(len(config.PreparedPayload))
+		if config.PreparedPayload != nil {
+			source = bytes.NewReader(bytes.Clone(config.PreparedPayload))
 		} else {
-			file, openErr := os.Open(c.config.LocalPath) // #nosec G304 -- explicit local source
+			file, openErr := os.Open(config.LocalPath) // #nosec G304 -- explicit local source
 			if openErr != nil {
 				return out, boundaryError("local_io", "open source", openErr)
 			}
@@ -235,11 +248,11 @@ func (c *SSHClient) ExecuteSftpResult() (out *SFTPOutcome, err error) {
 		}
 		err = publishRemoteFile(ctx, client, source, "local_io", size, nil, &entry)
 	case "download":
-		entry := FileOutcome{SourcePath: c.config.RemotePath, Path: c.config.LocalPath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
+		entry := FileOutcome{SourcePath: config.RemotePath, Path: config.LocalPath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
 		defer func() { out.Entries = append(out.Entries, entry) }()
 		err = downloadStaged(ctx, client, &entry)
 	case "list", "ls":
-		remotePath := c.config.RemotePath
+		remotePath := config.RemotePath
 		if remotePath == "" {
 			remotePath = "."
 		}
@@ -253,11 +266,11 @@ func (c *SSHClient) ExecuteSftpResult() (out *SFTPOutcome, err error) {
 			return out, listErr
 		}
 	case "mkdir":
-		entry := FileOutcome{Path: c.config.RemotePath, Type: "directory", ChangeState: "unchanged", Verification: "not_performed"}
+		entry := FileOutcome{Path: config.RemotePath, Type: "directory", ChangeState: "unchanged", Verification: "not_performed"}
 		defer func() { out.Entries = append(out.Entries, entry) }()
 		err = ensureRemoteDirectory(ctx, client, &entry)
 	case "remove", "rm":
-		err = removeRemoteTree(ctx, client, c.config.RemotePath, out)
+		err = removeRemoteTree(ctx, client, config.RemotePath, out)
 	}
 	out.operationComplete = err == nil
 	return out, err
@@ -705,7 +718,7 @@ func (w boundaryWriter) Write(p []byte) (int, error) {
 	return n, boundaryError(w.kind, "write copy destination", err)
 }
 func copyBoundary(ctx context.Context, dst io.Writer, src io.Reader, sourceKind, destinationKind string) (int64, error) {
-	return io.Copy(boundaryWriter{ctx, dst, destinationKind}, boundaryReader{ctx, src, sourceKind})
+	return io.CopyBuffer(boundaryWriter{ctx, dst, destinationKind}, boundaryReader{ctx, src, sourceKind}, make([]byte, sftpReadApertureBytes))
 }
 
 func remotePathJoin(elem ...string) string { return path.Join(elem...) }

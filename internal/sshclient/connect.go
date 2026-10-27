@@ -158,6 +158,7 @@ func (c *SSHClient) connectThrough(parent *ssh.Client) (err error) {
 		localAddr = resolved
 	}
 	addr := net.JoinHostPort(c.config.Host, c.config.Port)
+	algorithms := preferredHostKeyAlgorithms(&trustConfig, addr)
 	callback := func(host string, remote net.Addr, key ssh.PublicKey) error {
 		// SSH also invokes this callback during rekey, after the dial budget
 		// has been released. Only the transport lifetime applies then.
@@ -212,7 +213,7 @@ func (c *SSHClient) connectThrough(parent *ssh.Client) (err error) {
 			close(stopped)
 		})
 		sshConn, chans, reqs, handshakeErr := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
-			User: c.config.User, Auth: []ssh.AuthMethod{method}, HostKeyCallback: callback,
+			User: c.config.User, Auth: []ssh.AuthMethod{method}, HostKeyCallback: callback, HostKeyAlgorithms: algorithms,
 		})
 		if !stop() {
 			<-stopped

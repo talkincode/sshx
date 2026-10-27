@@ -1113,6 +1113,8 @@ func parseApplyArgs(config *sshclient.Config, args []string) {
 			config.ApplyExpectSHA256 = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "--backup-dir="):
 			config.ApplyBackupDir = strings.SplitN(arg, "=", 2)[1]
+		case strings.HasPrefix(arg, "--stage-dir="):
+			config.ApplyStageDir = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--no-backup":
 			config.ApplyNoBackup = true
 		case arg == "--sudo":
@@ -1480,6 +1482,7 @@ func parseROSArgs(config *sshclient.Config, args []string) {
 			config.ROSAllowWrite = true
 		case arg == "--force", arg == "-f":
 			config.Force = true
+		case applyViaFlag(config, arg):
 		case arg == "--raw":
 			config.ROSRaw = true
 		case strings.HasPrefix(arg, "--routeros-version="), strings.HasPrefix(arg, "--ros-version="): //nolint:misspell // domain name for MikroTik RouterOS

@@ -45,6 +45,7 @@ type ApplyRequest struct {
 	ExpectSHA256   string
 	Backup         bool
 	BackupDir      string
+	StageDir       string
 	Force          bool
 	UseSudo        bool
 	SudoConfigured bool
@@ -670,6 +671,12 @@ func (c *SSHClient) applyWithSudo(req ApplyRequest) (outcome *ApplyOutcome, err 
 		return outcome, err
 	}
 	stagingDir := path.Join(home, applyStagingDir)
+	if req.StageDir != "" {
+		if stageErr := ValidateApplyPath(req.StageDir + "/.keep"); stageErr != nil {
+			return outcome, fmt.Errorf("invalid stage directory: %w", stageErr)
+		}
+		stagingDir = path.Clean(req.StageDir)
+	}
 	client, clientErr := c.newSFTPClient()
 	if clientErr != nil {
 		return outcome, clientErr

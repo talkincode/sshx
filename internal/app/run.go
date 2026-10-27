@@ -262,6 +262,9 @@ func reportRunRequestFailure(config *sshclient.Config, audit *auditRecorder, err
 		Error:         execution.BuildError(err, kind, execution.IntentUnknown, execution.CompletionNotStarted),
 		ErrorKind:     kind,
 	}
+	if res.Error != nil {
+		res.Error.Message = redactAuditText(config, res.Error.Message)
+	}
 	if config.JSONOutput || config.JSONLOutput {
 		if encErr := emitLifecycleJSON(config, res); encErr != nil {
 			return encErr

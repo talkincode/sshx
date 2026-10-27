@@ -12,6 +12,7 @@
   - [Audit Query and Export](audit.md)
   - [Contract Freeze Policy](contract.md)
   - [Plans, Outcomes, and Safe Retries](execution-contract.md)
+  - [Execution Safety Upgrade](execution-safety.md)
   - [Usage Scenarios](usage-scenarios.md)
   - [Security Guidelines](security-guidelines.md)
   - [Troubleshooting](troubleshooting.md)

@@ -86,8 +86,9 @@ interpret `partial` or permission errors as application absence.
 ## Do not use `sshx login` from an agent
 
 `sshx login` attaches a human TTY to a remote shell (optional `--sudo` privileged
-login). It has no Agent JSON contract, is rejected without a TTY, and is not an
-MCP tool. For programmatic work keep using `sshx run` / `sshx inspect` /
+login). Sudo authentication is handled by that human TTY; no sudo keyring secret
+is read or prefilled. It has no Agent JSON contract, is rejected without a TTY,
+and is not an MCP tool. For programmatic work keep using `sshx run` / `sshx inspect` /
 `sshx apply` / `sshx sql` / `sshx text` with `--json`.
 
 ## Dissect logs before downloading them
@@ -101,6 +102,23 @@ sshx text -h=prod-web --journal=nginx.service --since='1h' --preset=error --json
 
 Do not invent `grep`/`awk`/`journalctl` pipelines under `sshx run` for triage.
 There is no `--command` on `sshx text`. Download whole files only for archives.
+
+## Sudo input safety (v0.20+)
+
+Noninteractive auto-fill and privileged run/apply/inspect/sql/text use a
+nonce-bound prompt/readiness handshake. No prompt means no credential is sent;
+application input is withheld until the child is ready. Do not prepend a sudo
+password to a script or database input stream. Ambiguous sudo `-s`/`-i` options
+and multiline passwords are rejected; use the human-only login for a login shell.
+The readiness wrapper needs sudo permission for a shell. Do not bypass a
+command-only sudoers restriction or redirect away the control stderr.
+Re-preview any saved plan after upgrade (execution semantics v2).
+
+`sshx ros raw` now preserves the supplied text, including quoting and option
+order; add `without-paging` explicitly when needed. Device diagnostic failures
+are surfaced even with an SSH exit status of zero. ROS remains unbindable with
+`--expect-plan`; it is not a sandbox. Credential-shaped audit redaction remains
+best-effort, not a guarantee that arbitrary output is safe to publish.
 
 ## Golden rule for agents: prefer `sshx run` + `--json`/`--jsonl`
 
@@ -510,6 +528,9 @@ sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
 - `--expect-sha256` is an optional hash precondition, not arbitrary-writer CAS.
   A pre-commit mismatch is `error_kind: "precondition"` with no target write.
 - Backups default to `~/.sshx/file-backups/`. `--no-backup` requires `--force`.
+- `--sudo --stage-dir=/absolute/private/path` selects a separate SFTP staging
+  filesystem when the remote home disk is full. It is included in the plan hash;
+  it does not change backup placement or final same-filesystem atomic publication.
 - `--sudo` stages the payload over SFTP, then installs with a privileged
   stdin script. Use it when the SSH user cannot write the target.
 - `/etc/passwd`, `/etc/shadow`, and `/etc/sudoers` require

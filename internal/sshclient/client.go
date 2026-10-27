@@ -244,6 +244,7 @@ type Config struct {
 	// Guarded file apply fields (Mode == "apply").
 	ApplyExpectSHA256 string
 	ApplyNoBackup     bool
+	ApplyStageDir     string
 	ApplyBackupDir    string
 	ApplyUseSudo      bool
 
@@ -285,6 +286,7 @@ type Config struct {
 	LoginLiteralHost bool
 
 	// RouterOS execution fields (Mode == "ros").
+	ROSAction          string
 	ROSTokens          []string
 	ROSAllowWrite      bool
 	ROSRouterOSVersion string

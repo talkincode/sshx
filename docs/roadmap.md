@@ -91,7 +91,7 @@ Agent / 自动化 / 人类运维者
 
 - **人类交互登录**
 
-  `sshx login <name> [--sudo]` 把本地 TTY 接到已解析主机上的交互会话；`--sudo` 经 stdin 注入 keyring sudo 秘密后进入特权 login shell。`--json` 仅配合 `--dry-run`。不进入 MCP，不支持多主机。POSIX only。证据：`internal/app/login.go`、`internal/sshclient/login.go`。
+  `sshx login <name> [--sudo]` 把本地 TTY 接到已解析主机上的交互会话；`--sudo` 启动 `sudo -i`，由人类 TTY 完成认证，不预填 sudo 凭据。`--json` 仅配合 `--dry-run`。不进入 MCP，不支持多主机。POSIX only。证据：`internal/app/login.go`、`internal/sshclient/login.go`。
 
 - **单次远程命令执行**
 
@@ -271,6 +271,18 @@ issue #71 的新增边界、验证状态及外部前提单列在后面的证据�
 
 不能据此声称完整平台/引擎验收已通过。任何一级能力不得只以参数解析或组件测试
 作为完成依据；必须补充相应外部边界 E2E，并如实记录不可用环境与未证明的保证。
+
+### v0.20 边界回归证据
+
+| 能力 | 验收边界 | 证据 |
+| --- | --- | --- |
+| sudo 输入隔离 | 编译 CLI + 实际 shell 的消费/不消费认证分支；Linux CI 原生 PASSWORD/NOPASSWD/cache/root/错误密码 | `tests/e2e/sudo_boundary_e2e_test.go`、`sudo_native_e2e_test.go`；控制标记分包/取消回归在 `internal/sshclient/sudo_test.go` |
+| ROS 契约与文件安全 | raw 字节、exit 0 设备错误、JSON/审计一致、symlink 下载保留原文件；已有 SSH/SFTP 成功/权限用例继续适用 | `tests/e2e/ros_boundary_e2e_test.go`、`ros_e2e_test.go` |
+| 主机信任与期限 | 单算法 pin + 多算法服务器；host-test 全链路超时；准入拒绝也不泄露 token | `tests/e2e/audit_boundaries_e2e_test.go` |
+| SFTP / apply stage | 协议级有界并发与完整字节；显式 stage 计划变化、发布、清理 | `internal/sshclient/sftp_pipeline_test.go`、`tests/e2e/apply_stage_e2e_test.go` |
+
+这些 fixture 不代表所有 RouterOS 版本、所有 PAM/sudo 策略已经原生验收。
+兼容边界见 [执行安全说明](execution-safety.md)。
 
 ## Issue 71 execution hardening evidence
 
