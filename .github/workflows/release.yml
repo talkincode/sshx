@@ -78,6 +78,18 @@ jobs:
               -o "$output" \
               ./cmd/sshx
 
+            # Earlier artifacts must not make later builds appear modified.
+            # Reject missing or dirty VCS evidence before signing/publishing.
+            go version -m "$output" > /tmp/sshx-build-metadata.txt
+            if ! grep -Fq 'vcs.modified=false' /tmp/sshx-build-metadata.txt; then
+              echo "Release binary lacks clean VCS provenance: $output" >&2
+              exit 1
+            fi
+            if ! grep -Fq "vcs.revision=$(git rev-parse HEAD)" /tmp/sshx-build-metadata.txt; then
+              echo "Release binary VCS revision differs from the release commit" >&2
+              exit 1
+            fi
+
             cp skills/sshx/SKILL.md dist/SKILL.md
 
             # 压缩二进制文件

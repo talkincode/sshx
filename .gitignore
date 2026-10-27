@@ -8,5 +8,6 @@ coverage.out
 __debug_bin*
 coverage.*
 bin/*
+/dist/
 /sshx
 /book
