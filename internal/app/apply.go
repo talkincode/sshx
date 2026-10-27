@@ -142,6 +142,7 @@ func HandleApply(config *sshclient.Config, audit *auditRecorder) (err error) {
 		ExpectSHA256:   config.ApplyExpectSHA256,
 		Backup:         !config.ApplyNoBackup,
 		BackupDir:      config.ApplyBackupDir,
+		StageDir:       config.ApplyStageDir,
 		Force:          config.Force,
 		UseSudo:        config.ApplyUseSudo,
 		SudoConfigured: config.SudoKeyConfigured,
@@ -176,6 +177,16 @@ func validateApplyConfig(config *sshclient.Config) error {
 			return fmt.Errorf("invalid --backup-dir: %w", err)
 		}
 		config.ApplyBackupDir = dir
+	}
+	if config.ApplyStageDir != "" {
+		if !config.ApplyUseSudo {
+			return fmt.Errorf("--stage-dir requires --sudo")
+		}
+		dir := path.Clean(config.ApplyStageDir)
+		if err := sshclient.ValidateApplyPath(dir + "/.keep"); err != nil {
+			return fmt.Errorf("invalid --stage-dir: %w", err)
+		}
+		config.ApplyStageDir = dir
 	}
 	normalized, err := sshclient.NormalizeApplySHA256(config.ApplyExpectSHA256)
 	if err != nil {

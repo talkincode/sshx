@@ -133,6 +133,7 @@ type applyDryRunPlan struct {
 	ExpectSHA256  string `json:"expect_sha256,omitempty"`
 	Backup        string `json:"backup"`
 	BackupDir     string `json:"backup_dir,omitempty"`
+	StageDir      string `json:"stage_dir,omitempty"`
 	UseSudo       bool   `json:"use_sudo"`
 	Force         bool   `json:"force,omitempty"`
 }
@@ -709,7 +710,7 @@ func fillDryRunLogin(config *sshclient.Config, plan *dryRunPlan) {
 		"login has no command timeout",
 	)
 	if config.LoginUseSudo {
-		plan.Notes = append(plan.Notes, "would start a privileged login shell after sudo -S; the password is never placed in argv")
+		plan.Notes = append(plan.Notes, "would start sudo -i; authentication is handled by the human TTY, without sudo secret lookup or prefill")
 	}
 	if !sshclient.InteractiveLoginSupported() {
 		plan.Notes = append(plan.Notes, "interactive login session is not supported on this platform; dry-run still previews the local plan")
@@ -773,7 +774,7 @@ func fillDryRunEffects(config *sshclient.Config, plan *dryRunPlan) {
 	case "login":
 		plan.WouldConnect = canProceed
 		plan.WouldExecute = canProceed
-		plan.WouldReadSecret = canProceed && ((config.LoginUseSudo && config.SudoKey != "") || config.SSHPasswordKey != "")
+		plan.WouldReadSecret = canProceed && config.SSHPasswordKey != ""
 		plan.WouldMutateRemote = canProceed
 	case "text":
 		plan.WouldConnect = canProceed
@@ -937,6 +938,7 @@ func fillDryRunApply(config *sshclient.Config, plan *dryRunPlan) {
 		ExpectSHA256: config.ApplyExpectSHA256,
 		Backup:       "file",
 		BackupDir:    config.ApplyBackupDir,
+		StageDir:     config.ApplyStageDir,
 		UseSudo:      config.ApplyUseSudo,
 		Force:        config.Force,
 	}

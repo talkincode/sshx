@@ -28,7 +28,7 @@ func (c *SSHClient) loginSession() error {
 
 	fd := int(os.Stdin.Fd())
 	width, height := terminalSize(fd)
-	if ptyErr := session.RequestPty(loginTermName(), height, width, loginPtyModes(c.config.LoginUseSudo)); ptyErr != nil {
+	if ptyErr := session.RequestPty(loginTermName(), height, width, loginPtyModes(false)); ptyErr != nil {
 		return fmt.Errorf("failed to request login PTY: %w", ptyErr)
 	}
 	forwardLoginEnv(session)
@@ -47,14 +47,8 @@ func (c *SSHClient) loginSession() error {
 	defer func() { _ = term.Restore(fd, state) }() //nolint:errcheck // always try to restore the TTY
 
 	if c.config.LoginUseSudo {
-		if c.config.SudoPassword == "" {
-			return fmt.Errorf("login --sudo requires a resolved sudo password")
-		}
 		if startErr := session.Start(PrivilegedLoginCommand); startErr != nil {
 			return fmt.Errorf("failed to start privileged login shell: %w", startErr)
-		}
-		if _, writeErr := io.WriteString(stdin, c.config.SudoPassword+"\n"); writeErr != nil {
-			return fmt.Errorf("failed to deliver sudo password: %w", writeErr)
 		}
 	} else if startErr := session.Shell(); startErr != nil {
 		return fmt.Errorf("failed to start login shell: %w", startErr)

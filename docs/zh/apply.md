@@ -7,6 +7,13 @@ sshx apply -h=prod-web --path=/etc/nginx/nginx.conf --from=./nginx.conf \
     --expect-sha256=<current> --sudo --json
 ```
 
+## 独立私有暂存目录
+
+`--sudo --stage-dir=/绝对/私有/目录` 可把 SFTP 暂存放到 home 以外的文件系统，
+解决根盘满而目标数据盘仍有空间的场景。该路径纳入 plan hash，并保持私有权限和
+符号链接检查；它不改变 `--backup-dir`，最终发布仍使用目标文件系统内的原子操作。
+MCP 对应 `stage_dir`，同样要求 sudo。参见 [执行安全说明](../execution-safety.md)。
+
 ## Apply 做什么
 
 1. 拒绝非干净绝对路径、目录、符号链接和设备节点。

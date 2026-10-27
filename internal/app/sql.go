@@ -336,9 +336,8 @@ func validateSQLiteConfig(config *sshclient.Config) error {
 }
 
 // runRemote executes one assembled remote command, prepending the database
-// password line to stdin when password delivery is enabled. --sudo wraps the
-// whole command in sudo -S and prepends the sudo password so it never enters
-// argv; sudo consumes the first line and the client sees the rest.
+// password line to stdin when password delivery is enabled. Sudo authentication
+// is a separate handshake; the database input is withheld until child readiness.
 func (r *sqlRun) runRemote(rc sqlsafe.RemoteCommand) (sshclient.ExecResult, error) {
 	command := rc.Command
 	stdin := rc.Stdin
@@ -350,7 +349,7 @@ func (r *sqlRun) runRemote(rc sqlsafe.RemoteCommand) (sshclient.ExecResult, erro
 			return sshclient.ExecResult{ExitCode: -1}, fmt.Errorf("sql --sudo requires a resolved sudo password")
 		}
 		command = sqlsafe.WrapSudoStdin(command)
-		stdin = r.config.SudoPassword + "\n" + stdin
+		return r.client.RunSudoCommandWithInput(command, []byte(stdin))
 	}
 	return r.client.RunCommandWithInput(command, []byte(stdin))
 }

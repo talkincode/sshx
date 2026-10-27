@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,30 +18,43 @@ import (
 
 // rosJSONResult is the machine-readable result emitted in --json mode for RouterOS commands.
 type rosJSONResult struct {
-	SchemaVersion string `json:"schema_version,omitempty"`
-	Status        string `json:"status"` // "ok" or "error"
-	Host          string `json:"host,omitempty"`
-	Port          string `json:"port,omitempty"`
-	User          string `json:"user,omitempty"`
-	Command       string `json:"command"`
-	Action        string `json:"action,omitempty"`
-	RouterOSPath  string `json:"routeros_path,omitempty"` //nolint:misspell // RouterOS domain term
-	Stdout        string `json:"stdout,omitempty"`
-	Stderr        string `json:"stderr,omitempty"`
-	Data          any    `json:"data,omitempty"`
-	ExitCode      int    `json:"exit_code"`
-	Success       bool   `json:"success"`
-	DurationMs    int64  `json:"duration_ms"`
-	AuthMethod    string `json:"auth_method,omitempty"`
-	ErrorKind     string `json:"error_kind,omitempty"`
-	Error         string `json:"error,omitempty"`
-	Phase         string `json:"phase"`
-	Completion    string `json:"completion"`
+	SchemaVersion  string `json:"schema_version,omitempty"`
+	Status         string `json:"status"` // "ok" or "error"
+	Host           string `json:"host,omitempty"`
+	Port           string `json:"port,omitempty"`
+	User           string `json:"user,omitempty"`
+	Command        string `json:"command"`
+	Action         string `json:"action,omitempty"`
+	RouterOSPath   string `json:"routeros_path,omitempty"` //nolint:misspell // RouterOS domain term
+	Stdout         string `json:"stdout,omitempty"`
+	Stderr         string `json:"stderr,omitempty"`
+	Data           any    `json:"data,omitempty"`
+	ExitCode       int    `json:"exit_code"`
+	Success        bool   `json:"success"`
+	DurationMs     int64  `json:"duration_ms"`
+	AuthMethod     string `json:"auth_method,omitempty"`
+	ErrorKind      string `json:"error_kind,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Phase          string `json:"phase"`
+	Completion     string `json:"completion"`
+	Executed       *bool  `json:"executed,omitempty"`
+	ChangeState    string `json:"change_state,omitempty"`
+	RemoteExitCode *int   `json:"remote_exit_code,omitempty"`
 }
 
 // HandleROS manages RouterOS command execution and workflows strictly over SSH.
 func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 	start := time.Now()
+	if config.Context == nil {
+		config.Context = context.Background()
+	}
+	attachPrepared(config, &preparedOperation{meta: execution.NewMetadata(nil, config.ExecutionID), audit: audit})
+	setROSOperation(config, "introspect", strings.Join(config.ROSTokens, " "), false, false, false)
+	if config.HostTimeout > 0 {
+		ctx, cancel := execution.WithScopedTimeout(config.Context, config.HostTimeout, "host")
+		defer cancel()
+		config.Context = ctx
+	}
 
 	if config.ArgumentError != "" {
 		return reportROSFailure(config, audit, "config", fmt.Errorf("%s", config.ArgumentError), start)
@@ -104,6 +118,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 
 	// 2. File and script workflows
 	if wfSpec, isWf := ros.ParseWorkflowCommand(tokens, config.ROSSource); isWf {
+		rosWorkflowIntent(config, wfSpec)
 		if config.DryRun {
 			planJSON, pErr := ros.RenderWorkflowPlanJSON(wfSpec)
 			if pErr != nil {
@@ -121,6 +136,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		return reportROSFailure(config, audit, "usage", parseErr, start)
 	}
 
+	setROSOperation(config, strings.Join(req.Path, "/")+"/"+req.Action, ros.BuildRouterOSCommand(req), !ros.ReadOnly(req), false, !ros.ReadOnly(req))
 	// Check dry-run
 	if config.DryRun {
 		plan := &ros.ROSPlan{
@@ -134,7 +150,12 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 			SideEffects:        req.Mapping.SideEffects,
 			Idempotency:        req.Mapping.Idempotency,
 			WillConnect:        false,
-			WillModifyRouterOS: req.Mapping.ActionKind != ros.ActionPrint,
+			WillModifyRouterOS: !ros.ReadOnly(req),
+		}
+		if req.Mapping.IsRaw() {
+			plan.RawCommand = req.RawCommand
+			plan.ResolvedArgs = map[string]string{}
+			plan.Flags = []string{}
 		}
 		b, mErr := json.MarshalIndent(plan, "", "  ")
 		if mErr != nil {
@@ -161,13 +182,13 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		}
 	}
 
-	client, cliErr := sshclient.NewSSHClient(config)
+	client, cliErr := newROSClient(config)
 	if cliErr != nil {
 		return reportROSFailure(config, audit, "config", fmt.Errorf("failed to create SSH client: %w", cliErr), start)
 	}
 	defer errutil.HandleCloseError(&err, client)
 
-	if connErr := client.ConnectDirect(); connErr != nil {
+	if connErr := client.Connect(); connErr != nil {
 		audit.recordPeer(client)
 		return reportROSFailure(config, audit, classifyError(connErr), fmt.Errorf("failed to connect over SSH: %w", connErr), start)
 	}
@@ -177,9 +198,9 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 	rosCmd := ros.BuildRouterOSCommand(req)
 	logger.GetLogger().Debug("executing RouterOS command over SSH: %s", rosCmd)
 
-	res, execErr := client.RunCommandWithInput(rosCmd, nil)
+	res, execErr := runROSCommand(client, rosCmd)
 	if execErr != nil {
-		return reportROSFailure(config, audit, classifyError(execErr), execErr, start)
+		return reportROSFailureWithExit(config, audit, classifyError(execErr), res, execErr, start)
 	}
 
 	if res.ExitCode != 0 {
@@ -205,7 +226,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		Host:          config.Host,
 		Port:          config.Port,
 		User:          config.User,
-		Command:       strings.Join(tokens, " "),
+		Command:       redactSensitiveText(config.Command),
 		Action:        req.Action,
 		RouterOSPath:  req.Mapping.RouterOSPath,
 		Stdout:        res.Stdout,
@@ -223,6 +244,9 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		return emitROSJSON(config, result)
 	}
 
+	if _, finalizeErr := finalizeLifecycle(config, result); finalizeErr != nil {
+		return finalizeErr
+	}
 	// Human output: print stdout cleanly
 	if strings.TrimSpace(res.Stdout) != "" {
 		fmt.Print(res.Stdout)
@@ -243,13 +267,13 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 		_ = resolveHostFromSettings(config) //nolint:errcheck // best-effort settings lookup
 	}
 
-	client, cliErr := sshclient.NewSSHClient(config)
+	client, cliErr := newROSClient(config)
 	if cliErr != nil {
 		return reportROSFailure(config, audit, "config", fmt.Errorf("failed to create SSH client: %w", cliErr), start)
 	}
 	defer errutil.HandleCloseError(&err, client)
 
-	if connErr := client.ConnectDirect(); connErr != nil {
+	if connErr := client.Connect(); connErr != nil {
 		audit.recordPeer(client)
 		return reportROSFailure(config, audit, classifyError(connErr), connErr, start)
 	}
@@ -267,20 +291,10 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 
 	switch spec.Type {
 	case ros.WorkflowFileUpload:
-		bytesCopied, uploadErr := ros.ExecuteSFTPUpload(sftpClient, spec.LocalPath, spec.RemotePath)
-		if uploadErr != nil {
-			return reportROSFailure(config, audit, "file_transfer_failed", uploadErr, start)
-		}
-		outputMsg = fmt.Sprintf("Uploaded %s to %s (%d bytes)", spec.LocalPath, spec.RemotePath, bytesCopied)
-		resultData = map[string]any{"bytes": bytesCopied, "local": spec.LocalPath, "remote": spec.RemotePath}
+		return finishROSFile(config, audit, client, "upload", spec.LocalPath, spec.RemotePath, start)
 
 	case ros.WorkflowFileDownload:
-		bytesCopied, downloadErr := ros.ExecuteSFTPDownload(sftpClient, spec.RemotePath, spec.LocalPath)
-		if downloadErr != nil {
-			return reportROSFailure(config, audit, "file_transfer_failed", downloadErr, start)
-		}
-		outputMsg = fmt.Sprintf("Downloaded %s to %s (%d bytes)", spec.RemotePath, spec.LocalPath, bytesCopied)
-		resultData = map[string]any{"bytes": bytesCopied, "remote": spec.RemotePath, "local": spec.LocalPath}
+		return finishROSFile(config, audit, client, "download", spec.LocalPath, spec.RemotePath, start)
 
 	case ros.WorkflowFileList:
 		entries, listErr := sftpClient.ReadDir(spec.RemotePath)
@@ -307,14 +321,18 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 		if valErr := ros.ValidateScriptSource(content, spec.LocalPath); valErr != nil {
 			return reportROSFailure(config, audit, "usage", valErr, start)
 		}
-		// Escape script source for RouterOS CLI
-		escapedSource := strings.ReplaceAll(string(content), `"`, `\"`)
-		cmd := fmt.Sprintf(`/system script add name=%q source="%s"`, spec.ScriptName, escapedSource)
-		res, execErr := client.RunCommandWithInput(cmd, nil)
+		escapedSource := ros.QuoteValue(string(content))
+		cmd := fmt.Sprintf(`/system script add name=%s source=%s`, ros.QuoteValue(spec.ScriptName), escapedSource)
+		res, execErr := runROSCommand(client, cmd)
 		if execErr != nil || res.ExitCode != 0 {
-			// If already exists, try set
-			cmdSet := fmt.Sprintf(`/system script set [find name=%q] source="%s"`, spec.ScriptName, escapedSource)
-			resSet, execSetErr := client.RunCommandWithInput(cmdSet, nil)
+			// Only a positively observed duplicate-name diagnostic authorizes set;
+			// an unknown outcome must not silently trigger a second mutation.
+			message := strings.ToLower(res.Stdout + res.Stderr)
+			if !res.ExitObserved || (!strings.Contains(message, "already have such name") && !strings.Contains(message, "already exists")) {
+				return reportROSFailureWithExit(config, audit, "ros_exec_error", res, fmt.Errorf("failed to add script: %s", redactSensitiveText(message)), start)
+			}
+			cmdSet := fmt.Sprintf(`/system script set [find name=%s] source=%s`, ros.QuoteValue(spec.ScriptName), escapedSource)
+			resSet, execSetErr := runROSCommand(client, cmdSet)
 			if execSetErr != nil || resSet.ExitCode != 0 {
 				return reportROSFailure(config, audit, "ros_exec_error", fmt.Errorf("failed to put script: %s", firstNonEmpty(res.Stderr, resSet.Stderr)), start)
 			}
@@ -324,13 +342,13 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 
 	case ros.WorkflowImport:
 		// 1. Upload script
-		_, uploadErr := ros.ExecuteSFTPUpload(sftpClient, spec.LocalPath, spec.RemotePath)
+		_, uploadErr := copyROSFile(client, config, "upload", spec.LocalPath, spec.RemotePath)
 		if uploadErr != nil {
 			return reportROSFailure(config, audit, "file_transfer_failed", uploadErr, start)
 		}
 		// 2. Run /import
-		importCmd := fmt.Sprintf("/import file-name=%q", spec.RemotePath)
-		res, execErr := client.RunCommandWithInput(importCmd, nil)
+		importCmd := "/import file-name=" + ros.QuoteValue(spec.RemotePath)
+		res, execErr := runROSCommand(client, importCmd)
 		// 3. Cleanup if requested
 		if config.ROSCleanup {
 			_ = sftpClient.Remove(spec.RemotePath) //nolint:errcheck // best-effort remote file cleanup
@@ -342,13 +360,13 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 		resultData = map[string]any{"imported": spec.LocalPath, "output": res.Stdout}
 
 	case ros.WorkflowExportDownload:
-		tempFile := "sshx_export_temp.rsc"
+		tempFile := "sshx_export_" + newAuditEventID() + ".rsc"
 		compactFlag := ""
 		if config.ROSCompact {
 			compactFlag = "compact"
 		}
 		exportCmd := fmt.Sprintf("/export %s file=%s", compactFlag, tempFile)
-		res, execErr := client.RunCommandWithInput(exportCmd, nil)
+		res, execErr := runROSCommand(client, exportCmd)
 		if execErr != nil || res.ExitCode != 0 {
 			return reportROSFailure(config, audit, "ros_exec_error", fmt.Errorf("export failed: %s", firstNonEmpty(res.Stderr, res.Stdout)), start)
 		}
@@ -357,7 +375,7 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 			return reportROSFailure(config, audit, "file_transfer_failed", waitErr, start)
 		}
 		// Download file
-		n, dlErr := ros.ExecuteSFTPDownload(sftpClient, tempFile, spec.LocalPath)
+		n, dlErr := copyROSFile(client, config, "download", spec.LocalPath, tempFile)
 		if config.ROSCleanup {
 			_ = sftpClient.Remove(tempFile) //nolint:errcheck // best-effort remote file cleanup
 		}
@@ -370,11 +388,11 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 	case ros.WorkflowBackupDownload:
 		backupName := config.ROSBackupName
 		if backupName == "" {
-			backupName = "sshx_backup_temp"
+			backupName = "sshx_backup_" + newAuditEventID()
 		}
 		backupFile := backupName + ".backup"
-		backupCmd := fmt.Sprintf("/system backup save name=%s", backupName)
-		res, execErr := client.RunCommandWithInput(backupCmd, nil)
+		backupCmd := "/system backup save name=" + ros.QuoteValue(backupName)
+		res, execErr := runROSCommand(client, backupCmd)
 		if execErr != nil || res.ExitCode != 0 {
 			return reportROSFailure(config, audit, "ros_exec_error", fmt.Errorf("backup failed: %s", firstNonEmpty(res.Stderr, res.Stdout)), start)
 		}
@@ -383,7 +401,7 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 			return reportROSFailure(config, audit, "file_transfer_failed", waitErr, start)
 		}
 		// Download file
-		n, dlErr := ros.ExecuteSFTPDownload(sftpClient, backupFile, spec.LocalPath)
+		n, dlErr := copyROSFile(client, config, "download", spec.LocalPath, backupFile)
 		if config.ROSCleanup {
 			_ = sftpClient.Remove(backupFile) //nolint:errcheck // best-effort remote file cleanup
 		}
@@ -419,6 +437,9 @@ func handleWorkflow(config *sshclient.Config, audit *auditRecorder, spec *ros.Wo
 		return emitROSJSON(config, result)
 	}
 
+	if _, finalizeErr := finalizeLifecycle(config, result); finalizeErr != nil {
+		return finalizeErr
+	}
 	logger.GetLogger().Success("%s", outputMsg)
 	return nil
 }
@@ -460,15 +481,15 @@ func handleDoctor(config *sshclient.Config, audit *auditRecorder, start time.Tim
 		SelectedProtocol: "ssh",
 	}
 
-	if config.ROSIncludeRemote && config.Host != "" {
+	if config.ROSIncludeRemote && config.Host != "" && !config.DryRun {
 		if !isIPAddress(config.Host) {
 			_ = resolveHostFromSettings(config) //nolint:errcheck // best-effort settings lookup
 		}
-		client, cliErr := sshclient.NewSSHClient(config)
+		client, cliErr := newROSClient(config)
 		if cliErr == nil {
 			defer func() { _ = client.Close() }() //nolint:errcheck // best-effort close
-			if connErr := client.ConnectDirect(); connErr == nil {
-				res, _ := client.RunCommandWithInput("/system resource print", nil) //nolint:errcheck // doctor probe ignores exec failure
+			if connErr := client.Connect(); connErr == nil {
+				res, _ := runROSCommand(client, "/system resource print") //nolint:errcheck // doctor probe ignores exec failure
 				remoteDoc := &ros.RemoteDoctor{
 					Status: "connected",
 				}
@@ -525,18 +546,38 @@ func reportROSFailureWithExit(config *sshclient.Config, audit *auditRecorder, ki
 		Host:       config.Host,
 		Port:       config.Port,
 		User:       config.User,
-		Command:    strings.Join(config.ROSTokens, " "),
+		Command:    redactSensitiveText(config.Command),
 		ExitCode:   res.ExitCode,
 		Success:    false,
 		DurationMs: time.Since(start).Milliseconds(),
 		ErrorKind:  kind,
 		Error:      redactError(err),
-		Phase:      "failed",
-		Completion: execution.CompletionUnknown,
+		Phase:      execution.PhaseExecute,
+		Completion: execution.CompletionForAttempt(execution.PhaseExecute, kind, res.StartAttempted, res.Started, res.ExitObserved),
 	}
-
+	if p := preparedFrom(config); p != nil {
+		result.Executed, result.ChangeState = p.meta.Executed, p.meta.ChangeState
+	}
+	if kind == "ros_command_error" && res.ExitObserved {
+		observed := res.ExitCode
+		result.RemoteExitCode = &observed
+		result.ExitCode = -1
+	}
+	if result.Executed != nil && *result.Executed && !res.StartAttempted {
+		result.Completion = execution.CompletionPartial
+	}
+	if res.Started || res.ExitObserved {
+		value := true
+		result.Executed = &value
+	} else if !res.StartAttempted && result.Executed == nil {
+		value := false
+		result.Executed = &value
+		result.Phase = execution.PhaseAdmission
+	}
 	if config.JSONOutput {
-		_ = emitROSJSON(config, result) //nolint:errcheck // best-effort error result JSON emission
+		if emitErr := emitROSJSON(config, result); emitErr != nil {
+			return emitErr
+		}
 		return ErrReported
 	}
 

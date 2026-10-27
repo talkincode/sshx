@@ -111,10 +111,8 @@ func TestROSE2E_DryRun(t *testing.T) {
 	var planRawWrite map[string]any
 	require.NoError(t, json.Unmarshal([]byte(resRawWrite.stdout), &planRawWrite))
 	assert.Equal(t, true, planRawWrite["will_modify_routeros"]) //nolint:misspell // RouterOS domain key
-	resolvedArgs, ok := planRawWrite["resolved_args"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "10.0.0.1/24", resolvedArgs["address"])
-	assert.Equal(t, "ether2", resolvedArgs["interface"])
+	assert.Empty(t, planRawWrite["resolved_args"])
+	assert.Equal(t, "/ip/address/add address=10.0.0.1/24 interface=ether2", planRawWrite["raw_command"])
 
 	// 4. Workflow dry-run
 	resWf := runSSHX(t, home, []string{
@@ -265,7 +263,7 @@ func TestROSE2E_LiveWorkflows(t *testing.T) {
 			case strings.Contains(cmd, "backup") && strings.Contains(cmd, "save"):
 				name := "test_backup"
 				if idx := strings.Index(cmd, "name="); idx != -1 {
-					name = strings.Fields(cmd[idx+5:])[0]
+					name = strings.Trim(strings.Fields(cmd[idx+5:])[0], `"`)
 				}
 				backupFile := filepath.Join(serverRoot, name+".backup")
 				_ = os.WriteFile(backupFile, []byte("ROUTEROS-BINARY-BACKUP-PAYLOAD"), 0o600)                                          //nolint:errcheck,misspell // fixture backup file

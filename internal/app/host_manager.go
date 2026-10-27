@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -889,6 +890,16 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 	}
 
 	sshConfig := buildHostTestConfig(hostConfig, settings, baseConfig)
+	if sshConfig.Context == nil {
+		sshConfig.Context = context.Background()
+	}
+	budget := sshConfig.HostTimeout
+	if budget <= 0 {
+		budget = sshConfig.Timeout
+	}
+	ctx, cancel := context.WithTimeout(sshConfig.Context, budget)
+	defer cancel()
+	sshConfig.Context = ctx
 	if hopErr := materializeJumpChain(sshConfig, settings); hopErr != nil {
 		result.ConnectionError = hopErr
 		return result
@@ -929,23 +940,17 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 }
 
 func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig *sshclient.Config) *sshclient.Config {
-	testConfig := &sshclient.Config{
-		Host:        hostConfig.Host,
-		Port:        hostConfig.Port,
-		User:        hostConfig.User,
-		UseKeyAuth:  true,
-		DialTimeout: hostTestDialTimeout,
-		HostAlias:   hostConfig.Name,
-		Via:         hostConfig.Via,
-	}
-
+	testConfig := &sshclient.Config{UseKeyAuth: true}
 	if baseConfig != nil {
-		testConfig.UseKeyAuth = baseConfig.UseKeyAuth
-		testConfig.KeyPath = baseConfig.KeyPath
-		testConfig.Password = baseConfig.Password
-		if baseConfig.DialTimeout > 0 {
-			testConfig.DialTimeout = baseConfig.DialTimeout
-		}
+		*testConfig = *baseConfig
+	}
+	testConfig.Host, testConfig.Port, testConfig.User = hostConfig.Host, hostConfig.Port, hostConfig.User
+	testConfig.HostAlias, testConfig.Via = hostConfig.Name, hostConfig.Via
+	if testConfig.DialTimeout <= 0 {
+		testConfig.DialTimeout = hostTestDialTimeout
+	}
+	if testConfig.Timeout <= 0 {
+		testConfig.Timeout = hostTestDialTimeout
 	}
 	if baseConfig != nil && baseConfig.BindSet {
 		testConfig.Bind = baseConfig.Bind

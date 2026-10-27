@@ -773,6 +773,7 @@ type mcpApplyInput struct {
 	ExpectSHA256      string  `json:"expect_sha256,omitempty" jsonschema:"Fail closed unless the current remote hash matches."`
 	NoBackup          bool    `json:"no_backup,omitempty" jsonschema:"Skip the pre-change backup; requires force."`
 	BackupDir         string  `json:"backup_dir,omitempty" jsonschema:"Remote backup directory (default ~/.sshx/file-backups)."`
+	StageDir          string  `json:"stage_dir,omitempty" jsonschema:"Private remote SFTP staging directory; requires sudo and is included in the plan."`
 	Sudo              bool    `json:"sudo,omitempty" jsonschema:"Stage over SFTP, then install with a privileged stdin script."`
 	Force             bool    `json:"force,omitempty" jsonschema:"Skip the hash precondition; required with no_backup."`
 	BypassReason      string  `json:"bypass_reason,omitempty" jsonschema:"Required with force when overwriting critical identity files."`
@@ -1068,6 +1069,12 @@ func buildApplyArgs(in mcpApplyInput, fromPath string) ([]string, error) {
 		return nil, fmt.Errorf("path is required")
 	}
 	args := []string{"apply", "--json", "-h=" + in.Target, "--path=" + in.Path, "--from=" + fromPath}
+	if in.StageDir != "" {
+		if !in.Sudo {
+			return nil, fmt.Errorf("stage_dir requires sudo")
+		}
+		args = append(args, "--stage-dir="+in.StageDir)
+	}
 	if in.ExpectSHA256 != "" {
 		args = append(args, "--expect-sha256="+in.ExpectSHA256)
 	}

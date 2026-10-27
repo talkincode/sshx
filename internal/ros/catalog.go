@@ -429,6 +429,7 @@ func ParseInvocation(tokens []string) (*ROSRequest, error) {
 			rawTokenIndex = 1
 		}
 
+		rawText := strings.Join(tokens[rawTokenIndex:], " ")
 		rawPath := strings.TrimSpace(tokens[rawTokenIndex])
 		var restTokens []string
 		if strings.Contains(rawPath, " ") {
@@ -471,7 +472,7 @@ func ParseInvocation(tokens []string) (*ROSRequest, error) {
 			}
 		}
 
-		isPrint := actionKind == ActionPrint
+		isPrint := actionKind == ActionPrint && !strings.ContainsAny(rawText, ";\r\n[]")
 		idempotency := "unknown"
 		var sideEffects []string
 		if isPrint {
@@ -483,7 +484,7 @@ func ParseInvocation(tokens []string) (*ROSRequest, error) {
 		return &ROSRequest{
 			Path:       []string{"raw"},
 			Action:     "raw",
-			RawCommand: rawPath,
+			RawCommand: rawText,
 			Args:       args,
 			Flags:      flags,
 			Mapping: &CommandMapping{
@@ -618,49 +619,16 @@ func ParseInvocation(tokens []string) (*ROSRequest, error) {
 	return req, nil
 }
 
+// QuoteValue encodes one literal RouterOS value, including script source. Raw
+// commands bypass this encoder and retain their caller-owned syntax.
+func QuoteValue(value string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "\r", `\r`, "\n", `\n`, "\t", `\t`).Replace(value) + `"`
+}
+
 // BuildRouterOSCommand formats the RouterOS CLI command line string to be executed over SSH.
 func BuildRouterOSCommand(req *ROSRequest) string {
 	if req.Mapping != nil && req.Mapping.IsRaw() {
-		var sb strings.Builder
-		rawCmd := strings.TrimSpace(req.RawCommand)
-		if rawCmd == "" {
-			rawCmd = req.Action
-		}
-		if !strings.HasPrefix(rawCmd, "/") && !strings.HasPrefix(rawCmd, ":") {
-			rawCmd = "/" + rawCmd
-		}
-		sb.WriteString(rawCmd)
-
-		for _, flag := range req.Flags {
-			sb.WriteString(" ")
-			sb.WriteString(flag)
-		}
-
-		if len(req.Args) > 0 {
-			keys := make([]string, 0, len(req.Args))
-			for k := range req.Args {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				v := req.Args[k]
-				sb.WriteString(" ")
-				if strings.Contains(v, " ") && !strings.HasPrefix(v, "\"") {
-					fmt.Fprintf(&sb, "%s=%q", k, v)
-				} else {
-					fmt.Fprintf(&sb, "%s=%s", k, v)
-				}
-			}
-		}
-
-		if req.Mapping.ActionKind == ActionPrint {
-			lower := strings.ToLower(sb.String())
-			if !strings.Contains(lower, "without-paging") {
-				sb.WriteString(" without-paging")
-			}
-		}
-
-		return sb.String()
+		return req.RawCommand
 	}
 
 	var sb strings.Builder
@@ -679,8 +647,8 @@ func BuildRouterOSCommand(req *ROSRequest) string {
 		for _, k := range keys {
 			v := req.Args[k]
 			sb.WriteString(" ")
-			if strings.Contains(v, " ") && !strings.HasPrefix(v, "\"") {
-				fmt.Fprintf(&sb, "%s=%q", k, v)
+			if strings.ContainsAny(v, " \t\r\n\"\\$;[]") {
+				fmt.Fprintf(&sb, "%s=%s", k, QuoteValue(v))
 			} else {
 				fmt.Fprintf(&sb, "%s=%s", k, v)
 			}

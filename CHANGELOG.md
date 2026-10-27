@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-27
+
+### Security
+
+- Update the reviewed Go build baseline to 1.26.10 across the module, CI and
+  releases, addressing newly reported reachable standard-library issues in
+  1.26.8 (including GO-2026-6809).
+- Separate noninteractive sudo authentication from script, SQL and other
+  application stdin using a nonce-bound prompt/readiness handshake. No
+  credential is sent when sudo does not request one. Authentication framing
+  is bounded and withheld from application output.
+- Human `login --sudo` now uses native TTY authentication without reading or
+  prefilling the sudo keyring credential.
+- Redact named token suffixes, authorization headers and escaped continuations
+  in audit records; label the policy explicitly as best-effort.
+- RouterOS file workflows reuse guarded SFTP publication and downloads instead
+  of direct truncate/copy, preserving symlink protection and close errors.
+
+### Fixed
+
+- RouterOS raw commands preserve original quoting and option order. Recognized
+  device diagnostics fail even with SSH exit status zero; execution/audit
+  evidence, SSH credential references, jump hosts and deadlines stay aligned.
+- RouterOS backup/export default filenames are unique per invocation. Script
+  updates do not retry a mutation after an uncertain transport result.
+- Host diagnostics retain trust configuration and cancellation/deadline limits.
+- Prefer already-known host-key algorithms and distinguish an unregistered
+  algorithm from a changed key of the same type, without relaxing verification.
+- Restore bounded SFTP read/write pipelining while keeping hashes, publication
+  acknowledgement, cleanup and partial-effect evidence.
+
+### Added
+
+- `apply --sudo --stage-dir=PATH` (MCP `stage_dir`) selects a private SFTP
+  staging filesystem separately from backups and final atomic publication.
+- Compiled-CLI regressions and disposable Linux native-sudo CI policies for
+  password, NOPASSWD, cached, root and rejected-authentication paths.
+
+### Changed
+
+- Plan schema remains v1; execution semantics advance to `sshx.execution.v2`.
+  Re-preview existing plans after upgrading.
+- Sudo auto-fill uses a shell readiness wrapper. Restricted command-only
+  sudoers policies may reject it; ambiguous sudo login/shell options fail
+  closed. Use the human login path instead of bypassing policy.
+- Raw RouterOS commands no longer add `without-paging` implicitly; include it
+  explicitly when needed. See `docs/execution-safety.md` for compatibility and
+  verification limits.
+
 ## [0.19.1] - 2026-09-28
 
 ### Fixed
@@ -845,7 +894,8 @@ diagnostics).
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/talkincode/sshx/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/talkincode/sshx/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/talkincode/sshx/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/talkincode/sshx/compare/v0.17.0...v0.18.0

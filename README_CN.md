@@ -80,6 +80,15 @@ Agent 需要的不是另一个交互式 SSH shell，而是一份稳定、可组�
 15. `sshx text`：有界远端日志/文本解剖（异常块、preset、行窗），经 SFTP 或 sshx 持有的 journalctl；读取走并发流水线，扫描进度写 stderr，宽窗口不再像卡死。
 16. Agent skill（`skills/sshx/SKILL.md`）：`npx skills add talkincode/sshx` 或 `sshx skill install`。
 
+## v0.20 执行安全升级
+
+sudo 认证与脚本/SQL 输入改为独立的 prompt/ready 阶段，不再无条件拼接口令。
+`login --sudo` 改由人类 TTY 完成认证，不预填 keyring 密码。RouterOS raw 保留原文、
+设备错误明确失败，文件动作复用受控 SFTP；主机测试继承超时，传输使用有界流水线。
+`apply --sudo --stage-dir=/data/sshx-stage` 可指定独立私有暂存目录，备份目录与最终
+原子发布语义不变。升级后必须重新预览计划（execution semantics v2）。
+详情与兼容边界见 [执行安全说明](docs/execution-safety.md)。
+
 ## 安装
 
 ### 安装 Agent skill

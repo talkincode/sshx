@@ -87,7 +87,7 @@ sshx login -h=prod-web --sudo
 sshx login prod-web --dry-run --json
 ```
 
-`--sudo` 会用 keyring 里的 sudo 秘密先提权，再进入特权 login shell。登录需要本地 TTY，目前只支持 POSIX，也不属于 Agent/MCP 契约。
+`--sudo` 启动 `sudo -i`，需要时由操作者在 TTY 认证；不读取或预填 keyring sudo 密码。登录需要本地 TTY，目前只支持 POSIX，也不属于 Agent/MCP 契约。
 
 ## 保存 sudo 密码
 

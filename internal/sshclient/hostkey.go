@@ -85,8 +85,14 @@ func getHostKeyCallback(cfg *Config) (ssh.HostKeyCallback, error) {
 			return err
 		}
 
-		// If there are known keys but they don't match, it's a key change
 		if len(keyErr.Want) > 0 {
+			knownAlgorithm := false
+			for _, known := range keyErr.Want {
+				knownAlgorithm = knownAlgorithm || known.Key.Type() == key.Type()
+			}
+			if !knownAlgorithm {
+				return fmt.Errorf("host %s offered an unregistered host-key algorithm %s; verify this key independently or enable a previously trusted algorithm (keep existing known_hosts records): %w", hostname, key.Type(), err)
+			}
 			return fmt.Errorf("⚠️  HOST KEY VERIFICATION FAILED!\n"+
 				"The host key for %s has changed.\n"+
 				"This could indicate a man-in-the-middle attack.\n"+

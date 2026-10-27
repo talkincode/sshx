@@ -39,6 +39,7 @@ const (
 func sftpClientOptions() []sftp.ClientOption {
 	return []sftp.ClientOption{
 		sftp.UseConcurrentReads(true),
+		sftp.UseConcurrentWrites(true),
 		sftp.MaxConcurrentRequestsPerFile(sftpMaxConcurrentRequests),
 	}
 }

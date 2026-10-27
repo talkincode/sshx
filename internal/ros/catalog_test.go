@@ -90,8 +90,8 @@ func TestParseInvocation(t *testing.T) {
 		t.Errorf("expected raw command, got %+v", reqRaw)
 	}
 	rawStr := BuildRouterOSCommand(reqRaw)
-	if rawStr != "/system/clock/print without-paging" {
-		t.Errorf("expected '/system/clock/print without-paging', got %q", rawStr)
+	if rawStr != "/system/clock/print" {
+		t.Errorf("raw command bytes must be unchanged, got %q", rawStr)
 	}
 
 	// 4. Raw command with args and flags

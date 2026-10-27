@@ -71,6 +71,7 @@ type ROSRequest struct {
 
 // ROSPlan is the execution plan emitted for dry-run preview.
 type ROSPlan struct {
+	RawCommand         string            `json:"raw_command,omitempty"`
 	SchemaVersion      string            `json:"schema_version"`
 	DryRun             bool              `json:"dry_run"`
 	Command            string            `json:"command"`

@@ -59,7 +59,7 @@ func usageSections() []usageSection {
 		{title: "Inspection Capabilities", verb: "inspect", summary: "Collect or reuse one structured host observation from a built-in or local capability.", text: usageInspect},
 		{title: "Guarded SQL Execution", verb: "sql", summary: "Run one guarded SQL statement through the database client already present on the remote host.", text: usageSQL},
 		{title: "MikroTik RouterOS (ROS) over SSH", verb: "ros", summary: "Manage MikroTik RouterOS devices over SSH and SFTP with structured commands.", text: usageROS},
-		{title: "Guarded File Apply", verb: "apply", summary: "Replace one remote regular file with a precondition, backup, and post-write verification pipeline.", text: usageApply},
+		{title: "Guarded File Apply", verb: "apply", summary: "Replace one remote file with a precondition, backup, verified publication, and optional private sudo stage directory.", text: usageApply},
 		{title: "Text Dissection", verb: "", summary: "", text: usageText},
 		{title: "Interactive Login", verb: "login", summary: "Open one human interactive TTY session on a host already known to sshx.", text: usageLogin},
 		{title: "Plugin Management", verb: "plugin", summary: "Install, create, list, validate, trust, and remove local inspection plugins.", text: usagePlugin},

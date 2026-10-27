@@ -4,7 +4,7 @@ Operating guide for humans and AI coding agents working on **sshx**. It defines
 what this project is, what it deliberately is *not*, how it is built, and how to
 make changes that fit. Read this before making non-trivial changes.
 
-Module: `github.com/talkincode/sshx` · Language: Go 1.26.8 · License: MIT
+Module: `github.com/talkincode/sshx` · Language: Go 1.26.10 · License: MIT
 
 ---
 
@@ -140,6 +140,8 @@ internal/app/             → CLI surface (argument parsing, routing, sub-comman
   sql.go                  → sshx sql: guarded SQL pipeline (classify → gate → explain → backup → execute)
   apply.go                → sshx apply: guarded single-file mutation (hash → backup → atomic write)
   text.go                 → sshx text: bounded remote text/log dissection
+  ros.go                  → RouterOS commands/workflows; shared transport and file evidence
+  ros_lifecycle.go        → ROS operation metadata and shared execution/file adapters
   login.go                → sshx login: human TTY session, optional sudo privileged shell
   mcp.go                  → sshx mcp: stdio MCP server; tools self-exec sshx as one-shot children
 internal/execution/       → versioned request/result model, selectors, executor
@@ -149,6 +151,7 @@ internal/runtimepath/     → ~/.sshx / SSHX_HOME runtime-root resolution
 internal/skillinstall/    → conflict-safe, atomic Agent skill installation
 internal/sqlsafe/         → fail-closed SQL classification, policy gates, transactional backup decisions, psql/sqlite3 assembly
 internal/textsafe/        → lexical presets, exception blocks, redaction, bounded text scan
+internal/ros/             → RouterOS parsing/encoding and diagnostics (raw bytes remain raw)
 internal/sshclient/       → SSH/SFTP core
   client.go               → SSHClient: dial, auth, exec, SFTP, sudo-over-stdin
   remote_state.go         → restrictive atomic remote observation I/O
@@ -210,7 +213,7 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 
 ## 5. Tech Stack
 
-- **Language:** Go (module directive pinned to **`go 1.26.8`** — see constraint below).
+- **Language:** Go (module directive pinned to **`go 1.26.10`** — see constraint below).
 - **SSH/crypto:** `golang.org/x/crypto/ssh`
 - **SFTP:** `github.com/pkg/sftp`
 - **Keyring:** `github.com/zalando/go-keyring`
@@ -219,10 +222,13 @@ skills/                  → canonical Agent skill plus its embedded asset packa
 
 > Security baseline reviewed for v0.14.0: x/crypto v0.56.0 fixes reachable
 > SSH channel deadlocks GO-2026-6354 and GO-2026-6355 and requires Go 1.26.
-> Go 1.26.8 is the patched build baseline; CI and releases use the same version.
+> The v0.20 security review advances the patched baseline to Go 1.26.10:
+> govulncheck found reachable standard-library issues in 1.26.8, including
+> GO-2026-6809 (fixed in 1.26.10) and GO-2026-66xx (fixed in 1.26.9).
+> CI and release artifacts use the same reviewed patch baseline.
 >
-> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.26.8**.
-> The `go` directive in `go.mod` must stay at `1.26.8` unless a deliberate
+> ⚠️ **Toolchain constraint:** CI's test/lint/security jobs run on **Go 1.26.10**.
+> The `go` directive in `go.mod` must stay at `1.26.10` unless a deliberate
 > security or compatibility review changes the baseline. New dependencies must
 > support that toolchain; do not let `go get` silently bump the directive.
 
@@ -260,7 +266,7 @@ Notes:
 
 ### CI (`.github/workflows/`)
 
-- `ci.yml`: **Test** (ubuntu + macOS, Go 1.26.8, `-race -cover`),
+- `ci.yml`: **Test** (ubuntu + macOS, Go 1.26.10, `-race -cover`),
   **Test (windows-latest)** (`-short`, build + vet), **Lint** (golangci-lint),
   **Security Scan** (`gosec` plus `govulncheck`), **Analyze** (CodeQL, Go),
   **E2E** (ubuntu + macOS), and **SQL (native PostgreSQL and MySQL)** with
@@ -278,7 +284,7 @@ Notes:
   Windows Credential Manager needs an isolated OS profile and is not proved
   by the test-only secret backend. Native CI results are required; a Windows
   cross-build on macOS/Linux is not execution evidence.
-- `release.yml`: builds release artifacts with Go 1.26.8 and bundles the matching
+- `release.yml`: builds release artifacts with Go 1.26.10 and bundles the matching
   Agent skill in every archive.
 
 All `ci.yml` checks must be green before merge.
@@ -306,12 +312,16 @@ tests.
    or in an explicit encrypted local vault. Inline `--password-set=key:value`
    and `SSH_PASSWORD` are supported but warned about. Never silently degrade
    the backend, and never emit vault secrets on `--password-get`.
-3. **Sudo password over stdin.** Never interpolate the password into the command
-   string. `sudoStdinCommand` rewrites a leading `sudo` to `sudo -S -p ''` and the
-   password is fed via `session.Stdin`. This avoids quote breakage and injection.
+3. **Sudo conversation is separate from application stdin.** Never interpolate
+   credentials into argv/env or unconditionally prefix them to a script/SQL
+   stream. `sudoExchange` sends a credential only on a nonce-bound prompt and
+   payload only after child readiness; NOPASSWD/cache/root must consume no
+   credential. Test both branches with actual shells and disposable native sudo.
+   Human `login --sudo` leaves authentication to the TTY; it never prefills a secret.
 4. **Sudo auto-fill only supports leading `sudo`.** `CommandUsesSudo` returns
-   true only when the remote command starts with `sudo`, matching the exact
-   form `sudoStdinCommand` can safely rewrite. Non-leading sudo inside shell
+   true only when the remote command starts with `sudo`. The readiness wrapper
+   preserves argv and outer shell operators; ambiguous sudo login/shell modes
+   fail closed. A restricted command-only sudoers grant may reject the wrapper. Non-leading sudo inside shell
    wrappers or pipelines is left untouched and is never silently ignored: sshx
    warns on stderr before connecting and again when the remote reports
    `sudo: a password is required`, suggesting `sudo sh -c "<command>"`.
@@ -513,9 +523,9 @@ When working in this repo:
 1. **Stay within the mission.** Re-read §3 before adding features. Default to a
    smaller change. Never introduce a daemon, a connection pool, an HTTP/SSE
    protocol server, tunneling, or a GUI.
-2. **Hold the toolchain line.** Keep `go.mod` at `go 1.26.8`. If a dependency
+2. **Hold the toolchain line.** Keep `go.mod` at `go 1.26.10`. If a dependency
    forces a newer directive, pin an older compatible version instead of bumping
-   the directive (CI runs Go 1.26.8).
+   the directive (CI runs Go 1.26.10).
 3. **Verify before declaring done.** Run `make check` (and `golangci-lint run`)
    locally; reproduce the original symptom and confirm it is gone. For PR work,
    watch CI to green (`gh pr checks <n> --watch`).

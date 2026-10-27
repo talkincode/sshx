@@ -65,6 +65,7 @@ type serverOptions struct {
 	authorizedKey    ssh.PublicKey
 	reportedUID      string
 	hostSigner       ssh.Signer
+	extraHostSigners []ssh.Signer
 	execHandler      func(ssh.Channel, string, string)
 	operatorPassword string
 	readerPassword   string
@@ -178,6 +179,9 @@ func startSSHServer(t *testing.T, options serverOptions) *testSSHServer {
 		},
 	}
 	config.AddHostKey(signer)
+	for _, extra := range options.extraHostSigners {
+		config.AddHostKey(extra)
+	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -343,6 +347,7 @@ func handleSSHSession(channel ssh.Channel, requests <-chan *ssh.Request, server 
 			return
 		}
 
+		channel, payload.Command = unwrapSudoFixture(channel, payload.Command)
 		exitCode := uint32(0)
 		switch {
 		case isCollectorCommand(payload.Command) != "":

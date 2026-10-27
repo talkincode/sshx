@@ -38,15 +38,6 @@ func HandleLogin(config *sshclient.Config, audit *auditRecorder) (err error) {
 	}
 	fillLoginSSHPassword(config)
 
-	if config.LoginUseSudo {
-		password, pwdErr := sshclient.GetSudoPassword(config.SudoKey)
-		if pwdErr != nil {
-			return failLogin(config, audit, sshclient.AuthMethodUnknown, "secret",
-				fmt.Errorf("resolve sudo password key %q: %w", config.SudoKey, pwdErr))
-		}
-		config.SudoPassword = password
-	}
-
 	client, cliErr := sshclient.NewSSHClient(config)
 	if cliErr != nil {
 		return failLogin(config, audit, sshclient.AuthMethodUnknown, "config",

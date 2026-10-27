@@ -3,8 +3,6 @@ package ros
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -159,60 +157,6 @@ func redactPath(p string) string {
 		return ""
 	}
 	return "***REDACTED***/" + filepath.Base(p)
-}
-
-// ExecuteSFTPUpload copies a local file to remote RouterOS using SFTP.
-func ExecuteSFTPUpload(sftpClient *sftp.Client, localPath, remotePath string) (int64, error) {
-	srcFile, err := os.Open(filepath.Clean(localPath)) // #nosec G304 -- local file path provided via CLI flag
-	if err != nil {
-		return 0, fmt.Errorf("open local file: %w", err)
-	}
-	defer func() { _ = srcFile.Close() }() //nolint:errcheck // best-effort file close
-
-	stat, err := srcFile.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("stat local file: %w", err)
-	}
-
-	dstFile, err := sftpClient.Create(remotePath)
-	if err != nil {
-		return 0, fmt.Errorf("create remote SFTP file %q: %w", remotePath, err)
-	}
-	defer func() { _ = dstFile.Close() }() //nolint:errcheck // best-effort file close
-
-	n, err := io.Copy(dstFile, srcFile)
-	if err != nil {
-		return n, fmt.Errorf("copy to remote SFTP file: %w", err)
-	}
-	if n != stat.Size() {
-		return n, fmt.Errorf("partial transfer: copied %d of %d bytes", n, stat.Size())
-	}
-	return n, nil
-}
-
-// ExecuteSFTPDownload copies a remote file on RouterOS to local filesystem using SFTP.
-func ExecuteSFTPDownload(sftpClient *sftp.Client, remotePath, localPath string) (int64, error) {
-	srcFile, err := sftpClient.Open(remotePath)
-	if err != nil {
-		return 0, fmt.Errorf("open remote SFTP file %q: %w", remotePath, err)
-	}
-	defer func() { _ = srcFile.Close() }() //nolint:errcheck // best-effort file close
-
-	if mkdirErr := os.MkdirAll(filepath.Dir(localPath), 0750); mkdirErr != nil {
-		return 0, fmt.Errorf("create local directory: %w", mkdirErr)
-	}
-
-	dstFile, err := os.Create(filepath.Clean(localPath)) // #nosec G304 -- local target path provided via CLI flag
-	if err != nil {
-		return 0, fmt.Errorf("create local file %q: %w", localPath, err)
-	}
-	defer func() { _ = dstFile.Close() }() //nolint:errcheck // best-effort file close
-
-	n, err := io.Copy(dstFile, srcFile)
-	if err != nil {
-		return n, fmt.Errorf("copy from remote SFTP file: %w", err)
-	}
-	return n, nil
 }
 
 // WaitForRemoteFile polls remote path via SFTP until it exists or deadline is exceeded.

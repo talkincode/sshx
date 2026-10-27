@@ -43,7 +43,7 @@ func ValidateSafety(req *ROSRequest, allowWrite bool, force bool) *ROSErr {
 	}
 
 	// Raw mutative commands require --allow-write or --force
-	if req.Mapping != nil && req.Mapping.IsRaw() && req.Mapping.ActionKind != ActionPrint {
+	if req.Mapping != nil && req.Mapping.IsRaw() && !ReadOnly(req) {
 		if !allowWrite && !force {
 			return &ROSErr{
 				ErrorCode: ErrCodeUsageError,
@@ -58,6 +58,24 @@ func ValidateSafety(req *ROSRequest, allowWrite bool, force bool) *ROSErr {
 	}
 
 	return nil
+}
+
+// ReadOnly recognizes only a single print invocation, never compound scripts
+// or expression evaluation. A declaration is not proof of arbitrary raw purity.
+func ReadOnly(req *ROSRequest) bool {
+	return req.Mapping != nil && req.Mapping.ActionKind == ActionPrint && !strings.ContainsAny(BuildRouterOSCommand(req), ";\r\n[]")
+}
+
+// CommandDiagnostic recognizes device diagnostics, not arbitrary occurrences of
+// the word error in user data. SSH exit status alone is insufficient on RouterOS.
+func CommandDiagnostic(output string) bool {
+	line := strings.ToLower(strings.TrimSpace(output))
+	for _, prefix := range []string{"input does not match any value", "expected end of command", "syntax error", "bad command name", "no such item", "not enough permissions", "failure:", "invalid value for argument"} {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateScriptSource checks size and UTF-8 validity of script contents.

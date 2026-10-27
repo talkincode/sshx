@@ -81,7 +81,7 @@ func TestLoginDryRunPlan(t *testing.T) {
 	if plan.HostResolved != "10.1.2.3" || plan.HostResolution.Status != "direct" {
 		t.Fatalf("literal address should not look up settings: %+v", plan.HostResolution)
 	}
-	if !plan.UsesSudo || !plan.WouldConnect || !plan.WouldReadSecret || !plan.WouldMutateRemote {
+	if !plan.UsesSudo || !plan.WouldConnect || plan.WouldReadSecret || !plan.WouldMutateRemote {
 		t.Fatalf("unexpected login effects: %+v", plan)
 	}
 	if plan.Command != sshclient.PrivilegedLoginCommand {

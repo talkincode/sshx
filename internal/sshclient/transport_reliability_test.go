@@ -214,6 +214,11 @@ func TestTransportCancellationBoundaries(t *testing.T) {
 						phase == "sftp_version" && request.Type == "subsystem":
 						replyOK(request)
 						if phase == "wait" {
+							var payload struct{ Command string }
+							if err := ssh.Unmarshal(request.Payload, &payload); err != nil {
+								return
+							}
+							channel, _ = unwrapSudoFixture(channel, payload.Command)
 							var first [1]byte
 							if _, err := io.ReadFull(channel, first[:]); err != nil {
 								return

@@ -106,6 +106,7 @@ func replyOK(req *ssh.Request) {
 }
 
 func runFakeCommand(ch ssh.Channel, command string) uint32 {
+	ch, command = unwrapSudoFixture(ch, command)
 	switch command {
 	case "exit0":
 		writeAll(ch, "hello\n")
@@ -279,7 +280,7 @@ func TestRunScriptKeepsSudoPasswordSeparateFromCollector(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, res.ExitCode)
-	assert.Equal(t, "sudo-payload:"+string(payload)+"\n", res.Stdout)
+	assert.Equal(t, "sudo-payload:"+string(payload), res.Stdout)
 	assert.NotContains(t, res.Stdout, client.config.SudoPassword)
 }
 

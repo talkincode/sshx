@@ -25,12 +25,10 @@ func (c *SSHClient) runConfiguredCommand(capture, pty bool) (ExecResult, error) 
 		}
 	}
 	command := c.config.Command
-	var stdin io.Reader
 	if c.config.SudoPassword != "" && CommandUsesSudo(command) {
-		command = sudoStdinCommand(command)
-		stdin = strings.NewReader(c.config.SudoPassword + "\n")
+		return c.executeSudo(command, nil, capture)
 	}
-	return c.execute(command, stdin, capture, pty)
+	return c.execute(command, nil, capture, pty)
 }
 
 // RunScript streams a collector without installing it on the remote host.
@@ -56,12 +54,10 @@ func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo boo
 		return ExecResult{ExitCode: -1}, boundaryError("auth", "prepare script", fmt.Errorf("sudo inspection requires a resolved sudo password"))
 	}
 	command := shell + " -s --"
-	var stdin io.Reader = bytes.NewReader(payload)
 	if useSudo {
-		command = "sudo -S -p '' " + shell + " -s --"
-		stdin = io.MultiReader(strings.NewReader(c.config.SudoPassword+"\n"), bytes.NewReader(payload), strings.NewReader("\n"))
+		return c.executeSudo("sudo "+command, bytes.NewReader(payload), true)
 	}
-	return c.execute(command, stdin, true, false)
+	return c.execute(command, bytes.NewReader(payload), true, false)
 }
 
 // RunCommandWithInput carries caller-prepared data and secrets over stdin.
@@ -72,7 +68,16 @@ func (c *SSHClient) RunCommandWithInput(command string, stdin []byte) (ExecResul
 	return c.execute(command, bytes.NewReader(stdin), true, false)
 }
 
+// RunSudoCommandWithInput isolates the sudo conversation from application stdin.
+func (c *SSHClient) RunSudoCommandWithInput(command string, stdin []byte) (ExecResult, error) {
+	return c.executeSudo(command, bytes.NewReader(stdin), true)
+}
+
 func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) (ExecResult, error) {
+	return c.executeSession(command, stdin, capture, pty, nil)
+}
+
+func (c *SSHClient) executeSession(command string, stdin io.Reader, capture, pty bool, auth *sudoExchange) (ExecResult, error) {
 	result := ExecResult{ExitCode: -1}
 	conn, err := c.sshConnection()
 	if err != nil {
@@ -83,7 +88,27 @@ func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) 
 		return result, c.transportError("connect", "create session", err)
 	}
 	defer func() { _ = session.Close() }() //nolint:errcheck // best-effort session teardown
-	session.Stdin = stdin
+	var finishAuth func()
+	if auth == nil {
+		session.Stdin = stdin
+	} else {
+		input, pipeErr := session.StdinPipe()
+		if pipeErr != nil {
+			return result, pipeErr
+		}
+		auth.start(input)
+		stopped := false
+		finishAuth = func() {
+			if stopped {
+				return
+			}
+			stopped = true
+			close(auth.stop)
+			_ = session.Close() //nolint:errcheck // unblock the sender; only it owns stdin CloseWrite
+			<-auth.done
+		}
+		defer finishAuth()
+	}
 	if pty {
 		modes := ssh.TerminalModes{ssh.ECHO: 0, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
 		if ptyErr := session.RequestPty("xterm", 80, 40, modes); ptyErr != nil {
@@ -98,6 +123,11 @@ func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) 
 		session.Stdout, session.Stderr = stdout, stderr
 	} else {
 		session.Stdout, session.Stderr = os.Stdout, os.Stderr
+	}
+	var control *sudoControlWriter
+	if auth != nil {
+		control = &sudoControlWriter{dst: session.Stderr, auth: auth}
+		session.Stderr = control
 	}
 	ctx := c.transportContext()
 	var cancel context.CancelFunc
@@ -129,6 +159,22 @@ func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) 
 	if !stop() {
 		<-finished
 	}
+	if finishAuth != nil {
+		finishAuth()
+	}
+	var sudoErr error
+	if control != nil {
+		if flushErr := control.flush(); err == nil {
+			err = flushErr
+		}
+		ready, authErr := auth.result()
+		if authErr != nil {
+			sudoErr = boundaryError("auth", "sudo handshake", authErr)
+			err = sudoErr
+		} else if err == nil && !ready {
+			err = boundaryError("auth", "sudo handshake", fmt.Errorf("sudo child readiness was not acknowledged"))
+		}
+	}
 	if capture {
 		result.Stdout, result.Stderr = stdout.String(), stderr.String()
 		result.StdoutTruncated, result.StderrTruncated = stdout.Truncated(), stderr.Truncated()
@@ -136,6 +182,9 @@ func (c *SSHClient) execute(command string, stdin io.Reader, capture, pty bool) 
 	// An observed exit remains evidence even if the outer budget expires while
 	// final output is being drained. Never infer an exit from a local close.
 	if cause := ctx.Err(); cause != nil {
+		if sudoErr != nil && (c.config.Context == nil || c.config.Context.Err() == nil) && !errors.Is(context.Cause(ctx), ErrCommandTimeout) {
+			return result, sudoErr
+		}
 		if errors.Is(context.Cause(ctx), ErrCommandTimeout) {
 			cause = errors.Join(ErrCommandTimeout, cause)
 		}

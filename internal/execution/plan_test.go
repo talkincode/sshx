@@ -14,7 +14,7 @@ func TestPlanCanonicalSerialization(t *testing.T) {
 	require.NoError(t, plan.Seal())
 	raw, err := plan.CanonicalBytes()
 	require.NoError(t, err)
-	require.JSONEq(t, `{"schema_version":"sshx.plan.v1","semantics":"sshx.execution.v1","action":"command","targets":[{"role":"target","address":"127.0.0.1","port":"22","user":"worker"}],"inputs":{"a":"<&","z":"last"},"risk":"read","effects":{"unknown":false,"remote_write":false,"local_write":false,"privileged":false,"destructive":false}}`, string(raw))
+	require.JSONEq(t, `{"schema_version":"sshx.plan.v1","semantics":"sshx.execution.v2","action":"command","targets":[{"role":"target","address":"127.0.0.1","port":"22","user":"worker"}],"inputs":{"a":"<&","z":"last"},"risk":"read","effects":{"unknown":false,"remote_write":false,"local_write":false,"privileged":false,"destructive":false}}`, string(raw))
 	require.Contains(t, string(raw), `"inputs":{"a":"\u003c\u0026","z":"last"}`)
 	before := plan.PlanHash
 	plan.Inputs = map[string]string{"a": "<&", "z": "last"}

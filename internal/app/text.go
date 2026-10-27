@@ -191,8 +191,7 @@ func (r *textRun) scanSFTP(req textsafe.Request) (textsafe.Result, error) {
 func (r *textRun) scanPrivilegedFile(req textsafe.Request) (textsafe.Result, error) {
 	fromEnd := req.Scan == textsafe.ScanEnd
 	cmd := textsafe.FileReadCommand(req.Path, fromEnd, req.MaxScanBytes, true)
-	stdin := []byte(r.config.SudoPassword + "\n")
-	result, err := r.client.RunCommandWithInput(cmd, stdin)
+	result, err := r.client.RunSudoCommandWithInput(cmd, nil)
 	if err != nil {
 		return textsafe.Result{}, err
 	}
@@ -205,11 +204,13 @@ func (r *textRun) scanPrivilegedFile(req textsafe.Request) (textsafe.Result, err
 
 func (r *textRun) scanJournal(req textsafe.Request) (textsafe.Result, error) {
 	cmd := textsafe.JournalCommand(req, r.config.TextUseSudo)
-	var stdin []byte
+	var result sshclient.ExecResult
+	var err error
 	if r.config.TextUseSudo {
-		stdin = []byte(r.config.SudoPassword + "\n")
+		result, err = r.client.RunSudoCommandWithInput(cmd, nil)
+	} else {
+		result, err = r.client.RunCommandWithInput(cmd, nil)
 	}
-	result, err := r.client.RunCommandWithInput(cmd, stdin)
 	if err != nil {
 		return textsafe.Result{}, err
 	}

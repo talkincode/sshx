@@ -86,6 +86,16 @@ It remains a single binary with one-shot invocations and no resident component o
     stderr scan progress so a wide window is never mistaken for a hang.
 16. Agent skill (`skills/sshx/SKILL.md`): `npx skills add talkincode/sshx` or `sshx skill install`.
 
+## Execution safety upgrade (v0.20)
+
+Sudo authentication and script/SQL input now use separate prompt/readiness
+phases. `login --sudo` authenticates at the human TTY, without credential
+prefill. RouterOS raw commands preserve their text, device errors fail clearly,
+and file actions share guarded SFTP. Host tests honor deadlines; transfers use
+bounded pipelining. `apply --sudo --stage-dir=/data/sshx-stage` supports a private
+staging filesystem separate from backups. Re-preview plans after upgrading
+(execution semantics v2). See [safety and compatibility notes](docs/execution-safety.md).
+
 ## Installation
 
 ### Agent skill

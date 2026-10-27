@@ -316,9 +316,9 @@ func TestCLILoginDryRunAndHumanGates(t *testing.T) {
 	assert.Equal(t, "10.9.8.7", plan.HostResolved)
 	assert.True(t, plan.UsesSudo)
 	assert.True(t, plan.WouldConnect)
-	assert.True(t, plan.WouldReadSecret)
+	assert.False(t, plan.WouldReadSecret)
 	assert.True(t, plan.WouldMutateRemote)
-	assert.Contains(t, plan.Command, "sudo -S")
+	assert.Equal(t, "sudo -i", plan.Command)
 
 	jsonOnly := runSSHX(t, home, []string{"login", "--target=prod-web", "--json"}, nil)
 	require.Equal(t, 255, jsonOnly.exitCode, jsonOnly.stderr)

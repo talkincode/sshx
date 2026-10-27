@@ -16,10 +16,9 @@ var (
 )
 
 // PrivilegedLoginCommand is the remote program used by login --sudo.
-// The sudo password is written to the session stdin ahead of the human TTY;
-// it is never interpolated into argv. After authentication, echo is restored
-// and a privileged login shell replaces the helper.
-const PrivilegedLoginCommand = "sudo -S -p '' sh -c 'stty echo 2>/dev/null; exec sudo -i'"
+// Authentication belongs to the human TTY. Never prefill a credential into a
+// stream that may already be an interactive root shell (NOPASSWD/cache).
+const PrivilegedLoginCommand = "sudo -i"
 
 // StdinIsTerminal reports whether stdin is an interactive terminal.
 func StdinIsTerminal() bool {
