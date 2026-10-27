@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-27
+
+### Fixed
+
+- Keep release output under an ignored `dist/` directory so packaging an
+  earlier platform cannot mark later binaries as dirty builds.
+- Fail the release before signing or publishing unless every binary records
+  `vcs.modified=false` and the exact release commit. Runtime behavior retains
+  the v0.20.0 execution-safety fixes and Go 1.26.10 baseline.
+
 ## [0.20.0] - 2026-10-27
 
 ### Security
@@ -894,7 +904,8 @@ diagnostics).
 - CI/CD workflow and automated release process
 - Tag creation script
 
-[Unreleased]: https://github.com/talkincode/sshx/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/talkincode/sshx/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/talkincode/sshx/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/talkincode/sshx/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/talkincode/sshx/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/talkincode/sshx/compare/v0.18.0...v0.19.0
