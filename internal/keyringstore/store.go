@@ -31,6 +31,9 @@ const (
 // ErrNotFound reports that a key has no value in the selected backend.
 var ErrNotFound = errors.New("secret not found")
 
+var ErrInteractionRequired = errors.New("keychain interaction is required (unlock the keychain in an interactive session)")
+var ErrAccessDenied = errors.New("secret backend denied access")
+
 // ErrListUnsupported reports that the selected backend cannot enumerate keys.
 var ErrListUnsupported = errors.New("secret backend cannot list keys")
 

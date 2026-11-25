@@ -80,6 +80,12 @@ func NormalizeRequest(req *Request) error {
 	}
 	switch req.Action.Kind {
 	case ActionCommand:
+		if req.Action.UseSudo {
+			return fmt.Errorf("%w: --sudo requires --script-file or --script-stdin; start the remote command with sudo for command mode", ErrConfig)
+		}
+		if len(req.Action.ScriptArgs) > 0 {
+			return fmt.Errorf("%w: --script-arg requires --script-file or --script-stdin", ErrConfig)
+		}
 		if strings.TrimSpace(req.Action.Command) == "" {
 			return fmt.Errorf("%w: command action requires a command", ErrConfig)
 		}
@@ -87,6 +93,14 @@ func NormalizeRequest(req *Request) error {
 			return fmt.Errorf("%w: command action cannot combine with script input", ErrConfig)
 		}
 	case ActionScript:
+		if req.Action.CommandStdin {
+			return fmt.Errorf("%w: --stdin-file is for command mode; --script-stdin supplies a script", ErrConfig)
+		}
+		for _, arg := range req.Action.ScriptArgs {
+			if strings.ContainsRune(arg, 0) {
+				return fmt.Errorf("%w: script arguments cannot contain NUL", ErrConfig)
+			}
+		}
 		if sources != 1 || strings.TrimSpace(req.Action.Command) != "" {
 			// script must have exactly one of file/stdin and no command text
 			n := 0
@@ -100,7 +114,7 @@ func NormalizeRequest(req *Request) error {
 				return fmt.Errorf("%w: script action requires exactly one of --script-file or --script-stdin", ErrConfig)
 			}
 			if strings.TrimSpace(req.Action.Command) != "" {
-				return fmt.Errorf("%w: script action cannot combine with positional command input", ErrConfig)
+				return fmt.Errorf("%w: script action cannot combine with positional command input; use --script-arg for each argument", ErrConfig)
 			}
 		}
 		if req.Action.ScriptRunner == "" {

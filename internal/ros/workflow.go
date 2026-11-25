@@ -25,13 +25,14 @@ const (
 
 // WorkflowSpec defines the parameters for a workflow execution.
 type WorkflowSpec struct {
-	Type       WorkflowType `json:"type"`
-	LocalPath  string       `json:"local_path,omitempty"`
-	RemotePath string       `json:"remote_path,omitempty"`
-	ScriptName string       `json:"script_name,omitempty"`
-	BackupName string       `json:"backup_name,omitempty"`
-	Compact    bool         `json:"compact,omitempty"`
-	Cleanup    bool         `json:"cleanup,omitempty"`
+	AllowNonAtomic bool
+	Type           WorkflowType `json:"type"`
+	LocalPath      string       `json:"local_path,omitempty"`
+	RemotePath     string       `json:"remote_path,omitempty"`
+	ScriptName     string       `json:"script_name,omitempty"`
+	BackupName     string       `json:"backup_name,omitempty"`
+	Compact        bool         `json:"compact,omitempty"`
+	Cleanup        bool         `json:"cleanup,omitempty"`
 }
 
 // ParseWorkflowCommand detects if the CLI tokens form a workflow command.
@@ -123,6 +124,9 @@ func RenderWorkflowPlanJSON(spec *WorkflowSpec) (string, error) {
 		"remote_path":      spec.RemotePath,
 	}
 
+	if spec.AllowNonAtomic {
+		plan["allow_non_atomic"] = true
+	}
 	switch spec.Type {
 	case WorkflowScriptPut:
 		plan["schema_version"] = "roswire.workflow.script.put.plan.v1"

@@ -75,3 +75,24 @@ func TestValidateScriptSource(t *testing.T) {
 		t.Errorf("expected %s, got %s", ErrCodeUsageError, err.ErrorCode)
 	}
 }
+
+func TestRawPrintBatchReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		read    bool
+	}{
+		{"/system/identity/print; /system/resource/print detail", true},
+		{"/system/identity/print; /system/resource/print file=report", false},
+		{"/system/identity/print file=report", false},
+		{"/system/identity/print; /container/shell id no-sh", false},
+		{"/system/identity/print; /system/resource/print where x=[/system/reboot]", false},
+	} {
+		req, err := ParseInvocation([]string{"raw", tc.command})
+		if err != nil {
+			t.Fatalf("parse %q: %v", tc.command, err)
+		}
+		if ReadOnly(req) != tc.read {
+			t.Fatalf("ReadOnly(%q) = %t", tc.command, !tc.read)
+		}
+	}
+}

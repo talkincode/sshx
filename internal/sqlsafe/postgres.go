@@ -129,6 +129,18 @@ func (c Conn) ExecuteReadCommand(stmt string) RemoteCommand {
 	}
 }
 
+// ExecuteReadRowsCommand requests an unambiguous wire format from PostgreSQL.
+// Classify the caller's SELECT before using this internal COPY TO operation.
+func (c Conn) ExecuteReadRowsCommand(stmt string) RemoteCommand {
+	p := newProtocol(EnginePostgres, stmt, false, false)
+	return RemoteCommand{
+		Command: c.wrap(shellJoin(c.dockerArgv(c.psqlArgv("-q")))),
+		Stdin: p.psql("start", "1") + "\nBEGIN TRANSACTION READ ONLY;\nCOPY (\n" + stmt +
+			"\n) TO STDOUT WITH (FORMAT csv, HEADER true, FORCE_QUOTE *);\nCOMMIT;\n" + p.psql("commit", "acknowledged") + "\n",
+		Protocol: p,
+	}
+}
+
 // ExecuteWithBackupCommand locks the target against concurrent writers,
 // snapshots its preimage, and executes the mutation in one PostgreSQL
 // transaction. A failed mutation rolls back while the already-written CSV

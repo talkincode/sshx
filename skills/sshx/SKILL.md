@@ -127,7 +127,8 @@ For any non-interactive/programmatic use, prefer the canonical run contract:
 ```bash
 sshx run --target=prod-web --json -- "systemctl is-active nginx"
 sshx run --group=prod-web --tag=env=prod --concurrency=4 --jsonl -- "uptime"
-sshx run --target=prod-web --script-file=./check.sh --json
+sshx run --target=prod-web --script-file=./check.sh --script-arg=/srv/app --json
+sshx run --target=prod-web --stdin-file=./input.txt --json -- "cat"
 ```
 
 Compatibility mode `sshx -h=prod-web --json "cmd"` still works and emits the
@@ -223,8 +224,8 @@ transports; it does not guarantee remote termination or rollback.
 Every non-dry-run invocation writes one JSONL audit event by default:
 `~/.sshx/audit/sshx-YYYY-MM-DD.jsonl`.
 
-Use `--audit-output=<dir>` when the audit record should live with a project or
-incident folder:
+Use `--audit-output=<dir>` for a project or incident folder. In a workspace
+sandbox set `SSHX_AUDIT_OUTPUT` to a writable audit directory:
 
 ```bash
 sshx -h=prod-web --audit-output=./.sshx-audit --json "systemctl reload nginx"

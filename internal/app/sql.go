@@ -44,6 +44,7 @@ type sqlJSONResult struct {
 	ExplainPlan    string                `json:"explain_plan,omitempty"`
 	Backup         *sqlBackupJSON        `json:"backup,omitempty"`
 	AffectedRows   *int64                `json:"affected_rows,omitempty"`
+	RowSet         *sqlsafe.RowSet       `json:"row_set,omitempty"`
 	Stdout         string                `json:"stdout,omitempty"`
 	Stderr         string                `json:"stderr,omitempty"`
 	ExitCode       int                   `json:"exit_code"`
@@ -114,6 +115,9 @@ func HandleSQL(config *sshclient.Config, audit *auditRecorder) (err error) {
 	cls, clsErr := sqlsafe.ClassifyFor(config.SQLEngine, config.SQLStatement)
 	if clsErr != nil {
 		return run.fail("blocked", clsErr)
+	}
+	if rowsErr := validateSQLRows(config, cls); rowsErr != nil {
+		return run.fail("config", rowsErr)
 	}
 	run.cls = cls
 
@@ -246,6 +250,14 @@ func newSQLExecutor(config *sshclient.Config, password string) sqlsafe.SQLExecut
 		PasswordStdin: passwordStdin,
 		Docker:        config.SQLDockerContainer,
 	}
+}
+
+func validateSQLRows(config *sshclient.Config, cls *sqlsafe.Classification) error {
+	if config.SQLRows && (sqlsafe.NormalizeEngine(config.SQLEngine) != sqlsafe.EnginePostgres ||
+		cls.Class != sqlsafe.ClassRead || cls.Verb != "SELECT" || config.SQLExplainOnly || !config.JSONOutput) {
+		return fmt.Errorf("%w: --rows requires a PostgreSQL SELECT with --json", execution.ErrConfig)
+	}
+	return nil
 }
 
 func validateSQLConfig(config *sshclient.Config) error {
@@ -578,7 +590,13 @@ func (r *sqlRun) checkRelatedEffects() (bool, error) {
 func (r *sqlRun) executePhase() error {
 	r.phase = "execute"
 	command := r.exec.ExecuteCommand(r.cls.Statement)
-	if r.cls.Class == sqlsafe.ClassRead {
+	if r.config.SQLRows {
+		conn, ok := r.exec.(sqlsafe.Conn)
+		if !ok {
+			return r.fail("config", fmt.Errorf("structured rows require the PostgreSQL connector"))
+		}
+		command = conn.ExecuteReadRowsCommand(r.cls.Statement)
+	} else if r.cls.Class == sqlsafe.ClassRead {
 		command = r.exec.ExecuteReadCommand(r.cls.Statement)
 	} else if r.backup != nil && r.backup.Kind != string(sqlsafe.BackupNone) {
 		var buildErr error
@@ -621,10 +639,22 @@ func (r *sqlRun) executePhase() error {
 	if command.Protocol == nil {
 		return r.failWithExit("protocol_error", res, &sqlsafe.ProtocolError{Reason: "missing execution protocol"})
 	}
+	var rows *sqlsafe.RowSet
+	if r.config.SQLRows {
+		if res.StdoutTruncated {
+			return r.failWithExit("protocol_error", res, &sqlsafe.ProtocolError{Reason: "structured row output exceeded the capture limit"})
+		}
+		var err error
+		rows, err = sqlsafe.ParseCopyRows(res.Stdout)
+		if err != nil {
+			return r.failWithExit("protocol_error", res, err)
+		}
+	}
 	r.phase = "complete"
 	r.recordAudit(0, "", nil)
 
 	result := r.baseResult()
+	result.RowSet = rows
 	result.Stdout = res.Stdout
 	result.ExitCode = 0
 	result.Success = true

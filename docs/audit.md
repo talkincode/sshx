@@ -80,3 +80,8 @@ a failed operation to retry. Repair the audit destination independently.
 Lifecycle JSON reports `audit_status: written|failed|disabled`; this status is
 not part of the execution fingerprint.
 See [the outcome decision table](execution-contract.md#interpret-outcomes-before-retrying).
+
+Host probes report `audit_status` separately from connection and command
+results. Batched JSON includes counts for connection and probe failures.
+With a restricted filesystem, set `SSHX_AUDIT_OUTPUT` to a writable workspace
+directory or provide `--audit-output` on the invocation.

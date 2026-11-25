@@ -257,3 +257,15 @@ func GetSudoPassword(key string) (string, error) {
 	logger.GetLogger().Success("Sudo password loaded from %s for key: %s", label, key)
 	return password, nil
 }
+
+// GetSSHPassword reads an SSH login password from the configured secret backend.
+func GetSSHPassword(key string) (string, error) {
+	password, err := keyringstore.Get(KeyringServiceName, key)
+	if err != nil {
+		return "", fmt.Errorf("SSH login password for key %q: %w", key, err)
+	}
+	if password == "" {
+		return "", fmt.Errorf("SSH login password for key %q is empty", key)
+	}
+	return password, nil
+}

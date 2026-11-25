@@ -60,6 +60,13 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		return reportROSFailure(config, audit, "config", fmt.Errorf("%s", config.ArgumentError), start)
 	}
 
+	if config.AllowNonAtomic {
+		tokens := config.ROSTokens
+		if len(tokens) < 2 || tokens[0] != "file" || tokens[1] != "upload" {
+			return reportROSFailure(config, audit, "config", fmt.Errorf("--allow-non-atomic requires ros file upload"), start)
+		}
+	}
+	config.TransferProgress = uploadProgress(noticeWriter(config))
 	tokens := config.ROSTokens
 	if len(tokens) == 0 {
 		return reportROSFailure(config, audit, "usage", ros.NewUsageError("missing RouterOS command", "run `sshx ros help` or `sshx ros commands` to list commands"), start)
@@ -120,6 +127,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 	if wfSpec, isWf := ros.ParseWorkflowCommand(tokens, config.ROSSource); isWf {
 		rosWorkflowIntent(config, wfSpec)
 		if config.DryRun {
+			wfSpec.AllowNonAtomic = config.AllowNonAtomic
 			planJSON, pErr := ros.RenderWorkflowPlanJSON(wfSpec)
 			if pErr != nil {
 				return reportROSFailure(config, audit, "internal", pErr, start)
@@ -142,7 +150,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		plan := &ros.ROSPlan{
 			SchemaVersion:      "roswire.command.plan.v1",
 			DryRun:             true,
-			Command:            strings.Join(tokens, " "),
+			Command:            redactROSText(strings.Join(tokens, " ")),
 			RouterOSPath:       req.Mapping.RouterOSPath,
 			Action:             req.Action,
 			ResolvedArgs:       req.Args,
@@ -153,9 +161,16 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 			WillModifyRouterOS: !ros.ReadOnly(req),
 		}
 		if req.Mapping.IsRaw() {
-			plan.RawCommand = req.RawCommand
+			plan.RawCommand = redactROSText(req.RawCommand)
 			plan.ResolvedArgs = map[string]string{}
 			plan.Flags = []string{}
+		}
+		for key, value := range plan.ResolvedArgs {
+			if rosSecretKey.MatchString(key) {
+				plan.ResolvedArgs[key] = "<redacted>"
+			} else {
+				plan.ResolvedArgs[key] = redactROSText(value)
+			}
 		}
 		b, mErr := json.MarshalIndent(plan, "", "  ")
 		if mErr != nil {
@@ -196,7 +211,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 	recordConnectedHops(config, client)
 
 	rosCmd := ros.BuildRouterOSCommand(req)
-	logger.GetLogger().Debug("executing RouterOS command over SSH: %s", rosCmd)
+	logger.GetLogger().Debug("executing RouterOS command over SSH: %s", redactROSText(rosCmd))
 
 	res, execErr := runROSCommand(client, rosCmd)
 	if execErr != nil {
@@ -226,7 +241,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 		Host:          config.Host,
 		Port:          config.Port,
 		User:          config.User,
-		Command:       redactSensitiveText(config.Command),
+		Command:       redactROSText(config.Command),
 		Action:        req.Action,
 		RouterOSPath:  req.Mapping.RouterOSPath,
 		Stdout:        res.Stdout,
@@ -254,7 +269,7 @@ func HandleROS(config *sshclient.Config, audit *auditRecorder) (err error) {
 			fmt.Println()
 		}
 	} else if req.Mapping.ActionKind != ros.ActionPrint {
-		logger.GetLogger().Success("RouterOS command %s completed successfully", strings.Join(tokens, " "))
+		logger.GetLogger().Success("RouterOS command %s completed successfully", redactROSText(strings.Join(tokens, " ")))
 	}
 	return nil
 }
@@ -546,12 +561,12 @@ func reportROSFailureWithExit(config *sshclient.Config, audit *auditRecorder, ki
 		Host:       config.Host,
 		Port:       config.Port,
 		User:       config.User,
-		Command:    redactSensitiveText(config.Command),
+		Command:    redactROSText(config.Command),
 		ExitCode:   res.ExitCode,
 		Success:    false,
 		DurationMs: time.Since(start).Milliseconds(),
 		ErrorKind:  kind,
-		Error:      redactError(err),
+		Error:      redactROSText(err.Error()),
 		Phase:      execution.PhaseExecute,
 		Completion: execution.CompletionForAttempt(execution.PhaseExecute, kind, res.StartAttempted, res.Started, res.ExitObserved),
 	}

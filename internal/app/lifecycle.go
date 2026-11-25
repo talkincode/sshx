@@ -45,18 +45,6 @@ func recordConnectedHopsAs(config *sshclient.Config, client *sshclient.SSHClient
 	}
 }
 
-func resolveSSHCredential(config *sshclient.Config) error {
-	if config.Password != "" || config.SSHPasswordKey == "" {
-		return nil
-	}
-	password, err := sshclient.GetSudoPassword(config.SSHPasswordKey)
-	if err != nil {
-		return &execution.BoundaryError{Kind: "auth", Message: fmt.Sprintf("resolve SSH password role %q: %v", config.SSHPasswordKey, err)}
-	}
-	config.Password = password
-	return nil
-}
-
 func reportPlanFailure(config *sshclient.Config, audit *auditRecorder, err error) error {
 	if preparedFrom(config) == nil {
 		attachPrepared(config, &preparedOperation{meta: execution.NewMetadata(nil, config.ExecutionID), audit: audit})

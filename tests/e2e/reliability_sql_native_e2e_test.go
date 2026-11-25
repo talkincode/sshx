@@ -63,6 +63,22 @@ func TestSQLRealEngineReliability(t *testing.T) {
 			require.Equal(t, 0, read.exitCode, read.stdout+read.stderr)
 			require.Contains(t, read.stdout, "old")
 
+			if engine == "postgres" {
+				args := append(append([]string{}, base...), "--rows", `SELECT name AS duplicate, NULL AS duplicate, '' AS empty FROM `+table+` WHERE id=1`)
+				structured := runSSHX(t, home, args, map[string]string{"SSH_PASSWORD": privateOptions.operatorPassword})
+				require.Zero(t, structured.exitCode, structured.stdout+structured.stderr)
+				var rows struct {
+					RowSet struct {
+						Columns []string    `json:"columns"`
+						Rows    [][]*string `json:"rows"`
+					} `json:"row_set"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(structured.stdout), &rows))
+				assert.Equal(t, []string{"duplicate", "duplicate", "empty"}, rows.RowSet.Columns)
+				old, empty := "old", ""
+				assert.Equal(t, [][]*string{{&old, nil, &empty}}, rows.RowSet.Rows)
+			}
+
 			update := run("UPDATE " + table + " SET name='new' WHERE id=1")
 			require.Equal(t, 0, update.exitCode, update.stdout+update.stderr)
 			var payload map[string]any
@@ -168,6 +184,9 @@ func assertNativeSQLMutationEvidence(t *testing.T, payload map[string]any, engin
 func newNativeSQLFixture(t *testing.T, engine string) *nativeSQLFixture {
 	t.Helper()
 	fixture := &nativeSQLFixture{engine: engine, client: "psql", user: "sshx", port: "5432", password: os.Getenv("SSHX_E2E_PG_PASSWORD")}
+	if port := os.Getenv("SSHX_E2E_PG_PORT"); engine == "postgres" && port != "" {
+		fixture.port = port
+	}
 	if engine == "mysql" {
 		fixture.client, fixture.user, fixture.port, fixture.password = "mysql", "root", "3306", os.Getenv("SSHX_E2E_MYSQL_PASSWORD")
 	}

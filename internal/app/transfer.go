@@ -108,9 +108,6 @@ func connectTransferEndpoint(base *sshclient.Config, host, role string) (*sshcli
 	if contextErr := operationContextError(endpoint); contextErr != nil {
 		return nil, contextErr
 	}
-	if secretErr := resolveSSHCredential(endpoint); secretErr != nil {
-		return nil, secretErr
-	}
 
 	client, err := sshclient.NewSSHClient(endpoint)
 	if err != nil {
@@ -119,9 +116,7 @@ func connectTransferEndpoint(base *sshclient.Config, host, role string) (*sshcli
 	if hopErr := ensureJumpChain(endpoint); hopErr != nil {
 		return nil, hopErr
 	}
-	if hopSecretErr := resolveJumpSecrets(endpoint); hopSecretErr != nil {
-		return nil, hopSecretErr
-	}
+	inheritJumpPassword(endpoint)
 	err = client.Connect()
 	recordConnectedHopsAs(endpoint, client, role)
 	if err != nil {

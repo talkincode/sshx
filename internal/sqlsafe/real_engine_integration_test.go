@@ -175,3 +175,36 @@ func TestSQLRealEngineConcurrentWriterExcludedFromPreimage(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLRealPostgresRowsAndMembershipBackup(t *testing.T) {
+	executor, password, table := realSQLFixture(t, EnginePostgres)
+	conn, ok := executor.(Conn)
+	require.True(t, ok)
+	command := conn.ExecuteReadRowsCommand(`SELECT NULL AS dup, '' AS dup, E'a\r\nb,c"d' AS note`)
+	observation, err := command.Protocol.Parse(runRealSQL(t, command, password, true))
+	require.NoError(t, err)
+	rows, err := ParseCopyRows(observation.Stdout)
+	require.NoError(t, err)
+	require.Equal(t, []string{"dup", "dup", "note"}, rows.Columns)
+	require.Len(t, rows.Rows, 1)
+	require.Len(t, rows.Rows[0], 3)
+	require.Nil(t, rows.Rows[0][0])
+	require.Equal(t, "", *rows.Rows[0][1])
+	require.Equal(t, "a\r\nb,c\"d", *rows.Rows[0][2])
+
+	stmt := "UPDATE " + table + " SET x='new' WHERE id IN (1,3)"
+	cls, err := Classify(stmt)
+	require.NoError(t, err)
+	plan, err := DecideBackup(cls, 1, Options{})
+	require.NoError(t, err)
+	require.Equal(t, BackupRows, plan.Kind)
+	backup := filepath.Join(t.TempDir(), "selected.csv")
+	edit, err := conn.ExecuteWithBackupCommand(stmt, table, cls.WhereClause, backup, plan.Kind)
+	require.NoError(t, err)
+	_, err = edit.Protocol.Parse(runRealSQL(t, edit, password, true))
+	require.NoError(t, err)
+	before, err := os.ReadFile(backup) // #nosec G304 -- test-owned fixture file
+	require.NoError(t, err)
+	assert.Contains(t, string(before), `"1","old"`)
+	assert.NotContains(t, string(before), "other")
+}

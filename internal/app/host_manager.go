@@ -17,8 +17,8 @@ import (
 
 const hostTestDialTimeout = 10 * time.Second
 
-// HandleHostManagement handles host management commands
-func HandleHostManagement(config *sshclient.Config) error {
+// handleHostManagement handles host management commands.
+func handleHostManagement(config *sshclient.Config, audit *auditRecorder) error {
 	var err error
 	switch config.HostAction {
 	case "add":
@@ -30,9 +30,9 @@ func HandleHostManagement(config *sshclient.Config) error {
 	case "list":
 		err = handleHostList(config)
 	case "test":
-		err = handleHostTest(config)
+		err = handleHostTest(config, audit)
 	case "test-all":
-		err = handleHostTestAll(config)
+		err = handleHostTestAll(config, audit)
 	case "remove":
 		err = handleHostRemove(config)
 	default:
@@ -51,6 +51,9 @@ func HandleHostManagement(config *sshclient.Config) error {
 		}
 		if config.HostName != "" {
 			doc.Host = &hostListJSONEntry{Name: config.HostName}
+		}
+		if config.HostAction == "test" || config.HostAction == "test-all" {
+			return emitHostDiagnosticJSON(config, audit, doc)
 		}
 		if emitErr := emitHostActionJSON(doc); emitErr != nil {
 			return emitErr
@@ -166,7 +169,7 @@ func handleHostAdd(config *sshclient.Config) error {
 		}
 
 		// Type (optional, default: linux)
-		fmt.Print("System type [linux/windows/macos] (default: linux): ")
+		fmt.Print("System type [linux/windows/macos/routeros] (default: linux): ")
 		if sysType, err := reader.ReadString('\n'); err == nil {
 			host.Type = strings.TrimSpace(sysType)
 		}
@@ -591,8 +594,12 @@ type hostActionJSON struct {
 	Host              *hostListJSONEntry  `json:"host,omitempty"`
 	ConnectionSuccess bool                `json:"connection_success,omitempty"`
 	CommandSuccess    bool                `json:"command_success,omitempty"`
+	ProbeStatus       string              `json:"probe_status,omitempty"`
 	AuthMethod        string              `json:"auth_method,omitempty"`
 	Output            string              `json:"output,omitempty"`
+	ConnectionFailed  int                 `json:"connection_failed,omitempty"`
+	ProbeFailed       int                 `json:"probe_failed,omitempty"`
+	AuditStatus       string              `json:"audit_status,omitempty"`
 	Count             int                 `json:"count,omitempty"`
 	Succeeded         int                 `json:"succeeded,omitempty"`
 	Hosts             []hostListJSONEntry `json:"hosts,omitempty"`
@@ -608,6 +615,7 @@ type hostTestJSONEntry struct {
 	Success           bool   `json:"success"`
 	ConnectionSuccess bool   `json:"connection_success"`
 	CommandSuccess    bool   `json:"command_success"`
+	ProbeStatus       string `json:"probe_status"`
 	AuthMethod        string `json:"auth_method,omitempty"`
 	Output            string `json:"output,omitempty"`
 	ErrorKind         string `json:"error_kind,omitempty"`
@@ -633,6 +641,7 @@ func hostTestJSONFromResult(result hostTestResult) hostTestJSONEntry {
 		Success:           result.Success(),
 		ConnectionSuccess: result.ConnectionSuccess,
 		CommandSuccess:    result.CommandSuccess,
+		ProbeStatus:       "not_run",
 		AuthMethod:        string(result.AuthMethod),
 		Output:            strings.TrimSpace(result.CommandOutput),
 	}
@@ -643,55 +652,75 @@ func hostTestJSONFromResult(result hostTestResult) hostTestJSONEntry {
 	case result.CommandError != nil:
 		entry.ErrorKind = classifyError(result.CommandError)
 		entry.Error = redactError(result.CommandError)
+		entry.ProbeStatus = "failed"
+		if entry.ErrorKind == "timeout" {
+			entry.ProbeStatus = "timeout"
+		}
+	case result.CommandSuccess:
+		entry.ProbeStatus = "passed"
 	}
 	return entry
 }
 
-func emitHostTestJSON(action string, result hostTestResult) error {
+func emitHostTestJSON(config *sshclient.Config, audit *auditRecorder, result hostTestResult) error {
 	entry := hostTestJSONFromResult(result)
 	doc := hostActionJSON{
 		Success:           entry.Success,
-		Action:            action,
+		Action:            "test",
 		Host:              hostJSONEntry(result.Host),
 		ConnectionSuccess: entry.ConnectionSuccess,
 		CommandSuccess:    entry.CommandSuccess,
+		ProbeStatus:       entry.ProbeStatus,
 		AuthMethod:        entry.AuthMethod,
 		Output:            entry.Output,
 		ErrorKind:         entry.ErrorKind,
 		Error:             entry.Error,
 	}
-	if emitErr := emitHostActionJSON(doc); emitErr != nil {
-		return emitErr
-	}
-	if !entry.Success {
-		return ErrReported
-	}
-	return nil
+	return emitHostDiagnosticJSON(config, audit, doc)
 }
 
-func emitHostTestAllJSON(results []hostTestResult) error {
-	entries := make([]hostTestJSONEntry, 0, len(results))
-	succeeded := 0
+func emitHostTestAllJSON(config *sshclient.Config, audit *auditRecorder, results []hostTestResult) error {
+	doc := hostActionJSON{
+		Action:  "test-all",
+		Count:   len(results),
+		Results: make([]hostTestJSONEntry, 0, len(results)),
+	}
 	for _, result := range results {
 		entry := hostTestJSONFromResult(result)
-		if entry.Success {
-			succeeded++
+		doc.Results = append(doc.Results, entry)
+		switch {
+		case !entry.ConnectionSuccess:
+			doc.ConnectionFailed++
+		case !entry.CommandSuccess:
+			doc.ProbeFailed++
+		default:
+			doc.Succeeded++
 		}
-		entries = append(entries, entry)
 	}
-	doc := hostActionJSON{
-		Success:   succeeded == len(results),
-		Action:    "test-all",
-		Count:     len(results),
-		Succeeded: succeeded,
-		Results:   entries,
-	}
-	if succeeded != len(results) {
+	doc.Success = doc.Succeeded == len(results)
+	if !doc.Success {
 		doc.ErrorKind = "connect"
-		doc.Error = fmt.Sprintf("host test failed for %d host(s)", len(results)-succeeded)
+		if doc.ConnectionFailed == 0 {
+			doc.ErrorKind = "probe"
+		}
+		doc.Error = fmt.Sprintf("connection failed for %d host(s), probe failed for %d host(s)", doc.ConnectionFailed, doc.ProbeFailed)
 	}
-	if emitErr := emitHostActionJSON(doc); emitErr != nil {
-		return emitErr
+	return emitHostDiagnosticJSON(config, audit, doc)
+}
+
+func emitHostDiagnosticJSON(config *sshclient.Config, audit *auditRecorder, doc hostActionJSON) error {
+	doc.AuditStatus = "disabled"
+	if audit != nil {
+		if !doc.Success {
+			config.ReportedErrorKind, config.ReportedError = doc.ErrorKind, doc.Error
+		}
+		doc.AuditStatus = "written"
+		if err := audit.finish(config, nil); err != nil {
+			doc.AuditStatus = "failed"
+		}
+	}
+	if err := emitHostActionJSON(doc); err != nil {
+		return err
 	}
 	if !doc.Success {
 		return ErrReported
@@ -722,7 +751,7 @@ func printHostListJSON(hosts []HostConfig) error {
 }
 
 // handleHostTest tests host connection
-func handleHostTest(config *sshclient.Config) error {
+func handleHostTest(config *sshclient.Config, audit *auditRecorder) error {
 	// Load settings
 	settings, err := LoadSettings()
 	if err != nil {
@@ -745,7 +774,7 @@ func handleHostTest(config *sshclient.Config) error {
 
 	result := runHostDiagnostics(hostConfig, settings, config)
 	if config.JSONOutput {
-		return emitHostTestJSON("test", result)
+		return emitHostTestJSON(config, audit, result)
 	}
 	if !result.ConnectionSuccess {
 		if result.ConnectionError != nil {
@@ -803,7 +832,7 @@ func handleHostRemove(config *sshclient.Config) error {
 }
 
 // handleHostTestAll tests all configured hosts and prints a summary report.
-func handleHostTestAll(config *sshclient.Config) error {
+func handleHostTestAll(config *sshclient.Config, audit *auditRecorder) error {
 	settings, err := LoadSettings()
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
@@ -812,13 +841,7 @@ func handleHostTestAll(config *sshclient.Config) error {
 	hosts := ListHosts(settings)
 	if len(hosts) == 0 {
 		if config.JSONOutput {
-			return emitHostActionJSON(hostActionJSON{
-				Success:   true,
-				Action:    "test-all",
-				Count:     0,
-				Succeeded: 0,
-				Results:   []hostTestJSONEntry{},
-			})
+			return emitHostTestAllJSON(config, audit, nil)
 		}
 		fmt.Println("No hosts configured. Use sshx --host-add to add hosts before running --host-test-all.")
 		return nil
@@ -838,7 +861,7 @@ func handleHostTestAll(config *sshclient.Config) error {
 	}
 
 	if config.JSONOutput {
-		return emitHostTestAllJSON(results)
+		return emitHostTestAllJSON(config, audit, results)
 	}
 
 	successCount := 0
@@ -904,10 +927,7 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 		result.ConnectionError = hopErr
 		return result
 	}
-	if hopSecretErr := resolveJumpSecrets(sshConfig); hopSecretErr != nil {
-		result.ConnectionError = hopSecretErr
-		return result
-	}
+	inheritJumpPassword(sshConfig)
 	client, err := sshclient.NewSSHClient(sshConfig)
 	if err != nil {
 		result.ConnectionError = err
@@ -927,8 +947,18 @@ func runHostDiagnostics(hostConfig *HostConfig, settings *Settings, baseConfig *
 	result.ConnectionSuccess = true
 	result.AuthMethod = client.AuthMethodUsed()
 
-	sshConfig.Command = "echo 'Connection test successful'"
-	output, execErr := client.ExecuteCommandWithOutput()
+	var output string
+	var execErr error
+	if strings.EqualFold(strings.TrimSpace(hostConfig.Type), "routeros") {
+		probe, probeErr := runROSCommand(client, "/system/identity/print")
+		output, execErr = redactROSOutput(probe.Stdout), probeErr
+		if execErr == nil && probe.ExitCode != 0 {
+			execErr = fmt.Errorf("RouterOS probe exited with status %d", probe.ExitCode)
+		}
+	} else {
+		sshConfig.Command = "echo 'Connection test successful'"
+		output, execErr = client.ExecuteCommandWithOutput()
+	}
 	if execErr != nil {
 		result.CommandError = execErr
 		return result
@@ -978,13 +1008,7 @@ func buildHostTestConfig(hostConfig *HostConfig, settings *Settings, baseConfig 
 
 	// Only the typed SSH login password key may authorize password auth.
 	// Legacy password_key / sudo_password_key are sudo-only and must not be used here.
-	if sshKey := hostConfig.EffectiveSSHPasswordKey(); sshKey != "" {
-		if password, err := sshclient.GetSudoPassword(sshKey); err == nil {
-			testConfig.Password = password
-		} else {
-			logger.GetLogger().Warning("failed to get SSH password from keyring (%s): %v", sshKey, err)
-		}
-	}
+	testConfig.SSHPasswordKey = hostConfig.EffectiveSSHPasswordKey()
 
 	return testConfig
 }

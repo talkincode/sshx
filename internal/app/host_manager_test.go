@@ -19,7 +19,7 @@ func TestHostAddOmitsDefaultSudoKey(t *testing.T) {
 		t.Fatal("omitted -pk must not set SudoKeySet")
 	}
 	var addErr error
-	out := string(captureStdout(t, func() { addErr = HandleHostManagement(cfg) }))
+	out := string(captureStdout(t, func() { addErr = handleHostManagement(cfg, nil) }))
 	if addErr != nil {
 		t.Fatalf("host-add: %v", addErr)
 	}
@@ -39,7 +39,7 @@ func TestHostAddOmitsDefaultSudoKey(t *testing.T) {
 
 	listCfg := ParseArgs([]string{"sshx", "--host-list", "--json"})
 	var listErr error
-	listOut := string(captureStdout(t, func() { listErr = HandleHostManagement(listCfg) }))
+	listOut := string(captureStdout(t, func() { listErr = handleHostManagement(listCfg, nil) }))
 	if listErr != nil {
 		t.Fatalf("host-list: %v", listErr)
 	}
@@ -52,12 +52,12 @@ func TestHostAddOmitsDefaultSudoKey(t *testing.T) {
 		t.Fatalf("explicit -pk not recorded: set=%t key=%q", explicit.SudoKeySet, explicit.SudoKey)
 	}
 	var explicitErr error
-	_ = captureStdout(t, func() { explicitErr = HandleHostManagement(explicit) })
+	_ = captureStdout(t, func() { explicitErr = handleHostManagement(explicit, nil) })
 	if explicitErr != nil {
 		t.Fatalf("explicit host-add: %v", explicitErr)
 	}
 	listOut = string(captureStdout(t, func() {
-		listErr = HandleHostManagement(ParseArgs([]string{"sshx", "--host-list", "--json"}))
+		listErr = handleHostManagement(ParseArgs([]string{"sshx", "--host-list", "--json"}), nil)
 	}))
 	if listErr != nil {
 		t.Fatalf("host-list after explicit: %v", listErr)
@@ -71,13 +71,13 @@ func TestHostUpdateRemoveJSON(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	var err error
 	_ = captureStdout(t, func() {
-		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "--json"}))
+		err = handleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "--json"}), nil)
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	out := string(captureStdout(t, func() {
-		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-update", "--host-name=lab", "--host-desc=updated", "--json"}))
+		err = handleHostManagement(ParseArgs([]string{"sshx", "--host-update", "--host-name=lab", "--host-desc=updated", "--json"}), nil)
 	}))
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -91,7 +91,7 @@ func TestHostUpdateRemoveJSON(t *testing.T) {
 	}
 
 	out = string(captureStdout(t, func() {
-		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-remove=lab", "--json"}))
+		err = handleHostManagement(ParseArgs([]string{"sshx", "--host-remove=lab", "--json"}), nil)
 	}))
 	if err != nil {
 		t.Fatalf("remove: %v", err)
@@ -114,9 +114,9 @@ func TestHostImportJSON(t *testing.T) {
 	}
 	var importErr error
 	out := string(captureStdout(t, func() {
-		importErr = HandleHostManagement(ParseArgs([]string{
+		importErr = handleHostManagement(ParseArgs([]string{
 			"sshx", "--host-import=imported", "--ssh-config=" + sshConfig, "--json",
-		}))
+		}), nil)
 	}))
 	if importErr != nil {
 		t.Fatalf("import: %v stdout=%s", importErr, out)
@@ -140,13 +140,13 @@ func TestHostTestJSONFailedConnect(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	var err error
 	_ = captureStdout(t, func() {
-		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "-u=probe", "--json"}))
+		err = handleHostManagement(ParseArgs([]string{"sshx", "--host-add", "--host-name=lab", "--host=127.0.0.1", "-u=probe", "--json"}), nil)
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	out := string(captureStdout(t, func() {
-		err = HandleHostManagement(ParseArgs([]string{"sshx", "--host-test=lab", "--json", "--no-key"}))
+		err = handleHostManagement(ParseArgs([]string{"sshx", "--host-test=lab", "--json", "--no-key"}), nil)
 	}))
 	if !errors.Is(err, ErrReported) {
 		t.Fatalf("test error = %v, want ErrReported; stdout=%s", err, out)

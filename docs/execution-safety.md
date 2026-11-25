@@ -15,7 +15,9 @@ prompt/readiness handshake:
 4. NOPASSWD, cached authentication and root do not receive a credential line.
 5. Repeated prompts, missing readiness, cancellation and I/O errors fail closed.
 
-Markers are removed from stderr even when split across SSH packets. Secrets
+Markers are removed from both result streams, including packet-split markers.
+SSHX requests the sudo credential only when the prompt reaches control stderr.
+A redirected prompt fails with an actionable diagnostic. Secrets
 never enter argv, environment variables or temporary secret files. The
 handshake has a 30-second readiness limit; configured command/host/global
 limits can end it earlier. Passwords containing NUL/CR/LF are rejected rather
@@ -52,8 +54,13 @@ SSH fixture is not evidence for every PAM or sudo configuration.
 - Recognized device diagnostic lines fail even when SSH reports exit status 0.
   Transport exit, domain acceptance and effect verification remain distinct;
   successful arbitrary mutations do not imply verified postconditions.
-- ROS connections use configured jump hosts, SSH credential references and
-  host/global budgets. Results and audit share finalized execution evidence.
+- ROS connections use the configured alias user, jump hosts, SSH credential
+  references and host/global budgets. SSH key authentication precedes password
+  fallback. Hosts typed as `routeros` use an identity probe in host diagnostics.
+- Command output redacts recognizable credential fields, including folded
+  container token arguments. Downloaded file contents are preserved.
+- Simple batches of literal print commands can run without write admission.
+  Nested evaluation, file output and container process execution require it.
 - File upload/download reuse the guarded SFTP implementation: no direct
   truncate-and-copy path, no silent delete-before-replace, and no symlink
   destination overwrite. Backup/export use unique default remote filenames.
@@ -67,8 +74,14 @@ SSH fixture is not evidence for every PAM or sudo configuration.
 Transfers use a bounded 1 MiB aperture and at most 32 outstanding requests per
 file. This preserves content verification, error ownership and partial-effect
 records while avoiding a serial round trip per 32 KiB packet. An upload still
-reads the destination back for verification; completion and verification are
-not interchangeable. JSON remains one final document.
+reads the destination back for verification. JSON remains one final document.
+Slow uploads report upload, publish and verify phases on stderr.
+
+For uploads on a server lacking atomic replacement, the default preserves the
+existing destination. With `--allow-non-atomic`, sshx verifies staging, moves
+the previous file to `backup_path`, then publishes. If publication is rejected,
+the acknowledged backup remains available. Check the recorded paths after an
+uncertain transport outcome before retrying.
 
 For a host whose home filesystem lacks space:
 

@@ -293,3 +293,15 @@ func TestCLIAuditRedactsSecretsAndRecoversAfterWriteFailure(t *testing.T) {
 	assert.Contains(t, strings.ToLower(event.Command), "redacted")
 	assert.False(t, scanner.Scan(), "one invocation must produce one audit event")
 }
+
+func TestHostDiagnosticSeparatesAuditFailureFromProbeOutcome(t *testing.T) {
+	home := t.TempDir()
+	auditFile := filepath.Join(home, "audit-target")
+	require.NoError(t, os.WriteFile(auditFile, nil, 0o600))
+	env := map[string]string{"SSHX_NO_AUDIT": "false", "SSHX_AUDIT_OUTPUT": auditFile}
+	empty := runSSHX(t, home, []string{"--host-test-all", "--json"}, env)
+	require.Zero(t, empty.exitCode)
+	assert.Contains(t, empty.stdout, `"success":true`)
+	assert.Contains(t, empty.stdout, `"audit_status":"failed"`)
+	assert.Contains(t, empty.stderr, "--audit-output")
+}

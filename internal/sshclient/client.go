@@ -54,8 +54,11 @@ type Config struct {
 	Host                string
 	Port                string
 	User                string
+	UserSet             bool
 	Password            string
+	PasswordSource      func() (string, error)
 	SudoPassword        string
+	SudoPasswordSource  func() (string, error)
 	KeyPath             string
 	UseKeyAuth          bool
 	SudoKey             string
@@ -97,9 +100,11 @@ type Config struct {
 	// KnownHostsPath allows overriding the path to the known_hosts file.
 	KnownHostsPath string
 
-	SftpAction string
-	LocalPath  string
-	RemotePath string
+	SftpAction       string
+	LocalPath        string
+	RemotePath       string
+	AllowNonAtomic   bool
+	TransferProgress func(phase string, bytes, total int64)
 
 	// Server-to-server transfer fields (Mode == "transfer").
 	TransferSrcHost string
@@ -169,6 +174,8 @@ type Config struct {
 	FailureMode    string
 	BypassReason   string
 	ScriptFile     string
+	ScriptArgs     []string
+	RunStdinFile   string
 	ScriptStdin    bool
 	// ScriptShell overrides the interpreter used for --script-file /
 	// --script-stdin payloads. Empty means: follow the payload's shebang, or
@@ -185,6 +192,7 @@ type Config struct {
 	// positional statement is given (--statement-file=PATH).
 	SQLStatementFile string
 	// SQLEngine names the database engine: "postgres" (default) or "sqlite".
+	SQLRows     bool
 	SQLEngine   string
 	SQLDatabase string
 	// SQLFile is the --db-file path for --engine=sqlite. Copied into

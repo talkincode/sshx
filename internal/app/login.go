@@ -33,10 +33,7 @@ func HandleLogin(config *sshclient.Config, audit *auditRecorder) (err error) {
 	if hopErr := ensureJumpChain(config); hopErr != nil {
 		return failLogin(config, audit, sshclient.AuthMethodUnknown, "config", hopErr)
 	}
-	if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
-		return failLogin(config, audit, sshclient.AuthMethodUnknown, "auth", hopSecretErr)
-	}
-	fillLoginSSHPassword(config)
+	inheritJumpPassword(config)
 
 	client, cliErr := sshclient.NewSSHClient(config)
 	if cliErr != nil {
@@ -70,18 +67,6 @@ func validateLoginConfig(config *sshclient.Config) error {
 		return fmt.Errorf("%w: login --json requires --dry-run", execution.ErrConfig)
 	}
 	return nil
-}
-
-func fillLoginSSHPassword(config *sshclient.Config) {
-	if config.Password != "" || config.SSHPasswordKey == "" {
-		return
-	}
-	password, pwdErr := sshclient.GetSudoPassword(config.SSHPasswordKey)
-	if pwdErr != nil {
-		logger.GetLogger().Warning("failed to get SSH password from keyring (%s): %v", config.SSHPasswordKey, pwdErr)
-		return
-	}
-	config.Password = password
 }
 
 func failLogin(config *sshclient.Config, audit *auditRecorder, auth sshclient.AuthMethod, kind string, err error) error {

@@ -144,6 +144,9 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 	case "sftp":
 		plan.Inputs["remote_path"] = config.RemotePath
 		if config.SftpAction == "upload" {
+			if config.AllowNonAtomic {
+				plan.Inputs["allow_non_atomic"] = "true"
+			}
 			hash, count, cleanup, err := prepareUpload(config)
 			p.cleanup = cleanup
 			if err != nil {
@@ -162,6 +165,12 @@ func prepareOperation(config *sshclient.Config) (*preparedOperation, error) {
 		cls, err := sqlsafe.ClassifyFor(config.SQLEngine, config.SQLStatement)
 		if err != nil {
 			return p, err
+		}
+		if err := validateSQLRows(config, cls); err != nil {
+			return p, err
+		}
+		if config.SQLRows {
+			plan.Inputs["rows"] = "true"
 		}
 		plan.Effects.Unknown = false
 		plan.Effects.RemoteWrite = cls.Class != sqlsafe.ClassRead && !config.SQLExplainOnly
@@ -400,11 +409,14 @@ func publiclyResolved(config *sshclient.Config) bool {
 func prepareRunPlan(config *sshclient.Config, req *execution.Request, snap *execution.TargetSnapshot, payload *execution.Payload) (*execution.Plan, error) {
 	plan := &execution.Plan{Action: req.Action.Kind, Inputs: planInputs(config)}
 	command := req.Action.Command
-	if payload != nil {
+	if payload != nil && req.Action.Kind == execution.ActionScript {
 		command = string(payload.Bytes)
 	}
 	plan.Risk, plan.Effects = execution.ClassifyRisk(req.Action.Kind, command, req.Action.UseSudo)
 	plan.Inputs["payload_sha256"], plan.Inputs["payload_bytes"] = req.Action.PayloadSHA256, strconv.Itoa(req.Action.PayloadBytes)
+	if req.Action.ScriptArgsSHA != "" {
+		plan.Inputs["script_args_sha256"] = req.Action.ScriptArgsSHA
+	}
 	plan.Inputs["shell"], plan.Inputs["intent"] = req.Action.ScriptRunner, req.Action.Intent
 	plan.Inputs["use_sudo"] = strconv.FormatBool(req.Action.UseSudo)
 	plan.Inputs["concurrency"] = strconv.Itoa(req.Limits.Concurrency)

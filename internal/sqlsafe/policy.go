@@ -2,6 +2,7 @@ package sqlsafe
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -176,6 +177,10 @@ func DecideBackup(cls *Classification, estimatedRows int64, opts Options) (Backu
 		Reason: "snapshotting affected rows selected by the statement's WHERE clause"}, nil
 }
 
+// Accept parentheses only in literal integer membership lists. The
+// whitespace between the column and IN keeps qualified functions out.
+var integerMembership = regexp.MustCompile(`(?i)(?:^|[ \t])[a-z_][a-z_0-9.]*[ \t]+(?:NOT[ \t]+)?IN[ \t]*\([ \t]*[+-]?[0-9]+(?:[ \t]*,[ \t]*[+-]?[0-9]+)*[ \t]*\)`)
+
 func stableBackupPredicate(where string) bool {
 	if strings.Contains(where, "--") || strings.Contains(where, "#") {
 		return false
@@ -183,6 +188,18 @@ func stableBackupPredicate(where string) bool {
 	masked, err := maskNonCode(where)
 	if err != nil {
 		return false
+	}
+	for _, match := range integerMembership.FindAllIndex(masked, -1) {
+		// Validate the original slice too. A masked literal or comment
+		// inside a list cannot masquerade as whitespace.
+		list := strings.TrimSpace(where[match[0]:match[1]])
+		if m := integerMembership.FindStringIndex(list); m != nil && m[0] == 0 && m[1] == len(list) {
+			for i := match[0]; i < match[1]; i++ {
+				if masked[i] == '(' || masked[i] == ')' {
+					masked[i] = ' '
+				}
+			}
+		}
 	}
 	for _, ch := range masked {
 		if ch == '(' || ch == '@' {

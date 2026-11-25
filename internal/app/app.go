@@ -140,7 +140,7 @@ func RunContext(ctx context.Context, args []string) (err error) {
 			audit.event.Metadata = meta
 		}
 		if auditErr := audit.finish(config, err); auditErr != nil {
-			logger.GetLogger().Error("failed to write audit event: %v", auditErr)
+			writeDiagnosticNote(os.Stderr, "sshx: warning: failed to write audit event: %v (set SSHX_AUDIT_OUTPUT or --audit-output to a writable directory)\n", auditErr)
 		}
 	}()
 	if config.ExpectPlan != "" && config.Mode != "run" && !remoteOperation(config) {
@@ -155,6 +155,13 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	// Canonical multi-host / script execution contract.
 	if config.Mode == "run" {
 		return HandleRun(config, audit)
+	}
+
+	if config.AllowNonAtomic && config.Mode != "ros" && (config.Mode != "sftp" || config.SftpAction != "upload") {
+		return reportPlanFailure(config, audit, fmt.Errorf("%w: --allow-non-atomic is only valid for file uploads", execution.ErrConfig))
+	}
+	if config.Mode == "sftp" && config.SftpAction == "upload" {
+		config.TransferProgress = uploadProgress(noticeWriter(config))
 	}
 
 	// MikroTik RouterOS execution contract over SSH.
@@ -209,12 +216,7 @@ func RunContext(ctx context.Context, args []string) (err error) {
 		if contextErr := config.Context.Err(); contextErr != nil {
 			return reportPlanFailure(config, audit, contextErr)
 		}
-		if secretErr := resolveSSHCredential(config); secretErr != nil {
-			return reportPlanFailure(config, audit, secretErr)
-		}
-		if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
-			return reportPlanFailure(config, audit, hopSecretErr)
-		}
+		inheritJumpPassword(config)
 	}
 
 	// Guarded SQL execution pipeline (owns its own SSH connection).
@@ -257,7 +259,7 @@ func RunContext(ctx context.Context, args []string) (err error) {
 
 	// Handle host management mode
 	if config.Mode == "host" {
-		if hostErr := HandleHostManagement(config); hostErr != nil {
+		if hostErr := handleHostManagement(config, audit); hostErr != nil {
 			if errors.Is(hostErr, ErrReported) {
 				return hostErr
 			}
@@ -328,9 +330,7 @@ func RunContext(ctx context.Context, args []string) (err error) {
 	if hopErr := ensureJumpChain(config); hopErr != nil {
 		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "config", hopErr)
 	}
-	if hopSecretErr := resolveJumpSecrets(config); hopSecretErr != nil {
-		return reportSSHFailure(config, audit, sshclient.AuthMethodUnknown, "auth", hopSecretErr)
-	}
+	inheritJumpPassword(config)
 
 	// Auto-fill sudo password if needed
 	if sshclient.CommandUsesSudo(config.Command) && config.SudoKey != "" {
@@ -593,7 +593,7 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 			config.Port = hostConfig.Port
 		}
 	}
-	if config.User == "" || config.User == sshclient.DefaultSSHUser {
+	if !config.UserSet && (config.User == "" || config.User == sshclient.DefaultSSHUser) {
 		if hostConfig.User != "" {
 			config.User = hostConfig.User
 		}
@@ -627,15 +627,6 @@ func resolveHostFromSettings(config *sshclient.Config) error {
 		case settings.Key != "":
 			config.KeyPath = settings.Key
 			logger.GetLogger().Success("Using SSH key: %s", settings.Key)
-		}
-	}
-
-	// Resolve typed SSH login password only when that role is requested.
-	if config.Password == "" && config.SSHPasswordKey != "" {
-		if password, pwdErr := sshclient.GetSudoPassword(config.SSHPasswordKey); pwdErr != nil {
-			logger.GetLogger().Warning("failed to get SSH password from keyring (%s): %v", config.SSHPasswordKey, pwdErr)
-		} else {
-			config.Password = password
 		}
 	}
 

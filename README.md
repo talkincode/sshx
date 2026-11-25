@@ -276,6 +276,24 @@ By default:
   control characters mixed in).
 - **The remote command's exit status is propagated** as `sshx`'s own exit code.
 
+### Command input and script arguments
+
+```bash
+sshx run --target=web --stdin-file=./query.txt --json -- 'cat'
+sshx run --target=web --script-file=./check.sh --script-arg='/srv/my app' --json
+```
+
+A pipe or file redirection supplies command stdin. `--stdin-file=-` selects
+local stdin explicitly. Input is read through EOF before connecting and is
+bounded by `--max-payload-bytes`. For scripts, pass one `--script-arg` per
+positional argument. `--sudo` applies to the whole script, with a keyring lookup
+only when sudo requests a password. Start a command with `sudo` for command
+mode. Results may report `action.sudo_autofill_skipped` for nested sudo.
+
+Use `sshx sql --json --rows` for PostgreSQL SELECT results with
+`row_set.columns` and `row_set.rows`. Cells retain PostgreSQL text and SQL NULL
+appears as JSON `null`. Duplicate column names and column order are preserved.
+
 ### Exit codes
 
 | Code     | Meaning                                                             |
@@ -1062,6 +1080,17 @@ Click "More info" and then "Run anyway" if Windows Defender SmartScreen shows a 
 # Make sure the binary has execute permissions
 sudo chmod +x /usr/local/bin/sshx
 ```
+
+RouterOS command output applies best-effort secret redaction. Downloaded
+files retain their original bytes. Set `--host-type=routeros` for device-aware
+host diagnostics. JSON host diagnostics report the probe outcome and
+`audit_status` separately. Set `SSHX_AUDIT_OUTPUT` to a writable directory in
+a restricted workspace.
+
+When a server lacks atomic replacement, an upload can opt in with
+`--allow-non-atomic`. sshx verifies the staged content, keeps the previous
+file under the returned `backup_path`, then publishes the new file. The
+destination can be briefly absent. Slow uploads report progress on stderr.
 
 ## Development
 

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -12,8 +11,10 @@ import (
 
 func runROSCommand(client *sshclient.SSHClient, command string) (sshclient.ExecResult, error) {
 	result, err := client.RunCommandWithInput(command, nil)
-	if err == nil && (ros.CommandDiagnostic(result.Stdout) || ros.CommandDiagnostic(result.Stderr)) {
-		err = &execution.BoundaryError{Kind: "ros_command_error", Message: "RouterOS rejected the command: " + redactSensitiveText(firstNonEmpty(result.Stderr, result.Stdout))}
+	rejected := ros.CommandDiagnostic(result.Stdout) || ros.CommandDiagnostic(result.Stderr)
+	result.Stdout, result.Stderr = redactROSOutput(result.Stdout), redactROSOutput(result.Stderr)
+	if err == nil && rejected {
+		err = &execution.BoundaryError{Kind: "ros_command_error", Message: "RouterOS rejected the command: " + firstNonEmpty(result.Stderr, result.Stdout)}
 	}
 	return result, err
 }
@@ -31,6 +32,9 @@ func setROSOperation(config *sshclient.Config, action, command string, remoteWri
 }
 
 func newROSClient(config *sshclient.Config) (*sshclient.SSHClient, error) {
+	if config.User == "" {
+		config.User = "admin"
+	}
 	settings, err := LoadSettings()
 	if err != nil {
 		return nil, err
@@ -38,12 +42,7 @@ func newROSClient(config *sshclient.Config) (*sshclient.SSHClient, error) {
 	if err := materializeJumpChain(config, settings); err != nil {
 		return nil, err
 	}
-	if err := resolveSSHCredential(config); err != nil {
-		return nil, err
-	}
-	if err := resolveJumpSecrets(config); err != nil {
-		return nil, err
-	}
+	inheritJumpPassword(config)
 	return sshclient.NewSSHClient(config)
 }
 
@@ -78,7 +77,7 @@ func finishROSFile(config *sshclient.Config, audit *auditRecorder, client *sshcl
 		return err
 	}
 	if !config.JSONOutput {
-		fmt.Printf("SFTP %s: %s (%d bytes)\n", action, outcome.Completion, outcome.BytesTransferred)
+		return sshclient.RenderSFTPOutcome(outcome)
 	}
 	return nil
 }

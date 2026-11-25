@@ -245,7 +245,23 @@ func checkPassword(config *sshclient.Config, serviceName, key string) error {
 		return missing
 	}
 
-	return fmt.Errorf("failed to check password: %w", err)
+	lookupErr := fmt.Errorf("failed to check password: %w", err)
+	if config == nil || !config.JSONOutput {
+		return lookupErr
+	}
+	kind := "secret_backend"
+	switch {
+	case errors.Is(err, keyringstore.ErrInteractionRequired):
+		kind = "interaction_required"
+	case errors.Is(err, keyringstore.ErrAccessDenied):
+		kind = "access_denied"
+	}
+	if emitErr := emitSecretsJSON(secretsJSONResult{
+		Action: "check", Key: key, ErrorKind: kind, Error: lookupErr.Error(),
+	}); emitErr != nil {
+		return emitErr
+	}
+	return ErrReported
 }
 
 func listPasswords(config *sshclient.Config) error {

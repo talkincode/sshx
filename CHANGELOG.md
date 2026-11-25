@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `run` forwards bounded command stdin and accepts repeatable `--script-arg`
+  arguments. A reviewed plan binds both forms of input.
+- PostgreSQL `sql --json --rows` emits ordered columns and row arrays with
+  distinct empty strings and SQL NULLs.
+- Uploads report progress. On SFTP servers without atomic replacement,
+  `--allow-non-atomic` verifies the staged content and preserves the old file
+  under a separate backup path.
+
+### Fixed
+
+- RouterOS diagnostics use a device-specific probe and report audit persistence
+  separately. ROS commands honor the alias user, diagnose invalid transfer
+  flags, redact recognizable credentials, and preserve grouped counters.
+- SSH attempts an available configured key before reading a fallback password.
+  macOS credential checks distinguish missing entries, denied access and
+  keychain interaction requirements.
+- `run --sudo` applies to scripts. Sudo reads a credential only when prompted,
+  and framing is removed from both output streams.
+- Guarded SQL recognizes integer-literal IN lists for row-scoped backups.
+
 ## [0.20.1] - 2026-10-27
 
 ### Fixed

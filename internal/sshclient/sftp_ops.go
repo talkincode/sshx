@@ -38,6 +38,8 @@ type FileOutcome struct {
 	Verification       string  `json:"verification"`
 	VerificationMethod string  `json:"verification_method,omitempty"`
 	ModifiedAt         string  `json:"modified_at,omitempty"`
+	BackupPath         string  `json:"backup_path,omitempty"`
+	BackupPreserved    bool    `json:"backup_preserved,omitempty"`
 	StagingPath        string  `json:"staging_path,omitempty"`
 	CleanupError       string  `json:"cleanup_error,omitempty"`
 	phase              string
@@ -93,7 +95,8 @@ func finishSFTPOutcome(out *SFTPOutcome, err error) {
 		if entry.ChangeState == "changed" {
 			out.ChangeState = "changed"
 			acknowledged = true
-			if entry.Path == out.DestinationPath && (!out.directory || out.Action == "mkdir" || out.Action == "remove" || out.Action == "rm") {
+			if entry.Path == out.DestinationPath && (!entry.BackupPreserved || entry.Published) &&
+				(!out.directory || out.Action == "mkdir" || out.Action == "remove" || out.Action == "rm") {
 				targetAcknowledged = true
 			}
 		}
@@ -160,8 +163,17 @@ func renderSFTPOutcome(w io.Writer, out *SFTPOutcome) error {
 		return boundaryError("config", "render SFTP outcome", fmt.Errorf("missing outcome"))
 	}
 	if out.Action != "list" && out.Action != "ls" {
-		_, err := fmt.Fprintf(w, "SFTP %s: %s (%d bytes)\n", out.Action, out.Completion, out.BytesTransferred)
-		return boundaryError("local_io", "render SFTP outcome", err)
+		if _, err := fmt.Fprintf(w, "SFTP %s: %s (%d bytes)\n", out.Action, out.Completion, out.BytesTransferred); err != nil {
+			return boundaryError("local_io", "render SFTP outcome", err)
+		}
+		for _, entry := range out.Entries {
+			if entry.BackupPreserved {
+				if _, err := fmt.Fprintf(w, "Previous file preserved at %s\n", entry.BackupPath); err != nil {
+					return boundaryError("local_io", "render SFTP outcome", err)
+				}
+			}
+		}
+		return nil
 	}
 	if _, err := fmt.Fprintf(w, "Directory listing: %s\n", out.DestinationPath); err != nil {
 		return boundaryError("local_io", "render SFTP outcome", err)
@@ -246,7 +258,8 @@ func (c *SSHClient) executeSftpResult(config *Config) (out *SFTPOutcome, err err
 			}
 			source, size = file, info.Size()
 		}
-		err = publishRemoteFile(ctx, client, source, "local_io", size, nil, &entry)
+		err = publishRemoteFileWithOptions(ctx, client, source, "local_io", size, nil, &entry,
+			remotePublishOptions{allowNonAtomic: config.AllowNonAtomic, progress: config.TransferProgress})
 	case "download":
 		entry := FileOutcome{SourcePath: config.RemotePath, Path: config.LocalPath, Type: "file", ChangeState: "unchanged", Verification: "not_performed"}
 		defer func() { out.Entries = append(out.Entries, entry) }()
@@ -332,7 +345,16 @@ func stagingName(destination string) (string, error) {
 	return "." + path.Base(destination) + ".sshx-copy-" + hex.EncodeToString(token[:]), nil
 }
 
-func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reader, sourceKind string, expectedSize int64, requestedMode *os.FileMode, entry *FileOutcome) (err error) {
+func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reader, sourceKind string, expectedSize int64, requestedMode *os.FileMode, entry *FileOutcome) error {
+	return publishRemoteFileWithOptions(ctx, client, source, sourceKind, expectedSize, requestedMode, entry, remotePublishOptions{})
+}
+
+type remotePublishOptions struct {
+	allowNonAtomic bool
+	progress       func(phase string, bytes, total int64)
+}
+
+func publishRemoteFileWithOptions(ctx context.Context, client *sftp.Client, source io.Reader, sourceKind string, expectedSize int64, requestedMode *os.FileMode, entry *FileOutcome, options remotePublishOptions) (err error) {
 	entry.phase, entry.VerificationMethod = "execute", "sha256_and_metadata"
 	if contextErr := ctx.Err(); contextErr != nil {
 		return contextErr
@@ -364,8 +386,9 @@ func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reade
 		mode = requestedMode.Perm()
 	}
 	_, atomicReplace := client.HasExtension("posix-rename@openssh.com")
-	if exists && !atomicReplace {
-		return boundaryError("remote_io", "publish file", fmt.Errorf("server lacks atomic replacement; existing destination preserved"))
+	nonAtomic := exists && !atomicReplace
+	if nonAtomic && !options.allowNonAtomic {
+		return boundaryError("remote_io", "publish file", fmt.Errorf("server lacks atomic replacement; existing destination preserved (use --allow-non-atomic for a replacement that keeps a backup)"))
 	}
 	name, err := stagingName(entry.Path)
 	if err != nil {
@@ -413,7 +436,12 @@ func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reade
 		return chmodErr
 	}
 	digest := sha256.New()
-	entry.BytesTransferred, err = copyBoundary(ctx, file, io.TeeReader(io.LimitReader(source, expectedSize+1), digest), sourceKind, "remote_io")
+	var target io.Writer = file
+	if options.progress != nil {
+		options.progress("upload", 0, expectedSize)
+		target = &copyProgressWriter{writer: file, phase: "upload", total: expectedSize, progress: options.progress}
+	}
+	entry.BytesTransferred, err = copyBoundary(ctx, target, io.TeeReader(io.LimitReader(source, expectedSize+1), digest), sourceKind, "remote_io")
 	entry.SourceSHA256 = hex.EncodeToString(digest.Sum(nil))
 	if err != nil {
 		return err
@@ -451,15 +479,30 @@ func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reade
 	if contextErr := ctx.Err(); contextErr != nil {
 		return contextErr
 	}
-	entry.ChangeState = "unknown"
+	if nonAtomic {
+		if preserveErr := preserveBeforeReplacement(ctx, client, stage, info, entry, options.progress); preserveErr != nil {
+			return preserveErr
+		}
+	}
+	if options.progress != nil {
+		options.progress("publish", expectedSize, expectedSize)
+	}
+	if entry.ChangeState != "changed" {
+		entry.ChangeState = "unknown"
+	}
 	if atomicReplace {
 		entry.Publication = "posix_rename"
 		err = client.PosixRename(stage, entry.Path)
 	} else {
-		entry.Publication = "sftp_rename_no_replace"
+		if !nonAtomic {
+			entry.Publication = "sftp_rename_no_replace"
+		}
 		err = client.Rename(stage, entry.Path)
 	}
 	if err != nil {
+		if entry.BackupPreserved {
+			return fmt.Errorf("publish replacement (previous file preserved at %s): %w", entry.BackupPath, err)
+		}
 		return err
 	}
 	published, entry.Published, entry.ChangeState, entry.StagingPath = true, true, "changed", ""
@@ -478,23 +521,83 @@ func publishRemoteFile(ctx context.Context, client *sftp.Client, source io.Reade
 		entry.Verification = "failed"
 		return boundaryError("verification_failed", "verify destination ownership", fmt.Errorf("destination ownership mismatch"))
 	}
-	remote, err := client.Open(entry.Path)
+	entry.SHA256, err = verifyRemoteDigest(ctx, client, entry.Path, entry.BytesTransferred, entry.SourceSHA256, "verify", options.progress)
 	if err != nil {
+		if errors.Is(err, errSFTPDigestMismatch) {
+			entry.Verification = "failed"
+		}
 		return boundaryError("verification_failed", "verify destination contents", err)
-	}
-	actual := sha256.New()
-	readBytes, readErr := copyBoundary(ctx, actual, io.LimitReader(remote, entry.BytesTransferred+1), "remote_io", "remote_io")
-	closeErr := remote.Close()
-	entry.SHA256 = hex.EncodeToString(actual.Sum(nil))
-	if readErr != nil || closeErr != nil {
-		return boundaryError("verification_failed", "verify destination contents", errors.Join(readErr, closeErr))
-	}
-	if readBytes != entry.BytesTransferred || entry.SHA256 != entry.SourceSHA256 {
-		entry.Verification = "failed"
-		return boundaryError("verification_failed", "verify destination contents", fmt.Errorf("destination digest mismatch"))
 	}
 	entry.Verified, entry.Verification = true, "passed"
 	return nil
+}
+
+// Preserve the original under a sibling name before the non-atomic publish.
+// An uncertain move is never replayed or automatically rolled back.
+func preserveBeforeReplacement(ctx context.Context, client *sftp.Client, stage string, original os.FileInfo, entry *FileOutcome, progress func(string, int64, int64)) error {
+	if _, err := verifyRemoteDigest(ctx, client, stage, entry.BytesTransferred, entry.SourceSHA256, "verify staging", progress); err != nil {
+		return boundaryError("verification_failed", "verify staging before replacement", err)
+	}
+	current, err := client.Lstat(entry.Path)
+	if err != nil {
+		return boundaryError("remote_io", "recheck destination before replacement", err)
+	}
+	currentUID, currentGID, ownerKnown := fileOwner(current)
+	originalUID, originalGID, _ := fileOwner(original)
+	if current.Mode() != original.Mode() || current.Size() != original.Size() ||
+		!current.ModTime().Equal(original.ModTime()) || !ownerKnown || currentUID != originalUID || currentGID != originalGID {
+		return boundaryError("remote_io", "recheck destination before replacement", fmt.Errorf("destination changed during upload"))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entry.BackupPath = stage + ".previous"
+	entry.Publication, entry.ChangeState = "sftp_rename_with_backup", "unknown"
+	if err := client.Rename(entry.Path, entry.BackupPath); err != nil {
+		return boundaryError("remote_io", "move destination to backup", err)
+	}
+	entry.BackupPreserved, entry.ChangeState = true, "changed"
+	return ctx.Err()
+}
+
+var errSFTPDigestMismatch = errors.New("content digest mismatch")
+
+func verifyRemoteDigest(ctx context.Context, client *sftp.Client, name string, size int64, expected, phase string, progress func(string, int64, int64)) (string, error) {
+	file, err := client.Open(name)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.New()
+	var target io.Writer = digest
+	if progress != nil {
+		progress(phase, 0, size)
+		target = &copyProgressWriter{writer: digest, phase: phase, total: size, progress: progress}
+	}
+	n, readErr := copyBoundary(ctx, target, io.LimitReader(file, size+1), "remote_io", "remote_io")
+	closeErr := file.Close()
+	actual := hex.EncodeToString(digest.Sum(nil))
+	if readErr != nil || closeErr != nil {
+		return actual, errors.Join(readErr, closeErr)
+	}
+	if n != size || actual != expected {
+		return actual, errSFTPDigestMismatch
+	}
+	return actual, nil
+}
+
+type copyProgressWriter struct {
+	writer   io.Writer
+	phase    string
+	progress func(string, int64, int64)
+	done     int64
+	total    int64
+}
+
+func (w *copyProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	w.done += int64(n)
+	w.progress(w.phase, w.done, w.total)
+	return n, err
 }
 
 func downloadStaged(ctx context.Context, client *sftp.Client, entry *FileOutcome) (err error) {

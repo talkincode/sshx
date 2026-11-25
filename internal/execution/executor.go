@@ -588,9 +588,9 @@ func executeOneWithMetadata(ctx context.Context, opts RunOptions, target Resolve
 		res.Error = BuildError(err, "", retryIntent(req), CompletionNotStarted)
 		return res
 	}
-	if req.Action.Kind == ActionScript && opts.Payload == nil {
+	if (req.Action.Kind == ActionScript || req.Action.CommandStdin) && opts.Payload == nil {
 		res.Phase = PhaseAdmission
-		res.Error = BuildError(fmt.Errorf("%w: missing script payload", ErrConfig), "", retryIntent(req), CompletionNotStarted)
+		res.Error = BuildError(fmt.Errorf("%w: missing execution payload", ErrConfig), "", retryIntent(req), CompletionNotStarted)
 		return res
 	}
 
@@ -669,9 +669,9 @@ func executeOneWithMetadata(ctx context.Context, opts RunOptions, target Resolve
 	var execErr error
 	switch req.Action.Kind {
 	case ActionCommand:
-		execRes, execErr = client.RunCommand(true)
+		execRes, execErr = client.RunCommandInput(payloadBytes(opts.Payload))
 	case ActionScript:
-		execRes, execErr = client.RunScriptWithShell(opts.Payload.Bytes, req.Action.ScriptRunner, req.Action.UseSudo)
+		execRes, execErr = client.RunScriptWithShell(opts.Payload.Bytes, req.Action.ScriptRunner, req.Action.UseSudo, req.Action.ScriptArgs...)
 	}
 
 	applyExecResult(&res, req, execRes, execErr)
@@ -832,56 +832,37 @@ func applySecrets(cfg *sshclient.Config, req *Request, target ResolvedTarget, se
 		if secrets == nil {
 			return fmt.Errorf("%w: jump ssh password key %q requested without secret resolver", ErrConfig, hopKey)
 		}
-		pw, err := secrets.GetSSHPassword(hopKey)
-		if cause := ctx.Err(); cause != nil {
-			return cause
-		}
-		if err != nil {
-			return &sshclient.HopError{Role: "jump", Alias: hop.HostAlias, Err: err}
-		}
-		hop.Password = pw
+		hop.PasswordSource = deferredSecret(ctx, hopKey, secrets.GetSSHPassword)
 	}
 	sshKey := firstNonEmpty(req.Policy.SSHPasswordKey, target.SSHPasswordKey)
 	if sshKey != "" {
 		if secrets == nil {
 			return fmt.Errorf("%w: ssh password key %q requested without secret resolver", ErrConfig, sshKey)
 		}
-		pw, err := secrets.GetSSHPassword(sshKey)
-		if cause := ctx.Err(); cause != nil {
-			return cause
-		}
-		if err != nil {
-			return err
-		}
-		cfg.Password = pw
+		cfg.PasswordSource = deferredSecret(ctx, sshKey, secrets.GetSSHPassword)
 	}
 
 	needSudo := req.Action.UseSudo || (req.Action.Kind == ActionCommand && sshclient.CommandUsesSudo(req.Action.Command))
-	if !needSudo {
-		return nil
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	sudoKey := SudoKeyForTarget(req.Policy.SudoPasswordKey, target.SudoPasswordKey)
-	cfg.SudoKey = sudoKey
-	if secrets == nil {
-		return fmt.Errorf("%w: sudo password key %q requested without secret resolver", ErrConfig, sudoKey)
-	}
-	pw, err := secrets.GetSudoPassword(sudoKey)
-	if cause := ctx.Err(); cause != nil {
-		return cause
-	}
-	if err != nil {
-		// Match legacy behavior for command mode: continue without auto-fill.
-		// For explicit script --sudo, fail closed.
-		if req.Action.UseSudo && req.Action.Kind == ActionScript {
-			return err
+	if needSudo {
+		cfg.SudoKey = SudoKeyForTarget(req.Policy.SudoPasswordKey, target.SudoPasswordKey)
+		if secrets != nil {
+			cfg.SudoPasswordSource = deferredSecret(ctx, cfg.SudoKey, secrets.GetSudoPassword)
 		}
-		return nil
 	}
-	cfg.SudoPassword = pw
 	return nil
+}
+
+func deferredSecret(ctx context.Context, key string, lookup func(string) (string, error)) func() (string, error) {
+	return func() (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		value, err := lookup(key)
+		if cause := ctx.Err(); cause != nil {
+			return "", cause
+		}
+		return value, err
+	}
 }
 
 // ToResult projects a TargetResult into the versioned single-target document

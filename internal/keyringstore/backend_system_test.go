@@ -14,6 +14,9 @@ import (
 func TestSystemBackendRoundtrip(t *testing.T) {
 	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	keyring.MockInit()
+	original := keyringGet
+	keyringGet = providerGet
+	t.Cleanup(func() { keyringGet = original })
 
 	const (
 		service = "sshx-test-service"
@@ -47,6 +50,9 @@ func TestSystemBackendRoundtrip(t *testing.T) {
 func TestSystemBackendMissingKey(t *testing.T) {
 	t.Setenv("SSHX_SECRET_BACKEND", "keyring")
 	keyring.MockInit()
+	original := keyringGet
+	keyringGet = providerGet
+	t.Cleanup(func() { keyringGet = original })
 
 	if _, err := Get("sshx-test-service", "never-stored"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get returned %v, want ErrNotFound", err)
