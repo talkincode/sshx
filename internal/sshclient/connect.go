@@ -133,11 +133,32 @@ func (c *SSHClient) connectThrough(parent *ssh.Client) (err error) {
 	if c.config.ExpectedKeyFingerprint != "" && keyAuth == nil {
 		return boundaryError("auth", "check admitted signing key", fmt.Errorf("admitted signing key is unavailable"))
 	}
-	if c.config.Password != "" {
-		passwordAuth = ssh.Password(c.config.Password)
+	passwordSource := c.config.PasswordSource
+	if passwordSource == nil && c.config.SSHPasswordKey != "" {
+		passwordSource = func() (string, error) { return GetSSHPassword(c.config.SSHPasswordKey) }
 	}
-	if keyAuth == nil && passwordAuth == nil {
-		return boundaryError("auth", "configure authentication", fmt.Errorf("no authentication method available"))
+	loadPassword := func() error {
+		password := c.config.Password
+		if password == "" && passwordSource != nil {
+			var lookupErr error
+			password, lookupErr = passwordSource()
+			if cause := ctx.Err(); cause != nil {
+				return cause
+			}
+			if lookupErr != nil {
+				return boundaryError("auth", "resolve SSH login password", lookupErr)
+			}
+		}
+		if password == "" {
+			return boundaryError("auth", "configure authentication", fmt.Errorf("no authentication method available"))
+		}
+		passwordAuth = ssh.Password(password)
+		return nil
+	}
+	if keyAuth == nil {
+		if passwordErr := loadPassword(); passwordErr != nil {
+			return passwordErr
+		}
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return boundaryError("connect", "connect", contextErr)
@@ -245,7 +266,10 @@ func (c *SSHClient) connectThrough(parent *ssh.Client) (err error) {
 		method, authUsed = keyAuth, AuthMethodKey
 	}
 	client, err := dialWithAuth(method)
-	if shouldFallbackToPassword(err, keyAuth != nil, passwordAuth != nil) && ctx.Err() == nil {
+	if shouldFallbackToPassword(err, keyAuth != nil, c.config.Password != "" || passwordSource != nil) && ctx.Err() == nil {
+		if passwordErr := loadPassword(); passwordErr != nil {
+			return passwordErr
+		}
 		client, err = dialWithAuth(passwordAuth)
 		authUsed = AuthMethodPasswordFallback
 	}

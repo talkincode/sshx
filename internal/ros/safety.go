@@ -2,6 +2,7 @@ package ros
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -60,19 +61,37 @@ func ValidateSafety(req *ROSRequest, allowWrite bool, force bool) *ROSErr {
 	return nil
 }
 
-// ReadOnly recognizes only a single print invocation, never compound scripts
-// or expression evaluation. A declaration is not proof of arbitrary raw purity.
+var simplePrint = regexp.MustCompile(`^/(?:[a-zA-Z0-9_.-]+[ /])+print(?:[ \t]+(?:detail|terse|without-paging|count-only|as-value))*$`)
+
+// ReadOnly recognizes individual print commands and simple batches of literal
+// print commands. Unknown syntax and nested evaluation require write admission.
+var printFile = regexp.MustCompile(`(?i)(?:^|[ \t])file[ \t]*=`)
+
 func ReadOnly(req *ROSRequest) bool {
-	return req.Mapping != nil && req.Mapping.ActionKind == ActionPrint && !strings.ContainsAny(BuildRouterOSCommand(req), ";\r\n[]")
+	if req.Mapping == nil {
+		return false
+	}
+	command := BuildRouterOSCommand(req)
+	if !strings.ContainsAny(command, ";\r\n[]") {
+		return req.Mapping.ActionKind == ActionPrint && !printFile.MatchString(command)
+	}
+	for _, part := range strings.Split(command, ";") {
+		if !simplePrint.MatchString(strings.Trim(part, " \t")) {
+			return false
+		}
+	}
+	return true
 }
 
 // CommandDiagnostic recognizes device diagnostics, not arbitrary occurrences of
 // the word error in user data. SSH exit status alone is insufficient on RouterOS.
 func CommandDiagnostic(output string) bool {
-	line := strings.ToLower(strings.TrimSpace(output))
-	for _, prefix := range []string{"input does not match any value", "expected end of command", "syntax error", "bad command name", "no such item", "not enough permissions", "failure:", "invalid value for argument"} {
-		if strings.HasPrefix(line, prefix) {
-			return true
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.ToLower(strings.TrimSpace(line))
+		for _, prefix := range []string{"input does not match any value", "expected end of command", "syntax error", "bad command name", "no such item", "not enough permissions", "failure:", "invalid value for argument"} {
+			if strings.HasPrefix(line, prefix) {
+				return true
+			}
 		}
 	}
 	return false

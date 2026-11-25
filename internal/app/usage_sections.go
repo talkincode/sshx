@@ -83,11 +83,18 @@ Run Contract (preferred for Agents):
   Script payloads:
     --script-file=PATH       byte-preserving script from a local file
     --script-stdin           byte-preserving script from stdin
+    --script-arg=VALUE       pass one positional script argument (repeatable)
     --shell=NAME             interpreter override: sh, bash, zsh, dash, ksh, ash
                              (default: the script's #! line, else sh)
     --sudo                   run the selected script interpreter via sudo
 
-  --sudo runs the whole script interpreter with sudo. Do not embed sudo
+  Command input:
+    --stdin-file=PATH        forward data to command stdin; use - for local stdin
+                             (redirected and piped stdin are also forwarded)
+
+  --sudo runs the whole script interpreter with sudo. Commands requiring sudo
+  start with a leading sudo instead. Piped command input is read up to EOF and
+  bounded by --max-payload-bytes. Do not embed sudo
   commands in a script: its stdin is occupied by the script, so sshx cannot
   inject the password for a nested sudo command.
   If sshx detects nested sudo without --sudo, it warns before connecting;
@@ -254,6 +261,9 @@ SFTP Options:
   --upload=<local>      Upload file (use with --to=<remote>)
   --download=<remote>   Download file (use with --to=<local>)
   --to=<path>           Target path for upload/download
+  --allow-non-atomic    Upload on a server without atomic replacement. Verify
+                        staging, keep the previous file at backup_path, then
+                        publish. The target can be briefly absent.
   --list=<path>         List directory contents (alias: --ls)
   --mkdir=<path>        Create remote directory
   --rm=<path>           Remove remote file or directory
@@ -317,7 +327,7 @@ Host Management:
     -u=<user>                         SSH username
     -i=<key>, --key=<key>            SSH private key path for this host (optional)
     -pk=<key>                         Password key name
-    --host-type=<type>                System type (linux/windows/macos)
+    --host-type=<type>                System type (linux/windows/macos/routeros)
     --bind=<ip|iface>                 Persist a source address for this host
     --via=<name>                      Named jump host for this target
 
@@ -374,6 +384,8 @@ Guarded SQL Execution:
   with a literal-redacted statement, its exact SHA-256 digest, classification,
   backup, and outcome.
 
+  --rows                    With --json on PostgreSQL SELECT, return row_set
+                            with column names and rows as strings or null
   --statement-file=PATH     Read the statement from a local file (mutually
                             exclusive with a positional statement)
   --engine=postgres|sqlite|mysql  SQL engine (default: postgres)
@@ -460,7 +472,7 @@ MikroTik RouterOS (ROS) over SSH:
   sshx ros -h=<host> interface print [--json]
   sshx ros -h=<host> ip address add address=192.168.88.1/24 interface=ether1
   sshx ros -h=<host> raw "/system/resource/print"
-  sshx ros -h=<host> file upload <local> <remote>
+  sshx ros -h=<host> file upload <local> <remote> [--allow-non-atomic]
   sshx ros -h=<host> file download <remote> <local>
   sshx ros -h=<host> backup download <local.backup> [--name=<name>] [--cleanup]
   sshx ros -h=<host> export download <local.rsc> [--compact] [--cleanup]
@@ -471,6 +483,10 @@ MikroTik RouterOS (ROS) over SSH:
   sshx ros schema [command] [--json]              # Emit JSON schema for command
   sshx ros doctor [-h=<host>] [--include-remote]  # Health & environment check
   sshx ros explain-error <code>                   # Explain error code and remediation
+
+  RouterOS command output uses best-effort secret redaction. File downloads
+  preserve file bytes. Use file download or file upload for SFTP; --pty
+  is unavailable for RouterOS commands.
 
   ROS Options:
     --dry-run               Emit execution plan JSON without modifying router

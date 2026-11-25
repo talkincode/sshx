@@ -704,6 +704,9 @@ type mcpRunInput struct {
 	Address           string   `json:"address,omitempty" jsonschema:"Explicit single literal address (not for fan-out)."`
 	Command           string   `json:"command,omitempty" jsonschema:"Remote command line. Exactly one of command or script is required."`
 	Script            string   `json:"script,omitempty" jsonschema:"Byte-preserving script payload delivered over stdin. Exactly one of command or script is required."`
+	ScriptArgs        []string `json:"script_args,omitempty" jsonschema:"Positional arguments for a script, in order."`
+	Stdin             *string  `json:"stdin,omitempty" jsonschema:"Input data for a command, forwarded on its stdin."`
+	Sudo              bool     `json:"sudo,omitempty" jsonschema:"Run the entire script via sudo."`
 	Shell             string   `json:"shell,omitempty" jsonschema:"Script interpreter override: sh, bash, zsh, dash, ksh, or ash. Defaults to the script's shebang, then sh."`
 	TimeoutSecs       int      `json:"timeout_seconds,omitempty" jsonschema:"Remote execution timeout in seconds (default 60)."`
 	Concurrency       int      `json:"concurrency,omitempty" jsonschema:"Bounded fan-out (default 4, hard max 32)."`
@@ -734,6 +737,7 @@ type mcpSQLInput struct {
 	DBCredFrom           string `json:"db_cred_from,omitempty" jsonschema:"Resolve credentials on the remote host: docker:<container> or env-file:<path>."`
 	CredCache            string `json:"cred_cache,omitempty" jsonschema:"off or a duration for caching remotely resolved credentials (default 15m)."`
 	CredRefresh          bool   `json:"cred_refresh,omitempty" jsonschema:"Drop the cached credential entry and re-resolve."`
+	Rows                 bool   `json:"rows,omitempty" jsonschema:"Return PostgreSQL SELECT rows and columns as structured JSON."`
 	Explain              bool   `json:"explain,omitempty" jsonschema:"Run EXPLAIN only; never executes the statement."`
 	RowThreshold         int    `json:"row_threshold,omitempty" jsonschema:"EXPLAIN row estimate that may widen a row backup to a full-table snapshot (default 1000); expansion is blocked by default."`
 	AllowFullTable       bool   `json:"allow_full_table,omitempty" jsonschema:"Required for UPDATE/DELETE without a WHERE clause."`
@@ -755,6 +759,7 @@ type mcpROSInput struct {
 	Port              int    `json:"port,omitempty" jsonschema:"SSH port (default 22)."`
 	User              string `json:"user,omitempty" jsonschema:"SSH user (default admin)."`
 	Command           string `json:"command" jsonschema:"RouterOS command or workflow (e.g. 'ip address print', 'commands', 'raw /system/resource/print')."`
+	AllowNonAtomic    bool   `json:"allow_non_atomic,omitempty" jsonschema:"Permit file upload replacement with a preserved backup on a server without atomic rename."`
 	AllowWrite        bool   `json:"allow_write,omitempty" jsonschema:"Permit raw commands or mutations to modify router state."`
 	Force             bool   `json:"force,omitempty" jsonschema:"Bypass safety guardrails for destructive commands."`
 	DryRun            bool   `json:"dry_run,omitempty" jsonschema:"Preview the execution plan without connecting."`
@@ -921,7 +926,16 @@ func buildRunArgs(in mcpRunInput) ([]string, string, error) {
 	args = appendBindArg(args, in.Bind)
 	stdin := ""
 	if hasScript {
+		if in.Stdin != nil {
+			return nil, "", fmt.Errorf("stdin data only applies to a command")
+		}
 		args = append(args, "--script-stdin")
+		if in.Sudo {
+			args = append(args, "--sudo")
+		}
+		for _, arg := range in.ScriptArgs {
+			args = append(args, "--script-arg="+arg)
+		}
 		if in.Shell != "" {
 			args = append(args, "--shell="+in.Shell)
 		}
@@ -929,6 +943,13 @@ func buildRunArgs(in mcpRunInput) ([]string, string, error) {
 	} else {
 		if in.Shell != "" {
 			return nil, "", fmt.Errorf("shell only applies to a script payload")
+		}
+		if in.Sudo || len(in.ScriptArgs) > 0 {
+			return nil, "", fmt.Errorf("sudo and script_args only apply to a script payload")
+		}
+		if in.Stdin != nil {
+			args = append(args, "--stdin-file=-")
+			stdin = *in.Stdin
 		}
 		args = append(args, "--", in.Command)
 	}
@@ -978,6 +999,9 @@ func buildSQLArgs(in mcpSQLInput) ([]string, error) {
 	}
 	if in.CredRefresh {
 		args = append(args, "--cred-refresh")
+	}
+	if in.Rows {
+		args = append(args, "--rows")
 	}
 	if in.Explain {
 		args = append(args, "--explain")
@@ -1033,6 +1057,9 @@ func buildROSArgs(in mcpROSInput) ([]string, error) {
 	}
 	if in.User != "" {
 		args = append(args, "-u="+in.User)
+	}
+	if in.AllowNonAtomic {
+		args = append(args, "--allow-non-atomic")
 	}
 	if in.AllowWrite {
 		args = append(args, "--allow-write")

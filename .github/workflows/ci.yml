@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go: ["1.26.10"]
+        go: ["1.26.11"]
 
     steps:
       - name: Checkout code
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -103,7 +103,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Native sudo tests exercise the sudoers timestamp_type setting on sudo.ws.
+        os: [ubuntu-24.04, macos-latest]
 
     steps:
       - name: Checkout code
@@ -112,7 +113,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Download dependencies
         run: go mod download
@@ -225,7 +226,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Verify native SQL prerequisites
         # ubuntu-latest includes native clients. Missing prerequisites must fail
@@ -274,7 +275,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
@@ -295,12 +296,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Run Go vulnerability scanner
         uses: golang/govulncheck-action@v1
         with:
-          go-version-input: "1.26.10"
+          go-version-input: "1.26.11"
           go-package: ./...
           repo-checkout: false
 

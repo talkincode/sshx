@@ -18,7 +18,8 @@ var (
 	commentRegex = regexp.MustCompile(`^;;;\s*(.*)$`)
 
 	// Tokenizes key=value or key="quoted value" pairs
-	kvPairRegex = regexp.MustCompile(`([a-zA-Z0-9_\-\.]+)=("(?:[^"\\]|\\.)*"|\S+)`)
+	kvPairRegex    = regexp.MustCompile(`([a-zA-Z0-9_\-\.]+)=("(?:[^"\\]|\\.)*"|-?[0-9]{1,3}(?: [0-9]{3})+(?:[ \t]|$)|\S+)`)
+	groupedInteger = regexp.MustCompile(`^-?[0-9]{1,3}(?: [0-9]{3})+$`)
 )
 
 // ParseRouterOSOutput attempts to parse RouterOS output into structured JSON-compatible data.
@@ -156,6 +157,9 @@ func extractKVPairs(line string, target map[string]any) {
 		if len(m) == 3 {
 			key := m[1]
 			val := m[2]
+			if groupedInteger.MatchString(strings.TrimSpace(val)) {
+				val = strings.ReplaceAll(strings.TrimSpace(val), " ", "")
+			}
 			if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") && len(val) >= 2 {
 				val = val[1 : len(val)-1]
 			}

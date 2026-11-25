@@ -18,6 +18,7 @@ import (
 type sudoExchange struct {
 	prompt, ready, password string
 	payload                 io.Reader
+	passwordSource          func() (string, error)
 	events                  chan bool // false: prompt, true: child ready
 	stop                    chan struct{}
 	done                    chan struct{}
@@ -37,7 +38,7 @@ func (c *SSHClient) executeSudo(command string, payload io.Reader, capture bool)
 		return ExecResult{ExitCode: -1}, err
 	}
 	id := hex.EncodeToString(nonce[:])
-	auth := &sudoExchange{prompt: "SSHX_SUDO_PROMPT_" + id, ready: "SSHX_SUDO_READY_" + id, password: password, payload: payload, events: make(chan bool, 2), stop: make(chan struct{}), done: make(chan struct{}), abort: func() { _ = c.Close() }} //nolint:errcheck // abort owns the transport
+	auth := &sudoExchange{prompt: "SSHX_SUDO_PROMPT_" + id, ready: "SSHX_SUDO_READY_" + id, password: password, payload: payload, passwordSource: c.config.SudoPasswordSource, events: make(chan bool, 2), stop: make(chan struct{}), done: make(chan struct{}), abort: func() { _ = c.Close() }} //nolint:errcheck // abort owns the transport
 	wrapped, err := sudoReadyCommand(command, auth.prompt, auth.ready)
 	if err != nil {
 		return ExecResult{ExitCode: -1}, boundaryError("config", "prepare sudo", err)
@@ -74,21 +75,36 @@ func (s *sudoExchange) start(w io.WriteCloser) {
 				return
 			case ready := <-s.events:
 				if !ready {
-					if sent || s.password == "" {
-						s.failure(fmt.Errorf("sudo authentication was rejected or no credential is available"))
+					if sent {
+						s.failure(fmt.Errorf("sudo authentication was rejected"))
 						return
 					}
+					password := s.password
+					if password == "" && s.passwordSource != nil {
+						var err error
+						password, err = s.passwordSource()
+						if err != nil {
+							s.failure(fmt.Errorf("resolve sudo password: %w", err))
+							return
+						}
+					}
+					if password == "" || strings.ContainsAny(password, "\x00\r\n") {
+						s.failure(fmt.Errorf("sudo requested a credential, but no valid single-line password is available"))
+						return
+					}
+					select {
+					case <-s.stop:
+						return
+					default:
+					}
 					sent = true
-					if _, err := io.WriteString(w, s.password+"\n"); err != nil {
+					if _, err := io.WriteString(w, password+"\n"); err != nil {
 						s.failure(fmt.Errorf("send sudo authentication: %w", err))
 						return
 					}
 					continue
 				}
 				timer.Stop()
-				s.mu.Lock()
-				s.childReady = true
-				s.mu.Unlock()
 				if s.payload != nil {
 					if _, err := io.Copy(w, s.payload); err != nil {
 						s.failure(fmt.Errorf("send sudo payload: %w", err))
@@ -100,13 +116,24 @@ func (s *sudoExchange) start(w io.WriteCloser) {
 	}()
 }
 
+func (s *sudoExchange) signalReady() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.childReady {
+		s.childReady = true
+		s.events <- true
+	}
+}
+
 // sudoControlWriter strips only session-owned framing, including markers split
-// across SSH packets. After ready it is a transparent stderr writer.
+// across SSH packets. The stdout side acknowledges readiness for commands
+// with merged streams, but accepts password prompts only on stderr.
 type sudoControlWriter struct {
 	dst             io.Writer
 	auth            *sudoExchange
 	pending         []byte
 	prompted, ready bool
+	passive         bool
 }
 
 func (w *sudoControlWriter) Write(p []byte) (int, error) {
@@ -130,23 +157,23 @@ func (w *sudoControlWriter) Write(p []byte) (int, error) {
 				marker = w.auth.ready
 			}
 			w.pending = w.pending[pos+len(marker):]
+			if w.passive && !ready {
+				w.auth.failure(fmt.Errorf("sudo prompt reached stdout; preserve the sudo control stderr"))
+				return 0, fmt.Errorf("sudo control stream was redirected")
+			}
 			if !ready && w.prompted {
 				w.auth.failure(fmt.Errorf("repeated sudo authentication prompt"))
 				return 0, fmt.Errorf("sudo authentication rejected")
 			}
 			w.prompted = w.prompted || !ready
 			if ready {
-				w.auth.mu.Lock()
-				w.auth.childReady = true
-				w.auth.mu.Unlock()
-			}
-			w.auth.events <- ready
-			if ready {
+				w.auth.signalReady()
 				w.ready = true
 				_, err := w.dst.Write(w.pending)
 				w.pending = nil
 				return n, err
 			}
+			w.auth.events <- false
 			continue
 		}
 		keep := 0

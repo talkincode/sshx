@@ -385,7 +385,7 @@ func (c *SSHClient) applySFTPFile(client *sftp.Client, req ApplyRequest, checkPa
 }
 
 func (c *SSHClient) checkApplyParentWritable(parentDir string, sudoConfigured bool) error {
-	quotedParent := applyShellQuote(parentDir)
+	quotedParent := quoteShellArgument(parentDir)
 	result, err := c.RunCommandWithInput("test -w "+quotedParent+" && test -x "+quotedParent, nil)
 	if err != nil {
 		return fmt.Errorf("check apply parent directory access: %w", err)
@@ -394,10 +394,6 @@ func (c *SSHClient) checkApplyParentWritable(parentDir string, sudoConfigured bo
 		return &applyParentDirectoryError{path: parentDir, sudoConfigured: sudoConfigured}
 	}
 	return nil
-}
-
-func applyShellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func checkApplyPrecondition(created bool, beforeHash string, req ApplyRequest) error {

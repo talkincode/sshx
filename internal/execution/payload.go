@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -118,4 +119,36 @@ func digestPayload(data []byte, maxBytes int) (Payload, error) {
 		Size:    len(data),
 		Shebang: parseShebang(data),
 	}, nil
+}
+
+// LoadCommandInput reads bounded data for the remote command's stdin. An
+// explicitly empty input is valid and carries its own digest.
+func LoadCommandInput(stdin io.Reader, file string, maxBytes int) (Payload, error) {
+	if maxBytes <= 0 || int64(maxBytes) == math.MaxInt64 {
+		return Payload{}, fmt.Errorf("%w: invalid command stdin limit", ErrConfig)
+	}
+	if file != "" && file != "-" {
+		info, err := os.Stat(file)
+		if err != nil {
+			return Payload{}, fmt.Errorf("%w: stat stdin file: %v", ErrLocalIO, err)
+		}
+		if !info.Mode().IsRegular() {
+			return Payload{}, fmt.Errorf("%w: stdin file must be a regular file", ErrLocalIO)
+		}
+		f, err := os.Open(file) // #nosec G304 -- caller-provided stdin file
+		if err != nil {
+			return Payload{}, fmt.Errorf("%w: open stdin file: %v", ErrLocalIO, err)
+		}
+		defer f.Close() //nolint:errcheck // read-only input
+		stdin = f
+	}
+	data, err := io.ReadAll(io.LimitReader(stdin, int64(maxBytes)+1))
+	if err != nil {
+		return Payload{}, fmt.Errorf("%w: read command stdin: %v", ErrLocalIO, err)
+	}
+	if len(data) > maxBytes {
+		return Payload{}, fmt.Errorf("%w: command stdin exceeds %d-byte limit", ErrLocalIO, maxBytes)
+	}
+	sum := sha256.Sum256(data)
+	return Payload{Bytes: data, SHA256: hex.EncodeToString(sum[:]), Size: len(data)}, nil
 }

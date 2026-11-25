@@ -273,6 +273,23 @@ sshx --transfer=192.168.1.100:/var/log/app.log --to=192.168.1.101:/backup/app.lo
 - **stdout 与 stderr 分离**并实时流式输出（不使用 PTY，不混入终端控制字符）。
 - **透传远程命令的退出码**，作为 `sshx` 自身的进程退出码。
 
+### 命令输入与脚本参数
+
+```bash
+sshx run --target=web --stdin-file=./query.txt --json -- 'cat'
+sshx run --target=web --script-file=./check.sh --script-arg='/srv/my app' --json
+```
+
+管道和文件重定向会把数据传给远端命令的 stdin。可用 `--stdin-file=-`
+显式选择本机 stdin。连接前读取至 EOF，大小受 `--max-payload-bytes` 限制。
+脚本的每个位置参数各用一个 `--script-arg`。`--sudo` 为整段脚本提权，
+仅在远端 sudo 要求密码时读取凭据。命令模式用命令开头的 `sudo`。
+内嵌 sudo 跳过自动填密时，可检查 `action.sudo_autofill_skipped`。
+
+PostgreSQL 的 SELECT 可用 `sshx sql --json --rows` 获取
+`row_set.columns` 和 `row_set.rows`。保留列顺序和重名列，
+结果值使用 PostgreSQL 文本，SQL NULL 表示为 JSON `null`。
+
 ### 退出码
 
 | 退出码    | 含义                                                       |
@@ -836,6 +853,15 @@ sshx ros -h=router script put bootstrap --source=@./setup.rsc
 ```
 
 高危破坏性命令（如 `reset-configuration`、`reboot`、`shutdown`、`disk format` 等）被安全门禁严格拦截，必须显式传入 `--force` 才能执行。
+
+RouterOS 命令输出会尽力脱敏，下载到本地的文件保留原始字节。
+设置 `--host-type=routeros` 可以使用 RouterOS 专用探测。
+诊断 JSON 分别报告探测结果和 `audit_status`。在受限工作区，
+可用 `SSHX_AUDIT_OUTPUT` 指定可写的审计目录。
+
+设备不支持原子替换时，可给上传加 `--allow-non-atomic`。
+sshx 会校验暂存内容，将旧文件移到返回的 `backup_path`，
+再发布新文件，期间目标路径可能短暂缺失。慢速上传的进度写入 stderr。
 
 ## 开发
 

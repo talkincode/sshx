@@ -187,7 +187,7 @@ var (
 	sensitiveQuotedAssignmentRE = regexp.MustCompile(`(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|authorization))=("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
 	sensitiveQuotedFlagRE       = regexp.MustCompile(`(?i)(--[a-z0-9_-]*(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')`)
 	sensitiveAssignmentRE       = regexp.MustCompile(`(?i)\b([a-z0-9_-]*(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|authorization))=([^\s&;]+)`)
-	sensitiveFlagRE             = regexp.MustCompile(`(?i)(--[a-z0-9_-]*(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s]+)`)
+	sensitiveFlagRE             = regexp.MustCompile(`(?i)(--[a-z0-9_-]*(?:password|passwd|token|secret|api-key|access-key)(?:=|\s+))([^\s'"&;]+)`)
 )
 
 func newAuditRecorder(config *sshclient.Config) *auditRecorder {

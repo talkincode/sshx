@@ -409,13 +409,18 @@ func TestExecuteChecksContextAfterEverySecretRead(t *testing.T) {
 					return "never-serialized", nil
 				},
 			}
-			dialer := &failDialer{}
+			dialer := lifecycleDialer(func(cfg *sshclient.Config) (*sshclient.SSHClient, error) {
+				if _, err := cfg.PasswordSource(); err != nil {
+					return nil, err
+				}
+				_, err := cfg.SudoPasswordSource()
+				return nil, err
+			})
 			out, err := Execute(ctx, RunOptions{
 				Request: req, Snapshot: lifecycleSnapshot(1), Secrets: secrets, Dialer: dialer, Events: noopEvents{},
 			})
-			if err != nil || sshCalls != 1 || dialer.calls.Load() != 0 || (duringSSH && sudoCalls != 0) {
-				t.Fatalf("work continued after a canceled secret read: ssh=%d sudo=%d dial=%d err=%v",
-					sshCalls, sudoCalls, dialer.calls.Load(), err)
+			if err != nil || sshCalls != 1 || duringSSH && sudoCalls != 0 || !duringSSH && sudoCalls != 1 {
+				t.Fatalf("work continued after a canceled secret read: ssh=%d sudo=%d err=%v", sshCalls, sudoCalls, err)
 			}
 			res := out.Results[0]
 			if res.Error == nil || res.Error.Kind != ErrorKindCancelled || res.Completion != CompletionNotStarted {

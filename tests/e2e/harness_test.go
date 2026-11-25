@@ -695,6 +695,11 @@ func requireIsolatedNativeKeyring(t *testing.T) {
 
 func runSSHXBinaryWithHome(t *testing.T, binary, workDir, environmentHome string, args []string, extraEnv map[string]string) cliResult {
 	t.Helper()
+	return runSSHXBinaryWithStdin(t, binary, workDir, environmentHome, args, extraEnv, nil)
+}
+
+func runSSHXBinaryWithStdin(t *testing.T, binary, workDir, environmentHome string, args []string, extraEnv map[string]string, stdin io.Reader) cliResult {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping compiled-binary E2E in short mode")
 	}
@@ -702,6 +707,7 @@ func runSSHXBinaryWithHome(t *testing.T, binary, workDir, environmentHome string
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- binary is one of the harness-built sshx executables and args are isolated test inputs.
+	command.Stdin = stdin
 	command.Dir = workDir
 	command.Env = isolatedEnvironment(environmentHome, extraEnv)
 	var stdout, stderr bytes.Buffer

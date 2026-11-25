@@ -18,7 +18,7 @@ import (
 type keyringSecrets struct{}
 
 func (keyringSecrets) GetSSHPassword(key string) (string, error) {
-	return sshclient.GetSudoPassword(key) // same keyring service; role is caller-enforced
+	return sshclient.GetSSHPassword(key)
 }
 
 func (keyringSecrets) GetSudoPassword(key string) (string, error) {
@@ -369,6 +369,8 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 			Intent:          config.RunIntent,
 			Command:         config.Command,
 			ScriptPath:      config.ScriptFile,
+			ScriptArgs:      config.ScriptArgs,
+			CommandStdin:    config.RunStdinFile != "",
 			ScriptFromStdin: config.ScriptStdin,
 			ScriptRunner:    execution.ScriptRunnerSH,
 			UseSudo:         config.RunUseSudo,
@@ -427,7 +429,8 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 	if hint, needed := sshclient.NonLeadingSudoHint(req.Action.Command); needed {
 		// Non-interactive sessions cannot answer a mid-command sudo prompt and
 		// auto-fill only rewrites the leading token. Say so before connecting.
-		logger.GetLogger().Warning("%s", hint)
+		req.Action.SudoAutofillSkipped = true
+		writeDiagnosticNote(noticeWriter(config), "%s\n", hint)
 	}
 	if req.Policy.FailureMode == "" {
 		req.Policy.FailureMode = execution.FailureContinue
@@ -447,8 +450,17 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 		return nil, nil, err
 	}
 
+	if len(req.Action.ScriptArgs) > 0 {
+		// JSON array framing preserves empty arguments and argument boundaries.
+		args, err := json.Marshal(req.Action.ScriptArgs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: encode script arguments: %v", execution.ErrConfig, err)
+		}
+		req.Action.ScriptArgsSHA = execution.Digest(args)
+	}
 	var payload *execution.Payload
-	if req.Action.Kind == execution.ActionScript {
+	switch req.Action.Kind {
+	case execution.ActionScript:
 		if req.Action.ScriptFromStdin {
 			p, loadErr := execution.LoadScriptStdin(os.Stdin, req.Limits.MaxPayloadBytes)
 			if loadErr != nil {
@@ -471,7 +483,22 @@ func buildRunRequest(config *sshclient.Config) (*execution.Request, *execution.P
 			req.Action.ScriptRunner = runner
 		}
 		if !req.Action.UseSudo && sshclient.ContainsSudoCommand(string(payload.Bytes)) {
+			req.Action.SudoAutofillSkipped = true
 			writeDiagnosticNote(noticeWriter(config), "sshx: the script contains `sudo` but --sudo was not requested; sshx cannot inject a password for a nested sudo (its stdin carries the script). Re-run with --sudo to run the interpreter privileged, or remove the sudo calls.\n")
+		}
+	case execution.ActionCommand:
+		stat, statErr := os.Stdin.Stat()
+		redirected := statErr == nil && (stat.Mode().IsRegular() || stat.Mode()&os.ModeNamedPipe != 0)
+		if req.Action.CommandStdin || redirected {
+			input, err := execution.LoadCommandInput(os.Stdin, config.RunStdinFile, req.Limits.MaxPayloadBytes)
+			if err != nil {
+				return nil, nil, err
+			}
+			if req.Action.CommandStdin || input.Size > 0 {
+				payload = &input
+				req.Action.CommandStdin = true
+				req.Action.PayloadSHA256, req.Action.PayloadBytes = input.SHA256, input.Size
+			}
 		}
 	}
 

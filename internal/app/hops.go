@@ -98,27 +98,15 @@ func jumpConfigs(parent *sshclient.Config, jumps []execution.ResolvedTarget) []*
 	return out
 }
 
-func resolveJumpSecrets(config *sshclient.Config) error {
-	if config == nil {
-		return nil
+func inheritJumpPassword(config *sshclient.Config) {
+	if config.Password == "" {
+		return
 	}
 	for _, hop := range config.JumpChain {
-		if hop == nil || hop.Password != "" {
-			continue
-		}
-		if hop.SSHPasswordKey != "" {
-			password, err := sshclient.GetSudoPassword(hop.SSHPasswordKey)
-			if err != nil {
-				return &sshclient.HopError{Role: "jump", Alias: hopAlias(hop), Err: fmt.Errorf("resolve jump SSH password role %q: %w", hop.SSHPasswordKey, err)}
-			}
-			hop.Password = password
-			continue
-		}
-		if config.Password != "" {
+		if hop != nil && hop.Password == "" && hop.SSHPasswordKey == "" {
 			hop.Password = config.Password
 		}
 	}
-	return nil
 }
 
 func hopAlias(hop *sshclient.Config) string {

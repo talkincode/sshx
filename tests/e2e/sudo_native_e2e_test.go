@@ -58,8 +58,10 @@ func TestNativeSudoInputBoundary(t *testing.T) {
 			if role == "wrong-password" {
 				secret = "wrong-fixture-password"
 			}
-			set := runSSHXWithTestKeyring(t, home, []string{"--password-set=fixture:" + secret, "--no-audit"}, env)
-			require.Equal(t, 0, set.exitCode, set.stderr)
+			if role == "password" || role == "wrong-password" {
+				set := runSSHXWithTestKeyring(t, home, []string{"--password-set=fixture:" + secret, "--no-audit"}, env)
+				require.Equal(t, 0, set.exitCode, set.stderr)
+			}
 			source := filepath.Join(home, "script.sh")
 			require.NoError(t, os.WriteFile(source, []byte("#!/bin/sh\nprintf 'native-payload-ok\\n'\n"), 0600))
 			result := runSSHXWithTestKeyring(t, home, []string{"run", "--address=" + server.host, "-p=" + server.port, "-u=operator", "--no-key", "--accept-unknown-host", "--bypass-reason=isolated-native-fixture", "-pk=fixture", "--sudo", "--script-file=" + source, "--timeout=5s", "--json"}, env)

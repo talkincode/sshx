@@ -278,7 +278,10 @@ issue #71 的新增边界、验证状态及外部前提单列在后面的证据�
 | --- | --- | --- |
 | sudo 输入隔离 | 编译 CLI + 实际 shell 的消费/不消费认证分支；Linux CI 原生 PASSWORD/NOPASSWD/cache/root/错误密码 | `tests/e2e/sudo_boundary_e2e_test.go`、`sudo_native_e2e_test.go`；控制标记分包/取消回归在 `internal/sshclient/sudo_test.go` |
 | ROS 契约与文件安全 | raw 字节、exit 0 设备错误、JSON/审计一致、symlink 下载保留原文件；已有 SSH/SFTP 成功/权限用例继续适用 | `tests/e2e/ros_boundary_e2e_test.go`、`ros_e2e_test.go` |
-| 主机信任与期限 | 单算法 pin + 多算法服务器；host-test 全链路超时；准入拒绝也不泄露 token | `tests/e2e/audit_boundaries_e2e_test.go` |
+| 主机信任与期限 | 单算法 pin + 多算法服务器；host-test 全链路超时；RouterOS 专用探测；审计落盘失败有单独状态 | `tests/e2e/audit_boundaries_e2e_test.go`、`tests/e2e/ros_boundary_e2e_test.go`、`tests/e2e/host_audit_e2e_test.go` |
+| 命令 stdin 与脚本 argv | 编译 CLI 经 SSH 转发本地文件重定向和显式 stdin；脚本参数保留空参数及引号 | `tests/e2e/sudo_boundary_e2e_test.go` |
+| SFTP 无原子扩展 | 默认保留旧文件；显式替换后验证新文件及旧备份；发布失败时保留备份路径 | `tests/e2e/ros_boundary_e2e_test.go`、`internal/sshclient/publish_metadata_test.go` |
+| PostgreSQL 结构化结果与窄备份 | 重名列、空字符串、NULL 及多行值；整数 IN 更新的备份只含命中行 | `tests/e2e/reliability_sql_native_e2e_test.go`、`internal/sqlsafe/real_engine_integration_test.go` |
 | SFTP / apply stage | 协议级有界并发与完整字节；显式 stage 计划变化、发布、清理 | `internal/sshclient/sftp_pipeline_test.go`、`tests/e2e/apply_stage_e2e_test.go` |
 
 这些 fixture 不代表所有 RouterOS 版本、所有 PAM/sudo 策略已经原生验收。

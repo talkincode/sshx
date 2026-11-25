@@ -175,7 +175,7 @@ var compatOptionNames = []string{
 	"--no-key", "--password-only", "--key-auth", "--force", "-f",
 	"--bypass-reason", "--accept-unknown-host", "--insecure-hostkey",
 	"--strict-host-key", "--known-hosts", "--no-safety-check", "--dry-run",
-	"--audit-output", "--no-audit", "--json", "--pty", "--timeout",
+	"--audit-output", "--allow-non-atomic", "--no-audit", "--json", "--pty", "--timeout",
 	"--expect-plan", "--host-timeout", "--global-timeout", "--bind", "--via",
 	"--sftp", "--upload", "--download", "--transfer", "--to", "--list", "--ls",
 	"--mkdir", "--rm", "--password-set", "--password-get", "--password-delete",
@@ -451,6 +451,8 @@ func ParseArgs(args []string) *sshclient.Config {
 		case applyViaFlag(config, arg):
 		case arg == "--sftp":
 			config.Mode = "sftp"
+		case arg == "--allow-non-atomic":
+			config.AllowNonAtomic = true
 		case strings.HasPrefix(arg, "--upload="):
 			config.Mode = "sftp"
 			config.SftpAction = "upload"
@@ -795,6 +797,13 @@ func parseRunArgs(config *sshclient.Config, args []string) {
 		case arg == "--script-stdin":
 			config.ScriptStdin = true
 			config.RunActionKind = "script"
+		case strings.HasPrefix(arg, "--script-arg="):
+			config.ScriptArgs = append(config.ScriptArgs, strings.TrimPrefix(arg, "--script-arg="))
+		case strings.HasPrefix(arg, "--stdin-file="):
+			config.RunStdinFile = strings.TrimPrefix(arg, "--stdin-file=")
+			if config.RunStdinFile == "" {
+				config.ArgumentError = "--stdin-file requires a path or -"
+			}
 		case strings.HasPrefix(arg, "--shell="):
 			config.ScriptShell = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--sudo":
@@ -842,7 +851,7 @@ var sqlOptionNames = []string{
 	"--password-only", "--key-auth", "--accept-unknown-host", "--insecure-hostkey",
 	"--strict-host-key", "--known-hosts", "--engine", "--db", "--database",
 	"--db-file", "--db-user", "--db-host", "--db-port", "--db-password-key",
-	"--statement-file", "--row-threshold", "--allow-full-table", "--allow-full-table-backup", "--no-backup",
+	"--statement-file", "--rows", "--row-threshold", "--allow-full-table", "--allow-full-table-backup", "--no-backup",
 	"--explain", "--backup-dir", "--docker", "--db-cred-from", "--cred-cache",
 	"--cred-refresh", "--sudo", "--force", "-f", "--dry-run", "--json",
 	"--timeout", "--bind", "--via", "--audit-output", "--no-audit",
@@ -1002,6 +1011,8 @@ func parseSQLArgs(config *sshclient.Config, args []string) {
 			}
 		case arg == "--cred-refresh":
 			config.SQLCredRefresh = true
+		case arg == "--rows":
+			config.SQLRows = true
 		case arg == "--sudo":
 			config.SQLUseSudo = true
 		case arg == "--force", arg == "-f":
@@ -1439,6 +1450,12 @@ func parseROSArgs(config *sshclient.Config, args []string) {
 		}
 		switch {
 		case applyLifecycleFlag(config, arg):
+		case arg == "--pty":
+			config.ArgumentError = "--pty is unavailable for sshx ros; remove it to use the RouterOS exec channel"
+		case arg == "--download", strings.HasPrefix(arg, "--download="):
+			config.ArgumentError = "use: sshx ros -h=<host> file download <remote> <local>"
+		case arg == "--upload", strings.HasPrefix(arg, "--upload="):
+			config.ArgumentError = "use: sshx ros -h=<host> file upload <local> <remote>"
 		case strings.HasPrefix(arg, "--bypass-reason="):
 			config.BypassReason = strings.TrimPrefix(arg, "--bypass-reason=")
 		case strings.HasPrefix(arg, "-h="), strings.HasPrefix(arg, "--host="):
@@ -1447,6 +1464,7 @@ func parseROSArgs(config *sshclient.Config, args []string) {
 			config.Port = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-u="), strings.HasPrefix(arg, "--user="):
 			config.User = strings.SplitN(arg, "=", 2)[1]
+			config.UserSet = true
 		case strings.HasPrefix(arg, "-i="), strings.HasPrefix(arg, "--key="):
 			config.KeyPath = strings.SplitN(arg, "=", 2)[1]
 			config.UseKeyAuth = true
@@ -1478,6 +1496,8 @@ func parseROSArgs(config *sshclient.Config, args []string) {
 			config.DryRun = true
 		case arg == "--json":
 			config.JSONOutput = true
+		case arg == "--allow-non-atomic":
+			config.AllowNonAtomic = true
 		case arg == "--allow-write":
 			config.ROSAllowWrite = true
 		case arg == "--force", arg == "-f":
@@ -1506,7 +1526,4 @@ func parseROSArgs(config *sshclient.Config, args []string) {
 		}
 	}
 	config.ROSTokens = tokens
-	if config.User == "" {
-		config.User = "admin"
-	}
 }

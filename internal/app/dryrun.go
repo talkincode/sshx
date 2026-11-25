@@ -160,6 +160,7 @@ type sqlDryRunPlan struct {
 	ExplainCommand   string       `json:"explain_command,omitempty"`
 	ExecuteCommand   string       `json:"execute_command,omitempty"`
 	UseSudo          bool         `json:"use_sudo,omitempty"`
+	Rows             bool         `json:"rows,omitempty"`
 }
 
 func emitDryRunPlan(config *sshclient.Config) error {
@@ -813,6 +814,7 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 		StatementHash: sqlStatementDigest(config.SQLStatement),
 		Docker:        config.SQLDockerContainer,
 		UseSudo:       config.SQLUseSudo,
+		Rows:          config.SQLRows,
 	}
 	if config.SQLCredFrom != "" {
 		sqlPlan.CredSource = config.SQLCredFrom
@@ -832,6 +834,11 @@ func fillDryRunSQL(config *sshclient.Config, plan *dryRunPlan) {
 	if err != nil {
 		plan.SafetyCheck = dryRunStatus{Status: "blocked", ErrorKind: "blocked", Message: err.Error()}
 		sqlPlan.PolicyCheck = plan.SafetyCheck
+		plan.Valid = false
+		return
+	}
+	if rowsErr := validateSQLRows(config, cls); rowsErr != nil {
+		plan.ConfigCheck = dryRunStatus{Status: "error", ErrorKind: "config", Message: rowsErr.Error()}
 		plan.Valid = false
 		return
 	}

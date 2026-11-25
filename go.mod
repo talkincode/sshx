@@ -1,6 +1,6 @@
 module github.com/talkincode/sshx
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0

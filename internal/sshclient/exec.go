@@ -15,20 +15,28 @@ import (
 
 // RunCommand preserves nonzero remote exits as results, not transport errors.
 func (c *SSHClient) RunCommand(capture bool) (ExecResult, error) {
-	return c.runConfiguredCommand(capture, c.config.UsePTY && !capture)
+	return c.runConfiguredCommand(capture, c.config.UsePTY && !capture, nil)
 }
 
-func (c *SSHClient) runConfiguredCommand(capture, pty bool) (ExecResult, error) {
+// RunCommandInput runs the configured command with caller-supplied stdin data.
+func (c *SSHClient) RunCommandInput(input []byte) (ExecResult, error) {
+	if input == nil {
+		return c.RunCommand(true)
+	}
+	return c.runConfiguredCommand(true, false, bytes.NewReader(input))
+}
+
+func (c *SSHClient) runConfiguredCommand(capture, pty bool, input io.Reader) (ExecResult, error) {
 	if c.config.SafetyCheck && !c.config.Force {
 		if err := ValidateCommand(c.config.Command); err != nil {
 			return ExecResult{ExitCode: -1}, boundaryError("blocked", "validate command", err)
 		}
 	}
 	command := c.config.Command
-	if c.config.SudoPassword != "" && CommandUsesSudo(command) {
-		return c.executeSudo(command, nil, capture)
+	if (c.config.SudoPassword != "" || c.config.SudoPasswordSource != nil) && CommandUsesSudo(command) {
+		return c.executeSudo(command, input, capture)
 	}
-	return c.execute(command, nil, capture, pty)
+	return c.execute(command, input, capture, pty)
 }
 
 // RunScript streams a collector without installing it on the remote host.
@@ -36,7 +44,7 @@ func (c *SSHClient) RunScript(payload []byte, useSudo bool) (ExecResult, error) 
 	return c.RunScriptWithShell(payload, "sh", useSudo)
 }
 
-func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo bool) (ExecResult, error) {
+func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo bool, args ...string) (ExecResult, error) {
 	if shell == "" {
 		shell = "sh"
 	}
@@ -50,14 +58,21 @@ func (c *SSHClient) RunScriptWithShell(payload []byte, shell string, useSudo boo
 	if len(payload) > limit {
 		return ExecResult{ExitCode: -1}, boundaryError("config", "prepare script", fmt.Errorf("collector payload exceeds %d-byte limit", limit))
 	}
-	if useSudo && c.config.SudoPassword == "" {
-		return ExecResult{ExitCode: -1}, boundaryError("auth", "prepare script", fmt.Errorf("sudo inspection requires a resolved sudo password"))
-	}
 	command := shell + " -s --"
+	for _, arg := range args {
+		if strings.ContainsRune(arg, 0) {
+			return ExecResult{ExitCode: -1}, boundaryError("config", "prepare script", fmt.Errorf("script argument contains NUL"))
+		}
+		command += " " + quoteShellArgument(arg)
+	}
 	if useSudo {
 		return c.executeSudo("sudo "+command, bytes.NewReader(payload), true)
 	}
 	return c.execute(command, bytes.NewReader(payload), true, false)
+}
+
+func quoteShellArgument(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // RunCommandWithInput carries caller-prepared data and secrets over stdin.
@@ -124,10 +139,14 @@ func (c *SSHClient) executeSession(command string, stdin io.Reader, capture, pty
 	} else {
 		session.Stdout, session.Stderr = os.Stdout, os.Stderr
 	}
-	var control *sudoControlWriter
+	var control, outputControl *sudoControlWriter
 	if auth != nil {
 		control = &sudoControlWriter{dst: session.Stderr, auth: auth}
 		session.Stderr = control
+		// A shell redirection may put framing on stdout. Remove it from
+		// the transcript without authorizing credential delivery there.
+		outputControl = &sudoControlWriter{dst: session.Stdout, auth: auth, passive: true}
+		session.Stdout = outputControl
 	}
 	ctx := c.transportContext()
 	var cancel context.CancelFunc
@@ -163,6 +182,11 @@ func (c *SSHClient) executeSession(command string, stdin io.Reader, capture, pty
 		finishAuth()
 	}
 	var sudoErr error
+	if outputControl != nil {
+		if flushErr := outputControl.flush(); err == nil {
+			err = flushErr
+		}
+	}
 	if control != nil {
 		if flushErr := control.flush(); err == nil {
 			err = flushErr
@@ -216,7 +240,7 @@ func (c *SSHClient) captureLimit() int {
 // ExecuteCommandWithOutput is the legacy combined-output adapter.
 func (c *SSHClient) ExecuteCommandWithOutput() (string, error) {
 	useSudo := c.config.SudoPassword != "" && CommandUsesSudo(c.config.Command)
-	result, err := c.runConfiguredCommand(true, !useSudo)
+	result, err := c.runConfiguredCommand(true, !useSudo, nil)
 	if err != nil {
 		return "", err
 	}

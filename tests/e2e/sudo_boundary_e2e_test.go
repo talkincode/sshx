@@ -59,17 +59,50 @@ exec "$@"
 			set := runSSHXWithTestKeyring(t, home, []string{"--password-set=fixture:SSHX_PRIVATE_CANARY", "--no-audit"}, env)
 			require.Equal(t, 0, set.exitCode, set.stderr)
 			script := filepath.Join(home, "script.sh")
-			require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nprintf 'payload-ok\\n'\n"), 0600))
+			require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nprintf '<%s>|<%s>\\n' \"$1\" \"$2\"\n"), 0600))
 			args := []string{"run", "--address=" + server.host, "-p=" + server.port, "-u=operator", "--no-key", "--accept-unknown-host", "--bypass-reason=isolated-fixture", "-pk=fixture", "--sudo", "--script-file=" + script, "--timeout=3s", "--json"}
+			if mode == "cached" {
+				// The host accepts sudo without touching the missing key.
+				args[7] = "-pk=missing-sudo-entry"
+			}
+			args = append(args, "--script-arg=a'b c", "--script-arg=")
 			result := runSSHXWithTestKeyring(t, home, args, env)
 			require.Equal(t, 0, result.exitCode, "stdout=%s stderr=%s", result.stdout, result.stderr)
-			assert.Contains(t, result.stdout, "payload-ok")
+			assert.Contains(t, result.stdout, "<a'b c>|<>")
 			assert.NotContains(t, result.stdout, "SSHX_PRIVATE_CANARY")
 			assert.NotContains(t, result.stderr, "SSHX_PRIVATE_CANARY")
 			// A stdin-reading child must receive EOF, not an unsolicited credential.
 			result = runSSHXWithTestKeyring(t, home, []string{"-h=" + server.host, "-p=" + server.port, "-u=operator", "--no-key", "-pk=fixture", "--timeout=3s", "--json", "sudo cat"}, env)
 			require.Equal(t, 0, result.exitCode, "stdout=%s stderr=%s", result.stdout, result.stderr)
 			assert.NotContains(t, result.stdout, "SSHX_PRIVATE_CANARY")
+
+			data := filepath.Join(home, "data.bin")
+			require.NoError(t, os.WriteFile(data, []byte("command-stdin-canary\n"), 0600))
+			commandArgs := []string{"run", "--address=" + server.host, "-p=" + server.port,
+				"-u=operator", "--no-key", "-pk=fixture", "--stdin-file=" + data, "--timeout=3s", "--json"}
+			result = runSSHXWithTestKeyring(t, home, append(commandArgs, "--", "sudo cat"), env)
+			require.Equal(t, 0, result.exitCode, "stdout=%s stderr=%s", result.stdout, result.stderr)
+			assert.Contains(t, result.stdout, "command-stdin-canary")
+			assert.NotContains(t, result.stdout, "SSHX_PRIVATE_CANARY")
+			redirected, err := os.Open(data) // #nosec G304 -- opened test fixture created above.
+			require.NoError(t, err)
+			noInputFlag := []string{"run", "--address=" + server.host, "-p=" + server.port,
+				"-u=operator", "--no-key", "--timeout=3s", "--json", "--", "cat"}
+			result = runSSHXBinaryWithStdin(t, testKeyringBinary, home, home, noInputFlag, env, redirected)
+			require.NoError(t, redirected.Close())
+			require.Zero(t, result.exitCode, "%s", result.stdout)
+			assert.Contains(t, result.stdout, "command-stdin-canary")
+
+			result = runSSHXWithTestKeyring(t, home, append(commandArgs, "--", "sudo cat 2>&1"), env)
+			if mode == "password" {
+				require.NotZero(t, result.exitCode)
+				assert.Contains(t, result.stdout, "sudo prompt reached stdout")
+			} else {
+				require.Zero(t, result.exitCode, "%s", result.stdout)
+				assert.Contains(t, result.stdout, "command-stdin-canary")
+			}
+			assert.NotContains(t, result.stdout, "SSHX_SUDO_")
+			assert.NotContains(t, result.stderr, "SSHX_SUDO_")
 		})
 	}
 }

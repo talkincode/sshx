@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/pkg/sftp"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -46,6 +48,82 @@ func TestROSExecutionBoundaries(t *testing.T) {
 		require.Equal(t, 255, result.exitCode, result.stdout)
 		assert.Contains(t, result.stdout, `"success":false`)
 		assert.Contains(t, result.stdout, "ros_command_error")
+	})
+	t.Run("typed host probe and redacted device output", func(t *testing.T) {
+		signer, keyPath := newClientKey(t)
+		wire := make(chan string, 3)
+		server := startSSHServer(t, serverOptions{authorizedKey: signer.PublicKey(), execHandler: func(ch ssh.Channel, cmd, _ string) {
+			wire <- cmd
+			_, _ = io.WriteString(ch, " log=-- reverse-\n    token abcd1234\n    defa5678\n file=ordinary.tgz\n") //nolint:errcheck // fixture peer may disconnect
+			_, _ = io.WriteString(ch.Stderr(), "reverse-token: stderr-canary\n")                                  //nolint:errcheck // fixture peer may disconnect
+			sendExitStatus(ch, 0)
+		}})
+		home := t.TempDir()
+		env := map[string]string{"SSHX_E2E_KEYRING_FILE": filepath.Join(home, "keyring.json")}
+		add := runSSHXWithTestKeyring(t, home, []string{"--host-add", "--host-name=ros-lab", "--host-type=routeros",
+			"-h=" + server.host, "-p=" + server.port, "-u=operator", "-i=" + keyPath, "--ssh-password-key=missing"}, env)
+		require.Zero(t, add.exitCode, "%s", add.stderr)
+		result := runSSHXWithTestKeyring(t, home, []string{"ros", "-h=ros-lab", "--json", "--accept-unknown-host", "raw", "/system/identity/print"}, env)
+		require.Zero(t, result.exitCode, "%s %s", result.stdout, result.stderr)
+		assert.Equal(t, "/system/identity/print", <-wire)
+		assert.Contains(t, result.stdout, "ordinary.tgz")
+		assert.Contains(t, result.stdout, "redacted")
+		assert.NotContains(t, result.stdout, "abcd1234")
+		assert.NotContains(t, result.stdout, "defa5678")
+		assert.NotContains(t, result.stdout, "stderr-canary")
+		test := runSSHXWithTestKeyring(t, home, []string{"--host-test=ros-lab", "--json"}, env)
+		require.Zero(t, test.exitCode, "%s %s", test.stdout, test.stderr)
+		assert.Equal(t, "/system/identity/print", <-wire)
+		assert.Contains(t, test.stdout, `"auth_method":"key"`)
+	})
+	t.Run("argument mistakes stay local", func(t *testing.T) {
+		for _, tc := range []struct{ arg, hint string }{
+			{"--pty", "unavailable for sshx ros"},
+			{"--download=router.rsc", "file download"},
+			{"--upload=router.rsc", "file upload"},
+		} {
+			doc := runSSHX(t, t.TempDir(), []string{"ros", "--dry-run", "--json", "raw", "/system/identity/print", tc.arg}, nil)
+			require.NotZero(t, doc.exitCode)
+			assert.Contains(t, doc.stdout, tc.hint)
+		}
+	})
+	t.Run("non-atomic SFTP replacement retains a backup", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("POSIX permission and ownership fixture")
+		}
+		require.NoError(t, sftp.SetSFTPExtensions())
+		t.Cleanup(func() {
+			require.NoError(t, sftp.SetSFTPExtensions("hardlink@openssh.com", "posix-rename@openssh.com", "statvfs@openssh.com"))
+		})
+		server := startSSHServer(t, serverOptions{})
+		home := t.TempDir()
+		local, remote := filepath.Join(home, "upload.txt"), filepath.Join(server.root, "image.txt")
+		require.NoError(t, os.WriteFile(local, []byte("new"), 0600))
+		require.NoError(t, os.WriteFile(remote, []byte("old"), 0600))
+		env := map[string]string{"SSH_PASSWORD": operatorPassword}
+		args := []string{"ros", "-h=" + server.host, "-p=" + server.port, "-u=operator", "--no-key", "--accept-unknown-host",
+			"--json", "file", "upload", local, remote}
+		refusal := runSSHX(t, home, args, env)
+		require.NotZero(t, refusal.exitCode)
+		assert.Contains(t, refusal.stdout, "existing destination preserved")
+		allowed := runSSHX(t, home, append(args, "--allow-non-atomic"), env)
+		require.Zero(t, allowed.exitCode, "%s %s", allowed.stdout, allowed.stderr)
+		var result struct {
+			Entries []struct {
+				Verified   bool   `json:"verified"`
+				BackupPath string `json:"backup_path"`
+			} `json:"entries"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(allowed.stdout), &result))
+		require.Len(t, result.Entries, 1)
+		assert.True(t, result.Entries[0].Verified)
+		require.Equal(t, server.root, filepath.Dir(result.Entries[0].BackupPath))
+		backup, err := os.ReadFile(result.Entries[0].BackupPath) // #nosec G304 -- verified fixture directory.
+		require.NoError(t, err)
+		assert.Equal(t, "old", string(backup))
+		updated, err := os.ReadFile(remote) // #nosec G304 -- fixture file.
+		require.NoError(t, err)
+		assert.Equal(t, "new", string(updated))
 	})
 	t.Run("download preserves symlink target", func(t *testing.T) {
 		if runtime.GOOS == "windows" {

@@ -8,19 +8,18 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-func keyringSet(service, account, password string) error {
-	return keyring.Set(service, account, password)
+var keyringGet = systemKeyringGet
+
+func providerGet(service, account string) (string, error) {
+	password, err := keyring.Get(service, account)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", ErrNotFound
+	}
+	return password, err
 }
 
-func keyringGet(service, account string) (string, error) {
-	password, err := keyring.Get(service, account)
-	if err != nil {
-		if errors.Is(err, keyring.ErrNotFound) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	return password, nil
+func keyringSet(service, account, password string) error {
+	return keyring.Set(service, account, password)
 }
 
 func keyringDelete(service, account string) error {

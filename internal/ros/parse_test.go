@@ -86,3 +86,18 @@ func TestParseJSONOutput(t *testing.T) {
 		t.Fatalf("expected []any of length 1, got %v", reflect.TypeOf(res))
 	}
 }
+
+func TestDetailGroupedIntegers(t *testing.T) {
+	data, ok := ParseRouterOSOutput(" 0 orig-packets=30 623 repl-packets=1 234 567 name=ordinary")
+	if !ok {
+		t.Fatal("output did not parse")
+	}
+	records, ok := data.([]map[string]any)
+	if !ok || len(records) != 1 {
+		t.Fatalf("unexpected records: %v", data)
+	}
+	record := records[0]
+	if record["orig-packets"] != int64(30623) || record["repl-packets"] != int64(1234567) || record["name"] != "ordinary" {
+		t.Fatalf("wrong detail values: %v", record)
+	}
+}

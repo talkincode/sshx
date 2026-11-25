@@ -31,6 +31,7 @@ type publishMetadataFS struct {
 	createMode                               os.FileMode
 	denyChown, ignoreChown, driftAfterRename bool
 	chownCalls, renameCalls                  int
+	denyReplacement                          bool
 	operations                               []string
 }
 
@@ -54,6 +55,9 @@ func (f *publishMetadataFS) Filewrite(request *sftp.Request) (io.WriterAt, error
 func (f *publishMetadataFS) Filecmd(request *sftp.Request) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.denyReplacement && request.Method == "Rename" && strings.HasSuffix(request.Target, "/destination") {
+		return sftp.ErrSSHFxPermissionDenied
+	}
 	flags := request.AttrFlags()
 	if request.Method == "Setstat" && flags.UidGid {
 		f.chownCalls++
@@ -290,4 +294,47 @@ func TestSFTPUploadMatchesServerCreatePermissions(t *testing.T) {
 	require.Len(t, out.Entries, 1)
 	assert.Equal(t, fmt.Sprintf("%04o", info.Mode().Perm()), out.Entries[0].Mode)
 	assert.True(t, out.Verified)
+}
+
+func TestNonAtomicUploadPreservesPreviousContents(t *testing.T) {
+	require.NoError(t, sftp.SetSFTPExtensions())
+	t.Cleanup(func() {
+		require.NoError(t, sftp.SetSFTPExtensions("hardlink@openssh.com", "posix-rename@openssh.com", "statvfs@openssh.com"))
+	})
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("publish_denied_%t", fail), func(t *testing.T) {
+			client, fs := newPublishMetadataSFTP(t, 0o600)
+			original, err := client.Create("/destination")
+			require.NoError(t, err)
+			_, err = io.WriteString(original, "old")
+			require.NoError(t, err)
+			require.NoError(t, original.Close())
+
+			entry := FileOutcome{Path: "/destination", Type: "file", ChangeState: "unchanged"}
+			require.ErrorContains(t, publishRemoteFile(context.Background(), client, strings.NewReader("new"), "local_io", 3, nil, &entry), "existing destination preserved")
+			require.False(t, entry.Started)
+			fs.mu.Lock()
+			fs.denyReplacement = fail
+			fs.mu.Unlock()
+			err = publishRemoteFileWithOptions(context.Background(), client, strings.NewReader("new"), "local_io", 3, nil, &entry, remotePublishOptions{allowNonAtomic: true})
+			assert.True(t, entry.BackupPreserved)
+			file, openErr := client.Open(entry.BackupPath)
+			require.NoError(t, openErr)
+			backup, readErr := io.ReadAll(file)
+			require.NoError(t, readErr)
+			require.NoError(t, file.Close())
+			assert.Equal(t, "old", string(backup))
+			if fail {
+				require.ErrorContains(t, err, "previous file preserved")
+				assert.False(t, entry.Published)
+				out := &SFTPOutcome{Action: "upload", DestinationPath: entry.Path, Entries: []FileOutcome{entry}}
+				finishSFTPOutcome(out, err)
+				assert.Equal(t, "partial", out.Completion)
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, entry.Published)
+			assert.True(t, entry.Verified)
+		})
+	}
 }

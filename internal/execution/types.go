@@ -93,18 +93,22 @@ type TargetSelector struct {
 
 // ActionSpec describes the single action admitted by one request.
 type ActionSpec struct {
-	Kind            string `json:"kind"`
-	Intent          string `json:"intent"`
-	Command         string `json:"command,omitempty"`
-	ScriptPath      string `json:"script_path,omitempty"`
-	ScriptFromStdin bool   `json:"script_from_stdin,omitempty"`
-	ScriptRunner    string `json:"script_runner,omitempty"`
-	UseSudo         bool   `json:"use_sudo,omitempty"`
-	PayloadSHA256   string `json:"payload_sha256,omitempty"`
-	PayloadBytes    int    `json:"payload_bytes,omitempty"`
-	SftpAction      string `json:"sftp_action,omitempty"`
-	LocalPath       string `json:"local_path,omitempty"`
-	RemotePath      string `json:"remote_path,omitempty"`
+	Kind                string   `json:"kind"`
+	Intent              string   `json:"intent"`
+	Command             string   `json:"command,omitempty"`
+	ScriptPath          string   `json:"script_path,omitempty"`
+	ScriptArgs          []string `json:"-"`
+	ScriptArgsSHA       string   `json:"script_args_sha256,omitempty"`
+	CommandStdin        bool     `json:"command_stdin,omitempty"`
+	SudoAutofillSkipped bool     `json:"sudo_autofill_skipped,omitempty"`
+	ScriptFromStdin     bool     `json:"script_from_stdin,omitempty"`
+	ScriptRunner        string   `json:"script_runner,omitempty"`
+	UseSudo             bool     `json:"use_sudo,omitempty"`
+	PayloadSHA256       string   `json:"payload_sha256,omitempty"`
+	PayloadBytes        int      `json:"payload_bytes,omitempty"`
+	SftpAction          string   `json:"sftp_action,omitempty"`
+	LocalPath           string   `json:"local_path,omitempty"`
+	RemotePath          string   `json:"remote_path,omitempty"`
 }
 
 // Limits bounds one process run.
