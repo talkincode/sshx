@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.21.0] - 2026-11-25
 
+### Security
+
+- Update CI and release builds to Go 1.26.11 for GO-2026-6859 in `net/http`.
+
 ### Added
 
 - `run` forwards bounded command stdin and accepts repeatable `--script-arg`
